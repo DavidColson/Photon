@@ -732,15 +732,13 @@ unindent_line :: (using panel: *Panel, args: []string) {
 }
 
 undo :: (using panel: *Panel, args: []string) {
-	// cursor.head = document_undo(document, cursor.head);
-	// cursor.anchor = cursor.head;
-	// panel_scroll_to_cursor(panel);
+	undo(document);
+	panel_scroll_to_cursor(panel);
 }
 
 redo :: (using panel: *Panel, args: []string) {
-	// cursor.head = document_redo(document, cursor.head);
-	// cursor.anchor = cursor.head;
-	// panel_scroll_to_cursor(panel);
+	redo(document);
+	panel_scroll_to_cursor(panel);
 }
 
 

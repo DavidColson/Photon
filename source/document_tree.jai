@@ -104,6 +104,19 @@ Document :: struct {
 	parser: *TSParser;
 	tsTree: *TSTree;
 
+	// Undo
+	// need to store an array of tree pointers basically
+	// which you can just replace the tree in the document with as you go back and forth in time
+	undoStack: [..]*Node;
+	redoStack: [..]*Node;
+
+	// [ ] - Make a new_undo_event function which will save the current tree to the stack
+	//		 This will be called before anyone makes an edit
+	// [ ] - Make an undo function which will push the current tree onto the redo stack,
+	//       and then replace it with a tree from the undo stack
+	// [ ] - Make a redo function which does the opposite
+	// [ ] - Inject undo events everwhere that is appropriate
+
 	// Note it will not be threadsafe to share these pools
 	// Between copies of the tree and allow any allocation
 	treeMemory: Flat_Pool;
@@ -371,8 +384,6 @@ document_load_from_disk :: (doc: *Document) {
 	if doc.parser {
 		ts_parser_reset(doc.parser);
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
-
-		//root:= ts_tree_root_node(doc.tsTree);
 	}
 }
 
@@ -436,6 +447,7 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 			assert(character != #char "\r");
 		}
 	}
+	new_undo_event(doc);
 
 	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
 
@@ -494,6 +506,7 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 delete :: (doc: *Document, atOffset: s64, length: s64) {
 	// delete length bytes in the document at offset
 
+	new_undo_event(doc);
 	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
 
 	firstNode, firstRemainder, firstNodeOffset := node_at_offset(doc, doc.tree, atOffset);
@@ -726,6 +739,41 @@ shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.I
 	return offset;
 }
 
+new_undo_event :: (doc: *Document) {
+	array_add(*doc.undoStack);
+	doc.undoStack[doc.undoStack.count-1] = doc.tree;
+}
+
+undo :: (doc: *Document) {
+	if doc.undoStack.count == 0 {
+		push_notification("Undo history empty");
+		return;
+	}
+	array_add(*doc.redoStack, doc.tree);
+	doc.tree = pop(*doc.undoStack);
+
+	// could be more efficient here, but don't know how to tell the diff of the undo?
+	if (doc.parser) {
+		ts_parser_reset(doc.parser);
+		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
+	}
+}
+
+redo :: (doc: *Document) {
+	if doc.redoStack.count == 0 {
+		push_notification("Redo history empty");
+		return;
+	}
+	array_add(*doc.undoStack, doc.tree);
+	doc.tree = pop(*doc.redoStack);
+
+	// could be more efficient here, but don't know how to tell the diff of the undo?
+	if (doc.parser) {
+		ts_parser_reset(doc.parser);
+		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
+	}
+}
+ 
 // Tree iterators
 
 make_iterator :: (document: *Document, startOffset: s64 = 0) -> Document.Iterator {
