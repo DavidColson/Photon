@@ -107,8 +107,14 @@ Document :: struct {
 	// Undo
 	// need to store an array of tree pointers basically
 	// which you can just replace the tree in the document with as you go back and forth in time
-	undoStack: [..]*Node;
-	redoStack: [..]*Node;
+
+	UndoEntry :: struct {
+		tree: *Node;
+		offset: s64;
+	}
+	
+	undoStack: [..]UndoEntry;
+	redoStack: [..]UndoEntry;
 
 	// [ ] - Make a new_undo_event function which will save the current tree to the stack
 	//		 This will be called before anyone makes an edit
@@ -380,6 +386,11 @@ document_load_from_disk :: (doc: *Document) {
 
 	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
 
+	// initial undo node
+	array_reset(*doc.undoStack);
+	array_reset(*doc.redoStack);
+	commit_history(doc, 0);
+
 	// parse the document, assuming we are able to
 	if doc.parser {
 		ts_parser_reset(doc.parser);
@@ -439,7 +450,7 @@ document_get_by_path :: (path: string) -> bool, *Document {
 	return false, null;
 }
 
-insert :: (doc: *Document, atOffset: s64, text: string) {
+insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 		if atOffset > 0 {
@@ -447,7 +458,11 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 			assert(character != #char "\r");
 		}
 	}
-	new_undo_event(doc);
+
+	// undo updates
+	if suppressHistory == false {
+		defer commit_history(doc, atOffset);
+	}
 
 	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
 
@@ -503,10 +518,14 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 	doc.tree = tree;
 }
 
-delete :: (doc: *Document, atOffset: s64, length: s64) {
+delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
 	// delete length bytes in the document at offset
 
-	new_undo_event(doc);
+	// undo updates
+	if suppressHistory == false {
+		defer commit_history(doc, atOffset);
+	}
+
 	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
 
 	firstNode, firstRemainder, firstNodeOffset := node_at_offset(doc, doc.tree, atOffset);
@@ -739,39 +758,45 @@ shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.I
 	return offset;
 }
 
-new_undo_event :: (doc: *Document) {
+commit_history :: (doc: *Document, offset: s64) {
+	// TODO: free this memory somewhere
 	array_add(*doc.undoStack);
-	doc.undoStack[doc.undoStack.count-1] = doc.tree;
+	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
+	doc.undoStack[doc.undoStack.count-1].offset = offset;
 }
 
-undo :: (doc: *Document) {
-	if doc.undoStack.count == 0 {
+undo :: (doc: *Document) -> s64 {
+	if doc.undoStack.count == 1 {
 		push_notification("Undo history empty");
-		return;
+		return -1;
 	}
-	array_add(*doc.redoStack, doc.tree);
-	doc.tree = pop(*doc.undoStack);
+	entry := pop(*doc.undoStack);
+	doc.tree = entry.tree;
+	array_add(*doc.redoStack, entry);
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {
 		ts_parser_reset(doc.parser);
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
+	return entry.offset;
 }
 
-redo :: (doc: *Document) {
+redo :: (doc: *Document) -> s64 {
 	if doc.redoStack.count == 0 {
 		push_notification("Redo history empty");
-		return;
+		return -1;
 	}
-	array_add(*doc.undoStack, doc.tree);
-	doc.tree = pop(*doc.redoStack);
+	entry := pop(*doc.redoStack);
+	doc.tree = entry.tree;
+	array_add(*doc.undoStack, entry);
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {
 		ts_parser_reset(doc.parser);
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
+	return entry.offset;
 }
  
 // Tree iterators

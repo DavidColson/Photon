@@ -732,12 +732,40 @@ unindent_line :: (using panel: *Panel, args: []string) {
 }
 
 undo :: (using panel: *Panel, args: []string) {
-	undo(document);
+	panel.cursor.head = undo(document);
+	panel.cursor.anchor = panel.cursor.head;
+
+	// lets say we suppress history
+	// how would that work with a timing based undo
+	// When in insert mode:
+	// You would suppress history by default when insert mode edits begin, and set a callback on a timer
+	// If more edits come, you would reset the timer
+	// If the timer runs out, you would commit the current tree to the undo stack
+
+	// how do we do timers in a sleeping application though?
+
+	// maybe timers is too complex of an idea
+	// What if instead we just do it based on insert mode
+	// Suppress history from the moment insert mode is entered
+	// and then commit the tree when leaving insert mode
+
+	// we need to know the offset to put the cursor to then
+
+	// The undo stack really needs to know the lowest offset touched and the maximum offset touched
+	// to accurately update the TS tree
+	// And then we need the offset to put the cursor back to
+	// which will be where you entered insert mode originallyo
+
+	// We should be able to just store a min/max offset, which we update on every edit
+	// when you commit the history you store that range
+	// which may or may not be the same as the initial edit offset
+	
 	panel_scroll_to_cursor(panel);
 }
 
 redo :: (using panel: *Panel, args: []string) {
-	redo(document);
+	panel.cursor.head = redo(document);
+	panel.cursor.anchor = panel.cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
