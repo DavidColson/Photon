@@ -115,6 +115,7 @@ Document :: struct {
 	
 	undoStack: [..]UndoEntry;
 	redoStack: [..]UndoEntry;
+	nextUndoOffset: s64 = -1;
 
 	// [ ] - Make a new_undo_event function which will save the current tree to the stack
 	//		 This will be called before anyone makes an edit
@@ -389,7 +390,8 @@ document_load_from_disk :: (doc: *Document) {
 	// initial undo node
 	array_reset(*doc.undoStack);
 	array_reset(*doc.redoStack);
-	commit_history(doc, 0);
+	doc.nextUndoOffset = 0;
+	commit_history(doc);
 
 	// parse the document, assuming we are able to
 	if doc.parser {
@@ -460,8 +462,11 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 	}
 
 	// undo updates
+	if doc.nextUndoOffset < 0 {
+		doc.nextUndoOffset = atOffset;
+	}
 	if suppressHistory == false {
-		defer commit_history(doc, atOffset);
+		defer commit_history(doc);
 	}
 
 	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
@@ -522,8 +527,11 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	// delete length bytes in the document at offset
 
 	// undo updates
+	if doc.nextUndoOffset < 0 {
+		doc.nextUndoOffset = atOffset;
+	}
 	if suppressHistory == false {
-		defer commit_history(doc, atOffset);
+		defer commit_history(doc);
 	}
 
 	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
@@ -758,11 +766,12 @@ shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.I
 	return offset;
 }
 
-commit_history :: (doc: *Document, offset: s64) {
+commit_history :: (doc: *Document) {
 	// TODO: free this memory somewhere
 	array_add(*doc.undoStack);
 	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
-	doc.undoStack[doc.undoStack.count-1].offset = offset;
+	doc.undoStack[doc.undoStack.count-1].offset = doc.nextUndoOffset;
+	doc.nextUndoOffset = -1;
 }
 
 undo :: (doc: *Document) -> s64 {
@@ -771,8 +780,8 @@ undo :: (doc: *Document) -> s64 {
 		return -1;
 	}
 	entry := pop(*doc.undoStack);
-	doc.tree = entry.tree;
 	array_add(*doc.redoStack, entry);
+	doc.tree = doc.undoStack[doc.undoStack.count-1].tree;
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {

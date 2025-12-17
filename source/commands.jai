@@ -471,6 +471,12 @@ expand_selection_to_lines :: (using panel: *Panel, args: []string) {
 
 enter_normal_mode :: (panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
+
+	// confirm undo action if we left insert mode with edits
+	if editorMode == .INSERT && panel.document.nextUndoOffset > 0 {
+		commit_history(panel.document);
+	}
+	
 	editorMode = .NORMAL;
 	extendSelections = false;
 }
@@ -732,8 +738,11 @@ unindent_line :: (using panel: *Panel, args: []string) {
 }
 
 undo :: (using panel: *Panel, args: []string) {
-	panel.cursor.head = undo(document);
-	panel.cursor.anchor = panel.cursor.head;
+	result := undo(document);
+	if result > 0 {
+		panel.cursor.head = result;
+		panel.cursor.anchor = panel.cursor.head;
+	}
 
 	// lets say we suppress history
 	// how would that work with a timing based undo
@@ -764,8 +773,11 @@ undo :: (using panel: *Panel, args: []string) {
 }
 
 redo :: (using panel: *Panel, args: []string) {
-	panel.cursor.head = redo(document);
-	panel.cursor.anchor = panel.cursor.head;
+	result := redo(document);
+	if result > 0 {
+		panel.cursor.head = result;
+		panel.cursor.anchor = panel.cursor.head;
+	}
 	panel_scroll_to_cursor(panel);
 }
 
@@ -914,7 +926,7 @@ document_search :: (doc: *Document, fromOffset: s64, searchTerm: string, stopAtF
 insert_mode_insert_string :: (input: string) {
 	// do the insert
 	distanceToAnchor := focusedPanel.cursor.anchor - focusedPanel.cursor.head;
-	insert(focusedPanel.document, focusedPanel.cursor.head, input);
+	insert(focusedPanel.document, focusedPanel.cursor.head, input, editorMode == .INSERT);
 
 	// move the cursor along
 	focusedPanel.cursor.head += input.count;
