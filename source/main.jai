@@ -468,7 +468,7 @@ build_ui_panel :: (panel: *Panel) {
 		}
 
 		// icon for file save status
-		if panel.document.unsaved {
+		if document_is_unsaved(panel.document) {
 			box(ui_key(style.iconCircle), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
@@ -1421,7 +1421,7 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 
 do_backup_callback :: () {
 	for * open_documents {
-		if it.unsaved {
+		if document_is_unsaved(it) {
 			builder : String_Builder;
 			builder.allocator = temp;
 			init_string_builder(*builder);
@@ -1443,18 +1443,18 @@ file_change_callback :: (watcher: *File_Watcher(void), change: *File_Change, use
 			modtime, size, success := file_modtime_and_size(doc.path);
 			if modtime > doc.diskLastModtime {
 				// reload file
-				if doc.unsaved == false {
+				if !document_is_unsaved(doc) {
 					document_load_from_disk(doc);
 				}
 				else {
 					// @todo: when we have nicer UI this should give a popup or something more explicit
-					doc.unsaved = true;
+					doc.undoStack[doc.undoStack.count-1].saved = false;
 					push_notification("File on disk changed, but you have unsaved edits");
 				}
 			}
 		}
 		if change.events & .REMOVED {
-			doc.unsaved = true;
+			doc.undoStack[doc.undoStack.count-1].saved = false;
 		}
 	}
 }

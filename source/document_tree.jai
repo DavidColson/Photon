@@ -97,7 +97,6 @@ Document :: struct {
 	lastInsert: BufferCursor;
 	lineEndings: LineEndingMode;
 	path: string;
-	unsaved: bool; // @todo: implement
 	diskLastModtime: Apollo_Time;
 	locator: Bucket_Locator;
 	language: string;
@@ -111,6 +110,7 @@ Document :: struct {
 	UndoEntry :: struct {
 		tree: *Node;
 		offset: s64;
+		saved: bool;
 	}
 	
 	undoStack: [..]UndoEntry;
@@ -392,6 +392,7 @@ document_load_from_disk :: (doc: *Document) {
 	array_reset(*doc.redoStack);
 	doc.nextUndoOffset = 0;
 	commit_history(doc);
+	doc.undoStack[doc.undoStack.count-1].saved = true;
 
 	// parse the document, assuming we are able to
 	if doc.parser {
@@ -433,12 +434,28 @@ document_save :: (doc: *Document, path: string, backup := false) {
 			doc.diskLastModtime = modtime;
 		}
 
-		doc.unsaved = false;
 		push_notification("Document Saved");
+
+		// mark last undo as saved
+		doc.undoStack[doc.undoStack.count-1].saved = true;
 	}
 	else {
 		push_notification("Backup Saved");
 	}
+}
+
+document_is_unsaved :: (doc: *Document) -> bool {
+	// there is pending edits that have not been committed yet, definitely unsaved
+	if doc.nextUndoOffset != -1 {
+		return true;
+	}
+
+	// most recent edit has not been saved
+	if doc.undoStack[doc.undoStack.count-1].saved == false {
+		return true;
+	}
+
+	return false;
 }
 
 document_get_by_path :: (path: string) -> bool, *Document {
