@@ -1,6 +1,6 @@
 @echo off
 setlocal
 
-run\debug\TextEditor.exe build.jai
+run\debug\Photon.exe build.jai
 
 endlocal

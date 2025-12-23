@@ -140,7 +140,7 @@ main :: () {
 	tree_test();
 
 	// create window
-    window = create_window(windowWidth, windowHeight, "TextEditor");
+    window = create_window(windowWidth, windowHeight, "Photon");
 	Input.window_move_callback = update;
 	platform_set_border_color();
 	init_renderer(window);
