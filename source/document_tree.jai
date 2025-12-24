@@ -140,6 +140,10 @@ Document :: struct {
 	// can have a mutex on the memory pools, then you can make your edits
 }
 
+DocumentView :: struct {
+	tree: *Document.Node;
+}
+
 open_documents: Bucket_Array(Document, 128); // might want more when we load full projects in?
 open_document_table: Table(string, Bucket_Locator);
 
@@ -151,10 +155,18 @@ tree_test :: () {
 	insert(doc, 100, "hello world");
 	insert(doc, 105, " my");
 	pretty_print_tree(doc.tree);
+
+	// views
+	view := make_view(doc);
+	log("size from view before edit: %", get_size(*view));
+
 	insert(doc, 110, "test ");
 	insert(doc, 200, "again more");
 
 	pretty_print_tree(doc.tree);
+
+	// views again, but without edit
+	log("size of doc %, size of view %", get_size(doc), get_size(*view));
 
 	// iterator
 	
@@ -216,6 +228,9 @@ tree_test :: () {
 
 	// deletions
 	delete(doc, 130, 19);
+
+
+	
 	
 	pretty_print_tree(doc.tree);
 
@@ -763,7 +778,7 @@ get_number_of_lines :: (doc: *Document) -> s64 {
 	return lf_count(doc.tree);
 }
 
-get_size :: (doc: *Document) -> s64 {
+get_size :: (doc: *$T/interface DocumentView) -> s64 {
 	return length(doc.tree);
 }
 
@@ -823,6 +838,15 @@ redo :: (doc: *Document) -> s64 {
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
 	return entry.offset;
+}
+
+// Document Views
+
+make_view :: (doc: *Document) -> DocumentView {
+	// Trivial copy
+	view: DocumentView;
+	view.tree = doc.tree;
+	return view;
 }
  
 // Tree iterators
