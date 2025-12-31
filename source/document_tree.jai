@@ -650,7 +650,7 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	}
 }
 
-get_char_at :: (doc: *Document, offset: s64) -> u8 {
+get_char_at :: (doc: *$T/interface DocumentView, offset: s64) -> u8 {
 	// get the literal char at the given offset
 
 	node, remainder, _ := node_at_offset(doc, doc.tree, offset);
@@ -660,7 +660,7 @@ get_char_at :: (doc: *Document, offset: s64) -> u8 {
 	return charPtr.*;
 }
 
-get_line_start :: (doc: *Document, line: s64) -> s64 {
+get_line_start :: (doc: *$T/interface DocumentView, line: s64) -> s64 {
 	// get the document offset of a specific line (0 indexed) via binary search
 	node := doc.tree;
 	lineInSubtree := line;
@@ -695,7 +695,7 @@ get_line_start :: (doc: *Document, line: s64) -> s64 {
 	return 0;
 }
 
-get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s64, s64 {
+get_line_range :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> s64, s64 {
 	// find the start and end offsets of the given line, with or without line endings
 	lineStart := get_line_start(doc, line);
 	lineEnd := get_line_start(doc, line+1);
@@ -713,14 +713,14 @@ get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s6
 	return lineStart, lineEnd;
 }
 
-get_coordinate_from_offset :: (doc: *Document, offset: s64) -> Document.Coordinate {
+get_coordinate_from_offset :: (doc: *$T/interface DocumentView, offset: s64) -> Document.Coordinate {
 	// get line, column from a given offset
 	node, remainder, nodeStart, line := node_at_offset(doc, doc.tree, offset);
 	lineStart := get_line_start(doc, line);
 	return .{ line, offset-lineStart };
 }
 
-get_offset_from_coordinate :: (doc: *Document, coord: Document.Coordinate) -> s64 {
+get_offset_from_coordinate :: (doc: *$T/interface DocumentView, coord: Document.Coordinate) -> s64 {
 	// Note, if you provide a column that is off the length of the line, it will clamp
 	// decide at some point if that's desirable
 	lineStart, lineEnd := get_line_range(doc, coord.line);
@@ -728,7 +728,7 @@ get_offset_from_coordinate :: (doc: *Document, coord: Document.Coordinate) -> s6
 	return lineStart + column;
 }
 
-get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> Document.LineContent {
+get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> Document.LineContent {
 	// allocates memory for returned string!!
 
 	offset := get_line_start(doc, line);
@@ -756,7 +756,7 @@ get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> 
 	return .{ builder_to_string(*builder), offset, endOffset };
 }
 
-get_content :: (doc: *Document, offset: s64, count: s64) -> string {
+get_content :: (doc: *$T/interface DocumentView, offset: s64, count: s64) -> string {
 	// allocates memory for returned string!!
 
 	iterator := make_iterator(doc, offset);
@@ -774,7 +774,7 @@ get_content :: (doc: *Document, offset: s64, count: s64) -> string {
 	return builder_to_string(*builder);
 }
 
-get_number_of_lines :: (doc: *Document) -> s64 {
+get_number_of_lines :: (doc: *$T/interface DocumentView) -> s64 {
 	return lf_count(doc.tree);
 }
 
