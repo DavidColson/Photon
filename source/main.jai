@@ -137,7 +137,7 @@ main :: () {
 	if isSet.build_grammars then build_grammars();
 	if isSet.fetch_grammars || isSet.build_grammars then return;
 	
-	tree_test();
+	// tree_test();
 
 	// create window
     window = create_window(windowWidth, windowHeight, "Photon");
@@ -576,7 +576,7 @@ build_ui_panel :: (panel: *Panel) {
 	{
 		push_parent(codeContainer); defer pop_parent();
 
-		codeBox := box(ui_key("code"), .{
+		codeBox := box(ui_key("code_window"), .{
 			flags=.CLIP_CONTENTS | .MOUSE_CLICKABLE,
 			layout=.{width=grow(), height=grow()},
 			font=fontCode
@@ -845,7 +845,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				push_parent(inputBox); defer pop_parent();
 
 				for panel.filesystemNav.currentPath {
-					pathSectionLabel := box(ui_key("%", it), .{
+					pathSectionLabel := box(ui_key("%##path_section%", it, it_index), .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=text_content() },
 					});

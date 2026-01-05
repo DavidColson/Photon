@@ -465,6 +465,11 @@ document_is_unsaved :: (doc: *Document) -> bool {
 		return true;
 	}
 
+	// TODO: unclean fallback for when files fail to load
+	if doc.undoStack.count == 0 {
+		return false;
+	}
+
 	// most recent edit has not been saved
 	if doc.undoStack[doc.undoStack.count-1].saved == false {
 		return true;
