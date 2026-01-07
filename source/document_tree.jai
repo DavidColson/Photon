@@ -780,7 +780,7 @@ get_content :: (doc: *$T/interface DocumentView, offset: s64, count: s64) -> str
 }
 
 get_number_of_lines :: (doc: *$T/interface DocumentView) -> s64 {
-	return lf_count(doc.tree);
+	return lf_count(doc.tree)+1; // plus one due to fence post problem
 }
 
 get_size :: (doc: *$T/interface DocumentView) -> s64 {

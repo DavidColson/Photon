@@ -490,7 +490,7 @@ build_ui_panel :: (panel: *Panel) {
 
 		// location
 		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursor.head);
-		box(ui_key("Ln: % Col: % vCol: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel.cursor.virtualColumn, panel.cursor.head), .{
+		box(ui_key("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel.cursor.head), .{
 			flags=.DRAW_TEXT,
 			layout=.{ width=text_content(), height=text_content() },
 		});
@@ -576,7 +576,7 @@ build_ui_panel :: (panel: *Panel) {
 	{
 		push_parent(codeContainer); defer pop_parent();
 
-		codeBox := box(ui_key("code_window"), .{
+		codeBox := box(ui_key("code"), .{
 			flags=.CLIP_CONTENTS | .MOUSE_CLICKABLE,
 			layout=.{width=grow(), height=grow()},
 			font=fontCode

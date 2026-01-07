@@ -124,6 +124,29 @@ move_one_line_up :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
+move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
+	newLineContent := get_line_content(panel.document, line);
+	
+	// recalculate the cursor column to match the virtual column
+	columnCounter := 0;
+	targetByteOffset := newLineContent.text.count;
+	for newLineContent.text {
+		if it == #char "\t" {
+			columnCounter += chars_to_tabstop(columnCounter);
+		}
+		else {
+			columnCounter += 1;
+		}
+
+		if columnCounter > cursor.virtualColumn {
+			targetByteOffset = it_index;
+			break;
+		}
+	}
+
+	cursor.head = newLineContent.startByteOffset + targetByteOffset;
+}
+
 goto_document_start :: (using panel: *Panel, args: []string) {
 	cursor.head = 0;
 
@@ -1006,53 +1029,53 @@ insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
 // ------------------------------
 
 page_up :: (using panel: *Panel, args: []string) {
-	// startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
+	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
-	// // move the cursor up half a page
-	// cursorLine := document_cursor_get_line(*focusedPanel.cursor.head);
-	// move_to_line_visual(*focusedPanel, cursorLine, max(cursorLine - pageSize, 0));
-	// focusedPanel.cursor.anchor = focusedPanel.cursor.head;
+	// move the cursor up half a page
+	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
+	move_cursor_to_specific_line(panel, max(cursorCoordinate.line - pageSize, 0));
+	focusedPanel.cursor.anchor = panel.cursor.head;
 
-	// // scroll to keep the cursor in the same relative place on screen
-	// panel_scroll_to_line(panel, startVisibleLine - pageSize);
+	// scroll to keep the cursor in the same relative place on screen
+	panel_scroll_to_line(panel, startVisibleLine - pageSize);
 }
 
 page_down :: (using panel: *Panel, args: []string) {
-	// startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-	// numLinesDocument := document_get_num_lines(panel.document);
+	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
+	numLinesDocument := get_number_of_lines(panel.document);
 
-	// // move the cursor down half a page
-	// cursorLine := document_cursor_get_line(*focusedPanel.cursor.head);
-	// move_to_line_visual(*focusedPanel, cursorLine, min(cursorLine + pageSize, numLinesDocument));
-	// focusedPanel.cursor.anchor = focusedPanel.cursor.head;
+	// move the cursor down half a page
+	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
+	move_cursor_to_specific_line(panel, min(cursorCoordinate.line + pageSize, numLinesDocument));
+	focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 
-	// // scroll to keep the cursor in the same relative place on screen
-	// panel_scroll_to_line(panel, startVisibleLine + pageSize);
+	// scroll to keep the cursor in the same relative place on screen
+	panel_scroll_to_line(panel, startVisibleLine + pageSize);
 }
 
 half_page_up :: (using panel: *Panel, args: []string) {
-	// startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
+	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
-	// // move the cursor up half a page
-	// cursorLine := document_cursor_get_line(*focusedPanel.cursor.head);
-	// move_to_line_visual(*focusedPanel, cursorLine, max(cursorLine - pageSize/2, 0));
-	// focusedPanel.cursor.anchor = focusedPanel.cursor.head;
+	// move the cursor up half a page
+	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
+	move_cursor_to_specific_line(panel, max(cursorCoordinate.line - pageSize/2, 0));
+	focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 
-	// // scroll to keep the cursor in the same relative place on screen
-	// panel_scroll_to_line(panel, startVisibleLine - pageSize/2);
+	// scroll to keep the cursor in the same relative place on screen
+	panel_scroll_to_line(panel, startVisibleLine - pageSize/2);
 }
 
 half_page_down :: (using panel: *Panel, args: []string) {
-	// startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-	// numLinesDocument := document_get_num_lines(panel.document);
+	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
+	numLinesDocument := get_number_of_lines(panel.document);
 
-	// // move the cursor down half a page
-	// cursorLine := document_cursor_get_line(*focusedPanel.cursor.head);
-	// move_to_line_visual(*focusedPanel, cursorLine, min(cursorLine + pageSize/2, numLinesDocument));
-	// focusedPanel.cursor.anchor = focusedPanel.cursor.head;
+	// move the cursor down half a page
+	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
+	move_cursor_to_specific_line(panel, min(cursorCoordinate.line + pageSize/2, numLinesDocument));
+	focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 
-	// // scroll to keep the cursor in the same relative place on screen
-	// panel_scroll_to_line(panel, startVisibleLine + pageSize/2);
+	// scroll to keep the cursor in the same relative place on screen
+	panel_scroll_to_line(panel, startVisibleLine + pageSize/2);
 }
 
 
