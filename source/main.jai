@@ -134,109 +134,105 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 }
 
 main :: () {
-	file, success :=  file_open("log.txt", for_writing=true, keep_existing_content=false);
+	file :=  file_open("log.txt", for_writing=true, keep_existing_content=false);
 	logger: LoggerData;
 	logger.logFile = file;
 
-    new_context := context;
-    new_context.logger = loggerFunc;
-    new_context.logger_data = *logger;
+    context.logger = loggerFunc;
+    context.logger_data = *logger;
 
-	// TODO: What if someone pushes a default context now? How do we make sure our context is used??
-	push_context new_context {
-	    #if OS == .WINDOWS {
-	        Windows :: #import "Windows";
-	        // Windows is very bad at thread-switching by default unless you do this. Sad.
-	        Windows.timeBeginPeriod(1);
-			platform_init_crash_handler();
-	    }
+    #if OS == .WINDOWS {
+        Windows :: #import "Windows";
+        // Windows is very bad at thread-switching by default unless you do this. Sad.
+        Windows.timeBeginPeriod(1);
+		platform_init_crash_handler();
+    }
 
-		success, args, isSet, filesToOpen := parse_arguments(Arguments);
-		if !success {
-			return;
-		}
+	success, args, isSet, filesToOpen := parse_arguments(Arguments);
+	if !success {
+		return;
+	}
 
-		if isSet.fetch_grammars then fetch_grammars();
-		if isSet.build_grammars then build_grammars();
-		if isSet.fetch_grammars || isSet.build_grammars then return;
-	
-		// tree_test();
+	if isSet.fetch_grammars then fetch_grammars();
+	if isSet.build_grammars then build_grammars();
+	if isSet.fetch_grammars || isSet.build_grammars then return;
 
-		// myCrash: float = 33.123;
-		// myCrash = myCrash/0.0;
+	// tree_test();
 
-		// myPointer :*float;
-		// log("%", myPointer);
-		// myCrash = <<myPointer * 2.90;
+	// myCrash: float = 33.123;
+	// myCrash = myCrash/0.0;
 
-		// create window
-	    window = create_window(windowWidth, windowHeight, "Photon");
-		Input.window_move_callback = update;
-		platform_set_border_color();
-		init_renderer(window);
-		init_font_cache();
-		load_fonts();
-		init_ui();
-		rebuild_key_map();
-		init_async(*asyncWorker);
+	// myPointer :*float;
+	// log("%", myPointer);
+	// myCrash = <<myPointer * 2.90;
 
-		// long_work :: (data: *void) {
-		// 	log("Starting long work");
-		// 	sleep_milliseconds(10*1000);
+	// create window
+    window = create_window(windowWidth, windowHeight, "Photon");
+	Input.window_move_callback = update;
+	platform_set_border_color();
+	init_renderer(window);
+	init_font_cache();
+	load_fonts();
+	init_ui();
+	rebuild_key_map();
+	init_async(*asyncWorker);
+
+	// long_work :: (data: *void) {
+	// 	log("Starting long work");
+	// 	sleep_milliseconds(10*1000);
+	// }
+
+	// long_work_done :: (data: *void) {
+	// 	log("long work done");
+	// }
+
+	// push_task(*asyncWorker, null, long_work, long_work_done);
+
+	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
+
+	if !init(*watcher, file_change_callback, watch_recursively = false) {
+        push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
+    }
+
+	focusedPanel.layoutRect.x = 0;
+	focusedPanel.layoutRect.y = 0;
+	focusedPanel.layoutRect.w = xx windowWidth;
+	focusedPanel.layoutRect.h = xx windowHeight;
+	focusedPanel.activeDialog = .NONE;
+
+	if filesToOpen.count > 0 {
+		doc := document_open(filesToOpen[0]);
+
+		// test document copies
+		// copy := document_make_read_only_copy(doc);
+		// cursor := document_create_cursor(copy);
+		// log("print content from a copy file:");
+		// for cursor {
+		// 	print("%", string.{1, *it});
+		// 	if it_index == 200 then break;
 		// }
-
-		// long_work_done :: (data: *void) {
-		// 	log("long work done");
-		// }
-
-		// push_task(*asyncWorker, null, long_work, long_work_done);
-
-		registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
-
-		if !init(*watcher, file_change_callback, watch_recursively = false) {
-	        push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
-	    }
-
-		focusedPanel.layoutRect.x = 0;
-		focusedPanel.layoutRect.y = 0;
-		focusedPanel.layoutRect.w = xx windowWidth;
-		focusedPanel.layoutRect.h = xx windowHeight;
-		focusedPanel.activeDialog = .NONE;
-
-		if filesToOpen.count > 0 {
-			doc := document_open(filesToOpen[0]);
-
-			// test document copies
-			// copy := document_make_read_only_copy(doc);
-			// cursor := document_create_cursor(copy);
-			// log("print content from a copy file:");
-			// for cursor {
-			// 	print("%", string.{1, *it});
-			// 	if it_index == 200 then break;
-			// }
-			// document_destroy_read_only_copy(copy);
+		// document_destroy_read_only_copy(copy);
 
 
-			if doc {
-				panel_set_active_document(*focusedPanel, doc);
-			}
+		if doc {
+			panel_set_active_document(*focusedPanel, doc);
 		}
+	}
 
-		platform_set_backup_timer(window, do_backup_callback);
+	platform_set_backup_timer(window, do_backup_callback);
 
-		deltaTime: float64 = 0.0;
-	    want_screenshot := false;
-	    while !pendingQuit {
-			frameStart := seconds_since_init();
-			update(deltaTime);
-			updateTime := seconds_since_init() - frameStart;
+	deltaTime: float64 = 0.0;
+    want_screenshot := false;
+    while !pendingQuit {
+		frameStart := seconds_since_init();
+		update(deltaTime);
+		updateTime := seconds_since_init() - frameStart;
 
-			// not ideal, should vsync to something else if above 16ms
-			timeToSleep := max(16 - updateTime * 1000, 0);
-		    sleep_milliseconds(cast(s32) timeToSleep);
+		// not ideal, should vsync to something else if above 16ms
+		timeToSleep := max(16 - updateTime * 1000, 0);
+	    sleep_milliseconds(cast(s32) timeToSleep);
 
-			deltaTime = seconds_since_init() - frameStart;
-		}
+		deltaTime = seconds_since_init() - frameStart;
 	}
      file_close(*logger.logFile);
 }
