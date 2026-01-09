@@ -91,6 +91,7 @@ requestRedraw := true;
 deltaTime:float64 = 0.016;
 lastTime:float64 = 0.0;
 asyncWorker: Async;
+logger: LoggerData;
 
 notifications : [10]Notification;
 numActiveNotifications := 0;
@@ -130,12 +131,13 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	logger = cast(*LoggerData)data;
     
     write_string(message);
+	write_string("\n");
 	file_write(*logger.logFile, message);
+	file_write(*logger.logFile, "\n");
 }
 
 main :: () {
 	file :=  file_open("log.txt", for_writing=true, keep_existing_content=false);
-	logger: LoggerData;
 	logger.logFile = file;
 
     context.logger = loggerFunc;
@@ -144,7 +146,7 @@ main :: () {
     #if OS == .WINDOWS {
         Windows :: #import "Windows";
         // Windows is very bad at thread-switching by default unless you do this. Sad.
-		indows.timeBeginPeriod(1);
+		Windows.timeBeginPeriod(1);
 		platform_init_crash_handler();
     }
 
@@ -158,13 +160,6 @@ main :: () {
 	if isSet.fetch_grammars || isSet.build_grammars then return;
 
 	// tree_test();
-
-	// myCrash: float = 33.123;
-	// myCrash = myCrash/0.0;
-
-	// myPointer :*float;
-	// log("%", myPointer);
-	// myCrash = <<myPointer * 2.90;
 
 	// create window
     window = create_window(windowWidth, windowHeight, "Photon");

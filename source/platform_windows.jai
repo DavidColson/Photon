@@ -185,7 +185,7 @@ EXCEPTION_POINTERS :: struct {
 	ContextRecord:   *CONTEXT;
 }
 
-backtrace :: (ctx: *CONTEXT, skips: s32) #no_context {
+backtrace :: (ctx: *CONTEXT, skips: s32) {
 	// Init the stack frame for this function
 	stackFrame: STACKFRAME64;
 
@@ -242,7 +242,7 @@ backtrace :: (ctx: *CONTEXT, skips: s32) #no_context {
 
 		if (i > 0) && (i <= skips) {
 			// Skip a bunch of stuff internal to the OS that is annoying.
-			if i == 1  werr("... (skipping OS-internal procedures)\n");
+			if i == 1  log("... (skipping OS-internal procedures)");
 			i += 1;
 			continue;
 		}
@@ -291,17 +291,21 @@ backtrace :: (ctx: *CONTEXT, skips: s32) #no_context {
 			line = theLine.LineNumber;
 		}
 
-		werr(func);
+        builder : String_Builder;
+        builder.allocator = temp;
+		append(*builder, func);
 
 		NAME_WIDTH :: 32;
 
 		padding := NAME_WIDTH - func.count;
-		for 1..padding werr(" ");
+		for 1..padding append(*builder, " ");
 
 		// @Speed: Can optimize the outputting of spaces.
-		werrs("  ", file, ":");
-		write_nonnegative_number(cast,no_check(u64) line, to_standard_error = true);
-		werr("\n");
+		append(*builder, "  ");
+		append(*builder, file);
+		append(*builder, ":");
+		print_to_builder(*builder, "%", cast,no_check(u64) line);
+		log(builder_to_string(*builder,,temp));
 
 		if func == "main" {  // @Incomplete: We really want to compare against the entry point, which may not be "main".
 			break;
@@ -377,6 +381,9 @@ is_ptr_in_program_section :: (ptr: *void) -> in_program_section: bool, read_only
 
 handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 	push_context {
+	    context.logger = loggerFunc;
+	    context.logger_data = *logger;
+
 		EXCEPTION_ACCESS_VIOLATION :: 3221225477;
 		EXCEPTION_ARRAY_BOUNDS_EXCEEDED :: 3221225612;
 		EXCEPTION_BREAKPOINT :: 2147483651;
@@ -388,10 +395,7 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 		EXCEPTION_PRIV_INSTRUCTION :: 3221225622;
 		EXCEPTION_STACK_OVERFLOW :: 3221225725;
 
-		// TODO: Replace werrs with a function that prints to our context log file
-   
-
-		if ExceptionRecord.ExceptionCode == {
+ 		if ExceptionRecord.ExceptionCode == {
 		// I'm trying to limit the amount of code we have here, so let's combine page fault and access violation
 		case EXCEPTION_ACCESS_VIOLATION; #through;
 		case EXCEPTION_IN_PAGE_ERROR;
@@ -400,49 +404,46 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 			ptr := ExceptionRecord.ExceptionInformation[1];
 
 			if (!ptr) {
-				werrs("The program crashed because it tried to ", ifx action "write to" else "read from", " a null pointer.\n");
+				log("The program crashed because it tried to % %", ifx action "write to" else "read from", "a null pointer.");
 			} else {
 				if (action == 0) || (action == 1) {
-					werrs("The program crashed because of ", exception, ifx action == 0 " reading location 0x" else " writing location 0x");
+					log("The program crashed because of % %", exception, ifx action == 0 "reading location 0x" else "writing location 0x");
 				} else {
-					werrs("The program crashed because of ", exception, ifx action == 8 " (user-mode data execution prevention)", " at location 0x");
+					log("The program crashed because of % %", exception, ifx action == 8 "(user-mode data execution prevention)", "at location 0x");
 				}
 
 				write_nonnegative_number(ptr, base=16, to_standard_error = true);
-				werr(".\n");
 
 				in_program_section, read_only, section_name := is_ptr_in_program_section (cast (*void) ptr);
 
 				if in_program_section {
-					werr("This address is in the ");
-					if read_only werr("read only ");
-					werrs("section ", section_name, " of the program.\n");
+					log("This address is in the %section % of the program", ifx read_only "read only " else "", section_name);
 
 					if read_only {
-						werr("A common mistake is to write to a constant string or array, which is put by the compiler in a read only section of the program.\n");
+						log("A common mistake is to write to a constant string or array, which is put by the compiler in a read only section of the program.");
 					}
 				}
 			}
 
 		case EXCEPTION_ARRAY_BOUNDS_EXCEEDED;
-			werr("The program crashed because of a non user level array bounds check failure.\n");
+			log("The program crashed because of a non user level array bounds check failure.");
 		case EXCEPTION_BREAKPOINT;
-			werr("A breakpoint was hit, but no debugger is attached.\n");
+			log("A breakpoint was hit, but no debugger is attached.");
 		case EXCEPTION_DATATYPE_MISALIGNMENT;
 			// I don't think this can really happen on modern hardware, but let's handle it anyway
-			werr("The program crashed because of a datatype misalignment.\n");
+			log("The program crashed because of a datatype misalignment.");
 		case EXCEPTION_FLT_INVALID_OPERATION;
-			werr("The program crashed because of a floating point exception.\n");
+			log("The program crashed because of a floating point exception.");
 		case EXCEPTION_ILLEGAL_INSTRUCTION;
-			werr("The program crashed because the thread tried to execute an invalid instruction.\n");
+			log("The program crashed because the thread tried to execute an invalid instruction.");
 		case EXCEPTION_INT_DIVIDE_BY_ZERO;
-			werr("The program crashed because of an integer division by zero error.\n");
+			log("The program crashed because of an integer division by zero error.");
 		case EXCEPTION_PRIV_INSTRUCTION;
-			werr("The program crashed because it tried to execute an unauthorized instruction.\n");
+			log("The program crashed because it tried to execute an unauthorized instruction.");
 		case EXCEPTION_STACK_OVERFLOW;
-			werr("The program crashed because of a stack overflow.\n");
+			log("The program crashed because of a stack overflow.");
 		case;
-			werr("The program crashed.\n");
+			log("The program crashed.");
 		}
 
 		// This condition is here to avoid printing both the user-level stack trace and OS provided stack trace
@@ -453,9 +454,9 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 
 			// In some cases of stack overflow (i.e. infinite recursion), printing the stack trace crashes the program
 			if ExceptionRecord.ExceptionCode == EXCEPTION_STACK_OVERFLOW
-				werr("\nPrinting the stack trace (this may fail when a stack overflow occurred):\n");
+				log("Printing the stack trace (this may fail when a stack overflow occurred):");
 			else
-				werr("\nPrinting the stack trace:\n");
+				log("Printing the stack trace:");
 			backtrace(*windows_context, 6);
 		}
 
@@ -467,7 +468,4 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 		return EXCEPTION_EXECUTE_HANDLER;   // Terminate the program, in case TerminateProcess did not succeed.
 	}
 } @NoProfile
-
-werr :: inline (s : string) #no_context { write_string (s, to_standard_error=true); };
-werrs :: inline (s : ..string) #no_context { write_strings (..s, to_standard_error=true); };
 
