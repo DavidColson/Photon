@@ -144,7 +144,7 @@ main :: () {
     #if OS == .WINDOWS {
         Windows :: #import "Windows";
         // Windows is very bad at thread-switching by default unless you do this. Sad.
-        Windows.timeBeginPeriod(1);
+		indows.timeBeginPeriod(1);
 		platform_init_crash_handler();
     }
 
