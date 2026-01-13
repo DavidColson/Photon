@@ -460,6 +460,21 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 			backtrace(*windows_context, 6);
 		}
 
+		// Before we terminate we want to make a folder Crashes/<timestamp>/ and then copy the log file to it.
+		make_time_string :: (ct: Calendar_Time) -> string /* Temporary_Storage */ {
+			using ct;
+
+			date_part :: #bake_arguments formatInt(minimum_digits = 2);
+
+			timezone_name := ifx ct.time_zone == .UTC then "Z" else ""; // @Incomplete: Maybe determine local time zone name or offset
+
+			time_string := tprint("%_%_%T%-%-%-%0%", year, date_part(month_starting_at_0 + 1), date_part(day_of_month_starting_at_0 + 1), date_part(hour), date_part(minute), date_part(second), formatInt(millisecond, minimum_digits = 3), timezone_name);
+			return time_string;
+		}
+		crashDirectory := tprint("crashes/%", make_time_string(to_calendar(current_time_consensus())));
+		make_directory_if_it_does_not_exist(crashDirectory, recursive=true);
+		copy_file("photon.log", tprint("%/photon.log", crashDirectory));
+
 		// This should terminate the process and set the error exit code.
 		TerminateProcess :: (hProcess: *void, uExitCode: u32) -> s32 #foreign kernel32;
 		TerminateProcess(CurrentProcess, 1);  // We are not being picky about exit codes currently.

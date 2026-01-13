@@ -137,7 +137,7 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 }
 
 main :: () {
-	file :=  file_open("log.txt", for_writing=true, keep_existing_content=false);
+	file :=  file_open("photon.log", for_writing=true, keep_existing_content=false);
 	logger.logFile = file;
 
     context.logger = loggerFunc;
