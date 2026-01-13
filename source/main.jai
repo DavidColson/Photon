@@ -142,6 +142,7 @@ main :: () {
 
     context.logger = loggerFunc;
     context.logger_data = *logger;
+	context.assertion_failed = assertion_failed;
 
     #if OS == .WINDOWS {
         Windows :: #import "Windows";
@@ -2099,6 +2100,41 @@ build_grammars :: () {
 		copy_file(tprint("%/%.dll", directory, it.name), tprint("grammars/%.dll", it.name));
 	}
 }
+
+assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
+	if message {
+		log("%:%,%: Assertion failed: %\n", loc.fully_pathed_filename, loc.line_number, loc.character_number, message);
+	}
+	else {
+		log("%:%,%: Assertion failed!\n", loc.fully_pathed_filename, loc.line_number, loc.character_number);
+	}
+
+	log_stack_trace :: (node: *Stack_Trace_Node, log_flags := Log_Flags.ERROR) {
+	    while node {
+	        if node.info {
+				if node.info.name {
+					log("%:%: %", node.info.location.fully_pathed_filename, node.line_number, node.info.name);
+				}
+				else {
+					log("%:%: (anonymous procedure)", node.info.location.fully_pathed_filename, node.line_number);
+				}
+			}
+	        node = node.next;
+	    }
+	}
+    if context.stack_trace {
+        log("Stack trace:");
+        log_stack_trace(context.stack_trace);
+    } else {
+        log("Exiting.");
+    }
+
+    __runtime_support_disable_stack_trace = true;
+
+    return true;
+}
+
+
 
 Input :: #import "Input";
 #import "Window_Creation";
