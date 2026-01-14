@@ -3,6 +3,7 @@
 #import "File";
 #import "File_Utilities";
 Compiler :: #import "Compiler";
+#import "Windows_Resources";
 
 #if OS == .WINDOWS {
     Windows_Resources :: #import "Windows_Resources";
@@ -33,9 +34,9 @@ Build :: ()
     {
     	if arg ==
     	{
-    		case "optimized";
+    		case "-optimized";
     			build_optimized = true;
-    		case "release";
+    		case "-release";
     			build_release = true;
     	}
     }
@@ -45,6 +46,7 @@ Build :: ()
     // 	- Optimized : Optimized and has debug info
     // 	- Release : Very optimized and doesn't have debug info
 	Compiler.compiler_begin_intercept(w);
+
     if build_release then BuildRelease(w);
     else if build_optimized then BuildOptimized(w);
     else BuildDebug(w);
@@ -81,6 +83,7 @@ Build :: ()
 
 BuildDebug :: (w: Workspace)
 {
+	make_directory_if_it_does_not_exist(BUILD_DEBUG_DIR, recursive=true);
     target_options := get_build_options(w);
     target_options.backend =.X64; 
     target_options.output_path = BUILD_DEBUG_DIR;
@@ -91,6 +94,7 @@ BuildDebug :: (w: Workspace)
 
 BuildOptimized :: (w: Workspace)
 {
+	make_directory_if_it_does_not_exist(BUILD_OPTIMIZED_DIR, recursive=true);
     target_options := get_build_options(w);
     target_options.backend = .X64;
     target_options.output_path = BUILD_OPTIMIZED_DIR;
@@ -101,6 +105,7 @@ BuildOptimized :: (w: Workspace)
 
 BuildRelease :: (w: Workspace)
 {
+	make_directory_if_it_does_not_exist(BUILD_RELEASE_DIR, recursive=true);
     target_options := get_build_options(w);
     target_options.backend = .LLVM;
     target_options.output_path = BUILD_RELEASE_DIR;

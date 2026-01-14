@@ -471,9 +471,9 @@ handle_exception :: (using pExceptionInfo: *EXCEPTION_POINTERS) -> s32 #c_call {
 			time_string := tprint("%_%_%T%-%-%-%0%", year, date_part(month_starting_at_0 + 1), date_part(day_of_month_starting_at_0 + 1), date_part(hour), date_part(minute), date_part(second), formatInt(millisecond, minimum_digits = 3), timezone_name);
 			return time_string;
 		}
-		crashDirectory := tprint("crashes/%", make_time_string(to_calendar(current_time_consensus())));
+		crashDirectory := tprint("%/crashes/%", path_strip_filename(get_path_of_running_executable()), make_time_string(to_calendar(current_time_consensus())));
 		make_directory_if_it_does_not_exist(crashDirectory, recursive=true);
-		copy_file("photon.log", tprint("%/photon.log", crashDirectory));
+		copy_file(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), tprint("%/photon.log", crashDirectory));
 
 		// This should terminate the process and set the error exit code.
 		TerminateProcess :: (hProcess: *void, uExitCode: u32) -> s32 #foreign kernel32;
