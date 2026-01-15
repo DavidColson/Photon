@@ -741,7 +741,6 @@ get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndi
 	builder: String_Builder;
 	builder.allocator = temp;
 	prev: u8;
-	test : [200]u8;
 	endOffset := 0;
 
 	for iterator {
@@ -754,7 +753,6 @@ get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndi
 			break;
 		}
 		append(*builder, it);
-		test[it_index] = it;
 		prev = it;
 	}
 
