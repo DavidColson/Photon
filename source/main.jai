@@ -593,82 +593,113 @@ build_ui_panel :: (panel: *Panel) {
 	build_ui_panel_dialogs(panel);
 
 	// Draw the main code screen
-	codeContainer := box(ui_key_nil, .{
+	codeContainerOuter := box(ui_key_nil, .{
 		flags=.DRAW_BACKGROUND,
-		layout=.{childLayoutAxis = .X, width=grow(), height=grow()},
+		layout=.{childLayoutAxis = .Y, width=grow(), height=grow()},
 	});
 	{
-		push_parent(codeContainer); defer pop_parent();
-
-		codeBox := box(ui_key("code"), .{
-			flags=.CLIP_CONTENTS | .MOUSE_CLICKABLE,
-			layout=.{width=grow(), height=grow()},
-			font=fontCode
+		push_parent(codeContainerOuter); defer pop_parent();
+		codeContainerInner := box(ui_key_nil, .{
+			flags=.DRAW_BACKGROUND,
+			layout=.{childLayoutAxis = .X, width=grow(), height=grow()},
 		});
-		codeBox.customDrawFunction = custom_draw_code;
-		codeBox.customDrawUdata = cast(*void) panel;
+		{
+			push_parent(codeContainerInner); defer pop_parent();
 
-		numDocumentLines := get_number_of_lines(panel.document);
-		metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
-		codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
-		signal := signal_from_box(codeBox);
+			codeBox := box(ui_key("code"), .{
+				flags=.CLIP_CONTENTS | .MOUSE_CLICKABLE,
+				layout=.{width=grow(), height=grow()},
+				font=fontCode
+			});
+			codeBox.customDrawFunction = custom_draw_code;
+			codeBox.customDrawUdata = cast(*void) panel;
 
-		// mouse cursor control
+			numDocumentLines := get_number_of_lines(panel.document);
+			metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
+			codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+			// width of the longest line??
+			// we can work it out during rendering almost for free
+			// but I would prefer not to have a frame when we don't know
+			// we should always have _some_ value for it
+			// doing it on render data would also mean if we're in a part of a file which doesn't have scroll requirements
+			// then it won't know the whole document needs to scroll
 
-		set_cursor_to_mouse_location :: (doc: *Document, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
-			gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
+			// I feel like this is something the document should track
+			// at least the width in glyphs of the longest line
+			// codeBox.viewBounds.z = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+			signal := signal_from_box(codeBox);
+
+			// mouse cursor control
+
+			set_cursor_to_mouse_location :: (doc: *Document, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
+				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
 		
-		    x, y, success := get_mouse_pointer_position(window, false);
-			mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
-			mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
+			    x, y, success := get_mouse_pointer_position(window, false);
+				mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
+				mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
 
-			metrics := get_font_metrics(box.font, xx box.fontSize);
-			clickedLine := clamp(cast(s64) (mouseY / metrics.lineSpacing), 0, numDocumentLines - 1);
+				metrics := get_font_metrics(box.font, xx box.fontSize);
+				clickedLine := clamp(cast(s64) (mouseY / metrics.lineSpacing), 0, numDocumentLines - 1);
 
-			// collect the line content of this line (so we can figure out how wide it is in pixels)
-			lineContent := get_line_content(doc, clickedLine,,temp);
-			run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
-			column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
-			cursor.head = lineContent.startByteOffset + column;
-			cursor.anchor = cursor.head;
+				// collect the line content of this line (so we can figure out how wide it is in pixels)
+				lineContent := get_line_content(doc, clickedLine,,temp);
+				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
+				column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
+				cursor.head = lineContent.startByteOffset + column;
+				cursor.anchor = cursor.head;
 
-			// update the virtual column
-			cursor.virtualColumn = 0;
-			for lineContent.text {
-				if it_index == column then break;
-				if it == #char "\t" {
-					cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-				}
-				else {
-					cursor.virtualColumn += 1;
+				// update the virtual column
+				cursor.virtualColumn = 0;
+				for lineContent.text {
+					if it_index == column then break;
+					if it == #char "\t" {
+						cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
+					}
+					else {
+						cursor.virtualColumn += 1;
+					}
 				}
 			}
-		}
 		
-		if signal.pressed {
-			set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
-			panel.cursor.head = panel.cursor.anchor;
-		}
-
-		if signal.holding {
-			set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
-		    x, y, success := get_mouse_pointer_position(window, false);
-			if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
-				_, range := panel_calculate_visible_lines(panel);
-				currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
-				panel_scroll_to_line(panel, currentLine - range);
+			if signal.pressed {
+				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
+				panel.cursor.head = panel.cursor.anchor;
 			}
-			else if y < cast(int, codeBox.rect.y) {
-				currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
-				panel_scroll_to_line(panel, currentLine);
+
+			if signal.holding {
+				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
+			    x, y, success := get_mouse_pointer_position(window, false);
+				if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
+					_, range := panel_calculate_visible_lines(panel);
+					currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
+					panel_scroll_to_line(panel, currentLine - range);
+				}
+				else if y < cast(int, codeBox.rect.y) {
+					currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
+					panel_scroll_to_line(panel, currentLine);
+				}
 			}
+
+			// @todo: find a way to not rely on this codebox rect
+			dragDelta := scroll_bar(ui_key("codeScrollVertical"), codeBox.viewOffset.y, codeBox.viewBounds.y, codeBox.rect.h, .Y);
+
+			dragRange := (1.0 - max(abs(codeBox.rect.h/(codeBox.viewBounds.y-codeBox.rect.h)), 0.05))*codeBox.rect.h;
+			scaleRatio := ifx dragRange != 0.0 then abs(codeBox.viewBounds.y)/dragRange else 1.0;
+			codeBox.viewOffset -= dragDelta * scaleRatio;
+			codeBox.viewOffset.y = clamp(codeBox.viewOffset.y, codeBox.viewBounds.y, 0);
+			codeBox.viewOffset.x = clamp(codeBox.viewOffset.x, codeBox.viewBounds.x, 0);
+
+			codeBox.viewOffsetTarget -= dragDelta * scaleRatio;
+			codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
+			codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
 		}
+		// draw horizontal scroll bar
 
-		// @todo: find a way to not rely on this codebox rect
-		dragDelta := scroll_bar(ui_key("codeScroll"), codeBox.viewOffset.y, codeBox.viewBounds.y, codeBox.rect.h);
+		success, codeBox:= find_box(ui_key("code"));
+		dragDelta := scroll_bar(ui_key("codeScrollHorizontal"), codeBox.viewOffset.x, codeBox.viewBounds.x, codeBox.rect.w, .X);
 
-		dragRange := (1.0 - max(abs(codeBox.rect.h/(codeBox.viewBounds.y-codeBox.rect.h)), 0.05))*codeBox.rect.h;
-		scaleRatio := ifx dragRange != 0.0 then abs(codeBox.viewBounds.y)/dragRange else 1.0;
+		dragRange := (1.0 - max(abs(codeBox.rect.h/(codeBox.viewBounds.x-codeBox.rect.w)), 0.05))*codeBox.rect.w;
+		scaleRatio := ifx dragRange != 0.0 then abs(codeBox.viewBounds.x)/dragRange else 1.0;
 		codeBox.viewOffset -= dragDelta * scaleRatio;
 		codeBox.viewOffset.y = clamp(codeBox.viewOffset.y, codeBox.viewBounds.y, 0);
 		codeBox.viewOffset.x = clamp(codeBox.viewOffset.x, codeBox.viewBounds.x, 0);
@@ -676,6 +707,7 @@ build_ui_panel :: (panel: *Panel) {
 		codeBox.viewOffsetTarget -= dragDelta * scaleRatio;
 		codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
 		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
+		
 	}
 
 	// Draw the search dialog
