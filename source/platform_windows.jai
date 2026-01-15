@@ -83,14 +83,14 @@ platform_init_crash_handler :: () {
 	symbols_initialized = true;
 }
 
-#scope_file 
-
 #run {
-	#if OS == .WINDOWS {
-		WR :: #import "Windows_Resources";
-		// WR.disable_runtime_console();
-	}
+    #if BUILD_TYPE == .RELEASE {
+        WR :: #import "Windows_Resources";
+        WR.disable_runtime_console();
+    }
 }
+
+#scope_file 
 
 backupTimerCallback: BackupTimerCallback;
 _windows_timer_callback :: (hwnd: HWND, message: u32, timerId: u32, dwTime: DWORD) #c_call {

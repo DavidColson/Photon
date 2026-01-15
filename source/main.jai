@@ -136,13 +136,6 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	file_write(*logger.logFile, "\n");
 }
 
-#run {
-    #if BUILD_TYPE == .RELEASE {
-        WR :: #import "Windows_Resources";
-        WR.disable_runtime_console();
-    }
-}
-
 main :: () {
 	file :=  file_open(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), for_writing=true, keep_existing_content=false);
 	logger.logFile = file;
