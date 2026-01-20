@@ -673,21 +673,22 @@ spacer :: (axis: UIAxis, size: UISize) {
 	}
 }
 
-scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, visibleRange: float) -> Vector2 {
-	container := box(ui_key_nil, .{
-		layout=.{
-			childLayoutAxis = .X,
-			width=fixed(em(1.2)) ,
-			height=grow(),
-			padding=padding_all(em(0.3))
-		},
-	});
+scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, visibleRange: float, axis: UIAxis) -> Vector2 {
+	// if this is a vertical scroll bar, then
+	
+	scrollAxis := axis;
+	otherAxis := axis ^ 1;
+	
+	layout := UILayoutData.{ padding=padding_all(em(0.3))};
+	layout.size[axis^1] = fixed(em(1.2));
+	layout.size[axis] = grow();
+	container := box(ui_key_nil, .{layout = layout});
 	{
 		push_parent(container); defer pop_parent();
 
 		scrollBarOuter := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND,
-			layout=.{childLayoutAxis = .Y, width=grow(), height=grow()},
+			layout=.{childLayoutAxis = axis, width=grow(), height=grow()},
 			cornerRadius=corner_rad_all(em(0.3)),
 			palette=.{background=style.backgroundLight}
 		});
@@ -698,16 +699,21 @@ scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, vi
 			spaceBeforePct := (1.0-handleSizePct) * abs(scrollOffset/scrollRegionSize);
 
 			// space before
-			box(ui_key_nil, .{ layout=.{childLayoutAxis = .X, width=grow(), height=percent(spaceBeforePct)}, });
+			layout = UILayoutData.{};
+			layout.size[axis^1] = grow();
+			layout.size[axis] = percent(spaceBeforePct);
+			box(ui_key_nil, .{layout = layout});
 
 			// handle
+			layout = UILayoutData.{};
+			layout.size[axis^1] = grow();
+			layout.size[axis] = percent(handleSizePct);
 			scrollHandle := box(handleKey, .{
 				flags=.DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS,
-				layout=.{childLayoutAxis = .X, width=grow(), height=percent(handleSizePct)},
+				layout=layout,
 				palette=.{background=style.backgroundLighter},
 				cornerRadius=corner_rad_all(em(0.3))
 			});
-
 			return signal_from_box(scrollHandle).dragDelta;
 		}
 	}
@@ -765,7 +771,7 @@ scroll_list_end :: (scrollBarKey: UIKey) {
 	// scroll bar if there are too many elements to display
 	if container.viewBounds.y != 0.0 {
 		maxContainerHeightInner := container.layout.height.max - em(0.4)*2;
-		dragDelta := scroll_bar(scrollBarKey, container.viewOffset.y, container.viewBounds.y, maxContainerHeightInner);
+		dragDelta := scroll_bar(scrollBarKey, container.viewOffset.y, container.viewBounds.y, maxContainerHeightInner, .Y);
 
 		// note: this mirrors the calculation of the handleSizePct
 		dragRange := (1.0 - max(abs(maxContainerHeightInner/(container.viewBounds.y-maxContainerHeightInner)), 0.05))*maxContainerHeightInner;
