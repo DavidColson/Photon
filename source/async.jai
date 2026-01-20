@@ -31,6 +31,9 @@ init_async :: (using async: *Async) {
 	async.thread.data = cast(*void, async);
 	thread_init(*async.thread, async_thread_entry);
 
+	// for parallel by default, we'd have to spin up several threads here instead of just one
+	// have them in some array
+
 	// Setup the work queue
 	init(*available.semaphore);
 	init(*available.mutex);
@@ -51,9 +54,19 @@ push_task :: (using async: *Async, data: *void, func: #type (data: *void), compl
 	task.data = data;
 	pendingTasks += 1;
 	push_task(*async.available, task);
+
+	// when pushing a task, we want the task to be given to all the threads at once
+	// we could just create async tasks in a loop here, one for each thread requested
+	// of course the push_task function would want to know how many wide do you want your task to go
+
+	// I think we would also need a task list for every thread
 }
 
 process_completed_tasks :: (using async: *Async) -> s32 {
+
+	// in here you would have to loop through every thread and collect up it's completed work
+	// calling the complete function
+
 	completedTasks: *Async.Task;
 	completedCount: s32;
 
