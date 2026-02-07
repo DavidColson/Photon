@@ -21,7 +21,7 @@ command_picker_open :: (using panel: *Panel, args: []string) {
 
     push_allocator(flat_pool_allocator_proc, *commandPicker.memory);
 
-	for command: commandList {
+	for command: normalModeCommands {
 		if !(command.flags & .HIDDEN) {
 			entry := array_add(*commandPicker.filteredCommandList);
 			entry.command = *command;
@@ -42,7 +42,7 @@ command_picker_input_field_on_edit :: (userData: *void, input: string) {
 
 	array_reset_keeping_memory(*state.filteredCommandList);
 
-	for command: commandList {
+	for command: normalModeCommands {
 		if !(command.flags & .HIDDEN) {
 			score,fuzzyMatches := fuzzy_search(command.name, input);
 			entry := array_add(*state.filteredCommandList);

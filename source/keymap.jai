@@ -1,19 +1,19 @@
 
 KeyMappingDesc :: struct {
-	mode: EditorMode = .NORMAL;
 	keys: string = "";
 }
 
 CommandFlags :: enum_flags u8 {
 	HIDDEN;
 	REPEATABLE;
+	EXTEND;
 }
 
 Command :: struct {
 	name: string;
+	mappings: []string;
 	flags: CommandFlags;
 	execute: (*Panel, []string);
-	mappings: []KeyMappingDesc;
 }
 
 KeyMap :: struct {
@@ -44,335 +44,226 @@ keyMap: KeyMap;
 // @todo: consider making certain commands only available in certain modes
 // such as command picker and filesystem nav commands. They won't show up in the command picker
 // if they can't be selected, filter them out when doing fuzzy filtering
-commandList :: Command.[
-	.{ "Quit", 0, quit, .[.{mode=.NORMAL, keys="Q"}]},
-	.{ "Save File", 0, save_file, .[.{mode=.NORMAL, keys="ctrl+s"}]},
-	.{ "Save File As", 0, save_file_as, .[.{mode=.NORMAL, keys="ctrl+shift+s"}]},
 
-	// motions
-	.{ "Move one char left", .REPEATABLE, move_one_char_left, .[
-		.{ mode=.NORMAL, keys="h"},
-		.{ mode=.INSERT, keys="<left>"},
-		.{ mode=.NORMAL, keys="<left>"},
-	]},
-	.{ "Move one char right", .REPEATABLE, move_one_char_right, .[
-		.{ mode=.NORMAL, keys="l"},
-		.{ mode=.INSERT, keys="<right>"},
-		.{ mode=.NORMAL, keys="<right>"},
-	]},
-	.{ "Move one line down", .REPEATABLE, move_one_line_down, .[
-		.{ mode=.NORMAL, keys="j"},
-		.{ mode=.INSERT, keys="<down>"},
-		.{ mode=.NORMAL, keys="<down>"},
-	]},
-	.{ "Move one line up", .REPEATABLE, move_one_line_up, .[
-		.{ mode=.NORMAL, keys="k"},
-		.{ mode=.INSERT, keys="<up>"},
-		.{ mode=.NORMAL, keys="<up>"}
-	]},
-	.{ "Goto document start", 0, goto_document_start, .[
-		.{ mode=.NORMAL, keys="gk"},
-	]},
-	.{ "Goto document end", 0, goto_document_end, .[
-		.{ mode=.NORMAL, keys="gj"},
-	]},
-	.{ "Goto line start", 0, goto_line_start, .[
-		.{ mode=.NORMAL, keys="gh"},
-	]},
-	.{ "Goto line end", 0, goto_line_end, .[
-		.{ mode=.NORMAL, keys="gl"},
-	]},
-	.{ "Move to next word start", .REPEATABLE, move_word_start, .[
-		.{ mode=.NORMAL, keys="w"},
-	]},
-	.{ "Move to next word end", .REPEATABLE, move_word_end, .[
-		.{ mode=.NORMAL, keys="e"},
-	]},
-	.{ "Move to prev word start", .REPEATABLE, move_prev_word_start, .[
-		.{ mode=.NORMAL, keys="b"},
-	]},
-	.{ "Move to next long word start", .REPEATABLE, move_long_word_start, .[
-		.{ mode=.NORMAL, keys="W"},
-	]},
-	.{ "Move to next long word end", .REPEATABLE, move_long_word_end, .[
-		.{ mode=.NORMAL, keys="E"},
-	]},
-	.{ "Move to next sub word start", .REPEATABLE, move_sub_word_start, .[
-		.{ mode=.NORMAL, keys="alt+w"},
-	]},
-	.{ "Move to next sub word end", .REPEATABLE, move_sub_word_end, .[
-		.{ mode=.NORMAL, keys="alt+e"},
-	]},
-	.{ "Jump to first occurence of {char}", .REPEATABLE, jump_to_char, .[
-		.{ mode=.NORMAL, keys="f{char}"},
-	]},
-	.{ "Jump to last occurence of {char}", .REPEATABLE, jump_to_last_char, .[
-		.{ mode=.NORMAL, keys="F{char}"},
-	]},
-	.{ "Jump to just before first occurence of {char}", .REPEATABLE, jump_to_before_char, .[
-		.{ mode=.NORMAL, keys="t{char}"},
-	]},
-	.{ "Jump to just before last occurence of {char}", .REPEATABLE, jump_to_before_last_char, .[
-		.{ mode=.NORMAL, keys="T{char}"},
-	]},
-	.{ "Expand selection to full lines", .REPEATABLE, expand_selection_to_lines, .[
-		.{ mode=.NORMAL, keys="x"},
-	]},
+normalModeCommands :: Command.[
+	.{ "Quit", .["Q"], 0, quit },
+	.{ "Save File", .["ctrl+s"], 0, save_file },
+	.{ "Save File As", .["ctrl+shift+s"], 0, save_file_as },
 
-	// view commands
-	.{ "Page Up", 0, page_up, .[
-		.{ mode=.NORMAL, keys="ctrl+b"},
-		.{ mode=.NORMAL, keys="<pageup>"},
-		.{ mode=.INSERT, keys="<pageup>"},
-	]},
-	.{ "Page Down", 0, page_down, .[
-		.{ mode=.NORMAL, keys="ctrl+f"},
-		.{ mode=.NORMAL, keys="<pagedown>"},
-		.{ mode=.INSERT, keys="<pagedown>"},
-	]},
-	.{ "Half Page Up", 0, half_page_up, .[
-		.{ mode=.NORMAL, keys="ctrl+u"}
-	]},
-	.{ "Half Page Down", 0, half_page_down, .[
-		.{ mode=.NORMAL, keys="ctrl+d"}
-	]},
+	// movements
+	.{ "Move one char left", .["h", "<left>"], .REPEATABLE, move_one_char_left },
+	.{ "Move one char right", .["l", "<right>"], .REPEATABLE, move_one_char_right },
+	.{ "Move one line down", .["j", "<down>"], .REPEATABLE, move_one_line_down },
+	.{ "Move one line up", .["k", "<up>"], .REPEATABLE, move_one_line_up },
+
+	.{ "Goto document start", .["gk"], 0, goto_document_start },
+	.{ "Goto document end", .["gj"], 0, goto_document_end },
+	.{ "Goto line start", .["gh"], 0, goto_line_start },
+	.{ "Goto line end", .["gl"], 0, goto_line_end },
+
+	.{ "Move to next word start", .["w"], 0, move_word_start },
+	.{ "Move to next word end", .["e"], 0, move_word_end },
+	.{ "Move to prev word start", .["b"], 0, move_prev_word_start },
+	.{ "Move to next long word start", .["W"], 0, move_long_word_start },
+	.{ "Move to next long word end", .["E"], 0, move_long_word_end },
+	.{ "Move to next sub word start", .["alt+w"], 0, move_sub_word_start },
+	.{ "Move to next sub word end", .["alt+e"], 0, move_sub_word_end },
+
+	.{ "Jump to first occurence of {char}", .["f{char}"], 0, jump_to_char },
+	.{ "Jump to last occurence of {char}", .["F{char}"], 0, jump_to_last_char },
+	.{ "Jump to just before first occurence of {char}", .["t{char}"], 0, jump_to_before_char },
+	.{ "Jump to just before last occurence of {char}", .["T{char}"], 0, jump_to_before_last_char },
+
+	.{ "Expand selection to full lines", .["x"], 0, expand_selection_to_lines },
+
+	.{ "Page Up", .["ctrl+b", "<pageup>"], 0, page_up },
+	.{ "Page Down", .["ctrl+f", "<pagedown>"], 0, page_down },
+	.{ "Half Page Up", .["ctrl+u"], 0, half_page_up },
+	.{ "Half Page Down", .["ctrl+d"], 0, half_page_down },
 
 	// misc normal mode
-	.{ "Toggle Extend Selections", 0, toggle_extend_selections, .[
-		.{ mode=.NORMAL, keys="v"}
-	]},
-	.{ "Select register {char}", 0, select_register, .[
-		.{ mode=.NORMAL, keys="\"{char}"}
-	]},
-	.{ "Next search result", 0, next_search_result, .[
-		.{ mode=.NORMAL, keys="n"}
-	]},
-	.{ "Previous search result", 0, previous_search_result, .[
-		.{ mode=.NORMAL, keys="N"}
-	]},
+	.{ "Toggle Extend Selections", .["v"], 0, toggle_extend_selections },
+	.{ "Select register {char}", .["\"{char}"], 0, select_register },
+	.{ "Next search result", .["n"], 0, next_search_result },
+	.{ "Previous search result", .["N"], 0, previous_search_result },
 
 	// search
-	.{ "Search Document", 0, start_document_search, .[
-		.{ mode=.NORMAL, keys="/"}
-	]},
+	.{ "Search Document", .["/"], 0, start_document_search },
 
 	// changes
-	.{ "Delete selection", 0, delete_selection, .[
-		.{ mode=.NORMAL, keys="d"},
-	]},
-	.{ "Change selection", 0, change_selection, .[
-		.{ mode=.NORMAL, keys="c"},
-	]},
-	.{ "Yank selection", 0, yank_selection, .[
-		.{ mode=.NORMAL, keys="y"},
-	]},
-	.{ "Paste after selection", 0, paste_after_selection, .[
-		.{ mode=.NORMAL, keys="p"},
-	]},
-	.{ "Paste before selection", 0, paste_before_selection, .[
-		.{ mode=.NORMAL, keys="P"},
-	]},
-	.{ "Replace selection with {char}", 0, replace_selection, .[
-		.{ mode=.NORMAL, keys="r{char}"},
-	]},
-	.{ "New line below selection", 0, new_line_below, .[
-		.{ mode=.NORMAL, keys="o"},
-	]},
-	.{ "New line above selection", 0, new_line_above, .[
-		.{ mode=.NORMAL, keys="O"},
-	]},
-	.{ "Indent line", 0, indent_line, .[
-		.{ mode=.NORMAL, keys=">"},
-	]},
-	.{ "Unindent line", 0, unindent_line, .[
-		.{ mode=.NORMAL, keys="<"},
-	]},
-	.{ "Undo", 0, undo, .[
-		.{ mode=.NORMAL, keys="u"},
-	]},
-	.{ "Redo", 0, redo, .[
-		.{ mode=.NORMAL, keys="U"},
-	]},
-	.{ "Visualize Undos", 0, visualize_undos, .[]},
+	.{ "Delete selection", .["d"], 0, delete_selection },
+	.{ "Change selection", .["c"], 0, change_selection },
+	.{ "Yank selection", .["y"], 0, yank_selection },
+	.{ "Paste after selection", .["p"], 0, paste_after_selection },
+	.{ "Paste before selection", .["P"], 0, paste_before_selection },
+	.{ "Replace selection with {char}", .["r{char}"], 0, replace_selection },
+	.{ "New line below selection", .["o"], 0, new_line_below },
+	.{ "New line above selection", .["O"], 0, new_line_above },
+	.{ "Indent line", .[">"], 0, indent_line },
+	.{ "Unindent line", .["<"], 0, unindent_line },
+	.{ "Undo", .["u"], 0, undo },
+	.{ "Redo", .["U"], 0, redo },
+	.{ "Visualize Undos", .[], 0, visualize_undos },
 
-	// insert mode stuff
-	.{ "Backward Delete Char", .HIDDEN, insert_mode_backward_delete_char, .[
-		.{ mode=.INSERT, keys="<backspace>"}
-	]},
-	.{ "Forward Delete Char", .HIDDEN, insert_mode_forward_delete_char, .[
-		.{ mode=.INSERT, keys="<delete>"}
-	]},
-	.{ "Insert line break", .HIDDEN, insert_mode_line_break, .[
-		.{ mode=.INSERT, keys="<enter>"}
-	]},
-	.{ "Insert tab", .HIDDEN, insert_tab_character, .[
-		.{ mode=.INSERT, keys="<tab>"}
-	]},
+	.{ "Open Filesystem Navigator", .["<space>o"], 0, open_file },
+	.{ "Open Filesystem Navigator At Working Directory", .["<space>O"], 0, open_file_in_working_dir },
+	.{ "Open Command Picker", .[":"], .HIDDEN, command_picker_open },
+	.{ "Open File Finder", .["<space>f"], 0, file_finder_open },	
 
-	.{ "Open Filesystem Navigator", 0, open_file, .[
-		.{ mode=.NORMAL, keys="<space>o"}
-	]},
-	.{ "Open Filesystem Navigator At Working Directory", 0, open_file_in_working_dir, .[
-		.{ mode=.NORMAL, keys="<space>O"}
-	]},
-	.{ "Open Command Picker", .HIDDEN, command_picker_open, .[
-		.{ mode=.NORMAL, keys=":"}
-	]},
-	.{ "Open File Finder", 0, file_finder_open, .[
-		.{ mode=.NORMAL, keys="<space>f"}
-	]},
-
-	// Dialogs
-	.{ "Dialog Select Next", .HIDDEN, dialog_select_next, .[
-		.{ mode=.DIALOG, keys="<down>"}
-	]},
-	.{ "Dialog Select Previous", .HIDDEN, dialog_select_previous, .[
-		.{ mode=.DIALOG, keys="<up>"}
-	]},
-	.{ "Dialog Action Item", .HIDDEN, dialog_action_item, .[
-		.{ mode=.DIALOG, keys="<enter>"}
-	]},
-	.{ "Dialog Backward Delete", .HIDDEN, dialog_backward_delete, .[
-		.{ mode=.DIALOG, keys="<backspace>"}
-	]},
-
-	.{ "Enter Insert Mode Start Of Selection", 0, enter_insert_mode_start, .[
-		.{ mode=.NORMAL, keys="i"}
-	]},
-	.{ "Enter Insert Mode End Of Selection", 0, enter_insert_mode_end, .[
-		.{ mode=.NORMAL, keys="a"}
-	]},
-	.{ "Enter Insert Mode Start Of Line", 0, enter_insert_mode_line_start, .[
-		.{ mode=.NORMAL, keys="I"}
-	]},
-	.{ "Enter Insert Mode End Of Line", 0, enter_insert_mode_line_end, .[
-		.{ mode=.NORMAL, keys="A"}
-	]},
-	.{ "Enter Normal Mode", 0, enter_normal_mode, .[
-		.{ mode=.NORMAL, keys="<escape>"},
-		.{ mode=.INSERT, keys="<escape>"},
-		.{ mode=.DIALOG, keys="<escape>"},
-	]},
+	.{ "Enter Insert Mode Start Of Selection", .["i"], 0, enter_insert_mode_start },
+	.{ "Enter Insert Mode End Of Selection", .["a"], 0, enter_insert_mode_end },
+	.{ "Enter Insert Mode Start Of Line", .["I"], 0, enter_insert_mode_line_start },
+	.{ "Enter Insert Mode End Of Line", .["A"], 0, enter_insert_mode_line_end },
+	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
 
 	// misc commands
-	.{ "Print piece chain debug", 0, print_piece_chain_debug, .[]},
-	.{ "Toggle draw line endings", 0, toggle_render_line_endings, .[]},
+	.{ "Print piece chain debug", .[], 0, print_piece_chain_debug },
+	.{ "Toggle draw line endings", .[], 0, toggle_render_line_endings },
 
 	// @todo: need command arguments to clean this up, second option box pops up to select from a dropdown
-	.{ "Normalize Line Endings To LF", 0, normalize_line_endings_lf, .[]},
-	.{ "Normalize Line Endings To CRLF", 0, normalize_line_endings_crlf, .[]},
+	.{ "Normalize Line Endings To LF", .[], 0, normalize_line_endings_lf },
+	.{ "Normalize Line Endings To CRLF", .[], 0, normalize_line_endings_crlf },];
+
+insertModeCommands :: Command.[
+	.{ "Move one char left", .["<left>"], 0, move_one_char_left },
+	.{ "Move one char right", .["<right>"], 0, move_one_char_right },
+	.{ "Move one line down", .["<down>"], 0, move_one_line_down },
+	.{ "Move one line up", .["<up>"], 0, move_one_line_up },
+
+	.{ "Page Up", .["<pageup>"], 0, page_up },
+	.{ "Page Down", .["<pagedown>"], 0, page_down },
+
+	.{ "Backward Delete Char", .["<backspace>"], .HIDDEN, insert_mode_backward_delete_char },
+	.{ "Forward Delete Char", .["<delete>"], .HIDDEN, insert_mode_forward_delete_char },
+	.{ "Insert line break", .["<enter>"], .HIDDEN, insert_mode_line_break },
+	.{ "Insert tab", .["<tab>"], .HIDDEN, insert_tab_character },
+];
+
+dialogModeCommands :: Command.[
+	.{ "Dialog Select Next", .["<down>"], .HIDDEN, dialog_select_next },
+	.{ "Dialog Select Previous", .["<up>"], .HIDDEN, dialog_select_previous },
+	.{ "Dialog Action Item", .["<enter>"], .HIDDEN, dialog_action_item },
+	.{ "Dialog Backward Delete", .["<backspace>"], .HIDDEN, dialog_backward_delete },
+	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
 ];
 
 rebuild_key_map :: ()  {
 	keyMap.allocator = Allocator.{proc = flat_pool_allocator_proc, data = *keyMap.memory};
 	keyMap.pendingKeyString.allocator = keyMap.allocator;
 
-	for mode: 0..EDITOR_MODE_NUM-1 {
-		keyMap.root[mode].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-	}
+	build_key_map_for_mode :: (list: []Command, mode: EditorMode) {
+		for * cmd : list {
+			for mapping : cmd.mappings {
+				if mapping == "" continue;
 
-	// for loop through the command list
-	for * cmd : commandList {
-		for mapping : cmd.mappings {
-			if mapping.keys == "" continue;
+				// Grab the mapping for each command
+				// for each key in the mapping (single char, or modified key, or special key)
+				keys := mapping;
+				curNode := *keyMap.root[mode]; 
+				while keys.count > 0 {
+					hashKey:= keys;
+					if begins_with(keys, "ctrl+") {
+						advance(*keys, 5); 
+					}
+					if begins_with(keys, "alt+") {
+						advance(*keys, 4); 
+					}
+					if begins_with(keys, "shift+") {
+						advance(*keys, 6); 
+					}
 
-			// Grab the mapping for each command
-			// for each key in the mapping (single char, or modified key, or special key)
-			keys := mapping.keys;
-			curNode := *keyMap.root[mapping.mode]; 
-			while keys.count > 0 {
-				hashKey:= keys;
-				if begins_with(keys, "ctrl+") {
-					advance(*keys, 5); 
-				}
-				if begins_with(keys, "alt+") {
-					advance(*keys, 4); 
-				}
-				if begins_with(keys, "shift+") {
-					advance(*keys, 6); 
-				}
-
-				if begins_with(keys, "<backspace>") {
-					advance(*keys, 11); 
-				}
-				else if begins_with(keys, "<enter>") {
-					advance(*keys, 7); 
-				}
-				else if begins_with(keys, "<escape>") {
-					advance(*keys, 8); 
-				}
-				else if begins_with(keys, "<left>") {
-					advance(*keys, 6); 
-				}
-				else if begins_with(keys, "<right>") {
-					advance(*keys, 7); 
-				}
-				else if begins_with(keys, "<up>") {
-					advance(*keys, 4); 
-				}
-				else if begins_with(keys, "<down>") {
-					advance(*keys, 6); 
-				}
-				else if begins_with(keys, "<tab>") {
-					advance(*keys, 5); 
-				}
-				else if begins_with(keys, "<delete>") {
-					advance(*keys, 8); 
-				}
-				else if begins_with(keys, "<space>") {
-					advance(*keys, 7); 
-				}
-				else if begins_with(keys, "<pageup>") {
-					advance(*keys, 7); 
-				}
-				else if begins_with(keys, "<pagedown>") {
-					advance(*keys, 7); 
-				}
-				else {
-					advance(*keys, 1); // take just the one letter key
-				}
-
-				nArgs := 0;
-				while begins_with(keys, "{char}") {
-					advance(*keys, 6); 
-					nArgs += 1;
-				}
-
-				// hashkey should be just what we grabbed from this loop iteration
-				hashKey.count = hashKey.count - (keys.count + nArgs * 6);
-
-				// a few possibilities
-				// if keys.count == 0, this is a leaf
-					// If there's already an entry in the current table, assert
-					// No existing entry, add the entry now
-				// if keys.count > 0 this is not a leaf
-					// If there's no entry, add a new non-leaf entry set this as current table
-					// if there's already a non-leaf entry, set as current and loop
-					// if there's already a leaf entry, assert
-
-				if keys.count == 0 { // leaf node
-					assert(!table_contains(curNode.children, hashKey), "Mapping already exists");
-					newNode := New(KeyMapNode,,keyMap.allocator);
-					newNode.cmd = cmd;
-					newNode.nArgs = xx nArgs;
-					table_add(curNode.children, hashKey, newNode);
-				}
-				else if keys.count > 0 { // non-leaf node
-					assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence");
-					exists, entry := table_find_new(curNode.children, hashKey);
-					if !exists { 
-						newNode := New(KeyMapNode,,keyMap.allocator);
-						newNode.children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-						curNode = <<table_add(curNode.children, hashKey, newNode); 
+					if begins_with(keys, "<backspace>") {
+						advance(*keys, 11); 
+					}
+					else if begins_with(keys, "<enter>") {
+						advance(*keys, 7); 
+					}
+					else if begins_with(keys, "<escape>") {
+						advance(*keys, 8); 
+					}
+					else if begins_with(keys, "<left>") {
+						advance(*keys, 6); 
+					}
+					else if begins_with(keys, "<right>") {
+						advance(*keys, 7); 
+					}
+					else if begins_with(keys, "<up>") {
+						advance(*keys, 4); 
+					}
+					else if begins_with(keys, "<down>") {
+						advance(*keys, 6); 
+					}
+					else if begins_with(keys, "<tab>") {
+						advance(*keys, 5); 
+					}
+					else if begins_with(keys, "<delete>") {
+						advance(*keys, 8); 
+					}
+					else if begins_with(keys, "<space>") {
+						advance(*keys, 7); 
+					}
+					else if begins_with(keys, "<pageup>") {
+						advance(*keys, 7); 
+					}
+					else if begins_with(keys, "<pagedown>") {
+						advance(*keys, 7); 
 					}
 					else {
-						assert(entry.cmd == null, "Start of this key sequence already exists as a direct mapping");
-						curNode = entry;
+						advance(*keys, 1); // take just the one letter key
+					}
+
+					nArgs := 0;
+					while begins_with(keys, "{char}") {
+						advance(*keys, 6); 
+						nArgs += 1;
+					}
+
+					// hashkey should be just what we grabbed from this loop iteration
+					hashKey.count = hashKey.count - (keys.count + nArgs * 6);
+
+					// a few possibilities
+					// if keys.count == 0, this is a leaf
+						// If there's already an entry in the current table, assert
+						// No existing entry, add the entry now
+					// if keys.count > 0 this is not a leaf
+						// If there's no entry, add a new non-leaf entry set this as current table
+						// if there's already a non-leaf entry, set as current and loop
+						// if there's already a leaf entry, assert
+
+					if keys.count == 0 { // leaf node
+						assert(!table_contains(curNode.children, hashKey), "Mapping already exists");
+						newNode := New(KeyMapNode,,keyMap.allocator);
+						newNode.cmd = cmd;
+						newNode.nArgs = xx nArgs;
+						table_add(curNode.children, hashKey, newNode);
+					}
+					else if keys.count > 0 { // non-leaf node
+						assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence");
+						exists, entry := table_find_new(curNode.children, hashKey);
+						if !exists { 
+							newNode := New(KeyMapNode,,keyMap.allocator);
+							newNode.children = New(Table(string, *KeyMapNode),,keyMap.allocator);
+							curNode = <<table_add(curNode.children, hashKey, newNode); 
+						}
+						else {
+							assert(entry.cmd == null, "Start of this key sequence already exists as a direct mapping");
+							curNode = entry;
+						}
 					}
 				}
 			}
 		}
 	}
+	
+	keyMap.root[EditorMode.NORMAL].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
+	build_key_map_for_mode(normalModeCommands, .NORMAL);
+
+	keyMap.root[EditorMode.INSERT].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
+	build_key_map_for_mode(insertModeCommands, .INSERT);
+
+	keyMap.root[EditorMode.DIALOG].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
+	build_key_map_for_mode(dialogModeCommands, .DIALOG);
+
 	keyMap.pendingKeyNode = *keyMap.root[editorMode];
 }
 

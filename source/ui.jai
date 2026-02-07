@@ -352,7 +352,6 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					box.viewOffsetTarget.x += (Input.mouse_wheel_delta.horizontal/it.typical_wheel_delta)*metrics.lineSpacing*3;
 					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
-					log("bounds %", box.viewBounds.x);
 					remove it;
 				}
 		}

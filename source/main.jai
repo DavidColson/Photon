@@ -810,7 +810,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// @todo: should we show bindings for all modes?
 					mappingStr := "";
 					for commandEntry.command.mappings {
-						if it.mode == .NORMAL then mappingStr = it.keys;
+						// TODO
+						// if it.mode == .NORMAL then mappingStr = it;
+						mappingStr = it;
 					}
 
 					commandLabel := box(ui_key("%", commandEntry.command.name), .{
