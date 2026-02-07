@@ -1,8 +1,13 @@
 Rect :: struct {
 	x: float;
 	y: float;
+#place x;
+    pos: Vector2;
+
 	w: float;
 	h: float;
+#place w;
+    size: Vector2;
 }
 
 contains_point :: (rect: Rect, x: float, y: float) -> bool {

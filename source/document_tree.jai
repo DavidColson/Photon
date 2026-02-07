@@ -102,6 +102,8 @@ Document :: struct {
 	language: string;
 	parser: *TSParser;
 	tsTree: *TSTree;
+	longestLine: s32;
+	longestLineLength: s32;
 
 	// Undo
 	// need to store an array of tree pointers basically
@@ -110,6 +112,8 @@ Document :: struct {
 	UndoEntry :: struct {
 		tree: *Node;
 		offset: s64;
+		longestLine: s32;
+		longestLineLength: s32;
 		saved: bool;
 	}
 	
@@ -385,7 +389,7 @@ document_load_from_disk :: (doc: *Document) {
 		}
 	}
 	else if crCount > 0 {
-		push_notification("File has CR line endings, undefined behaviour will occur");
+		push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
 	}
 
 	lineStarts2 := *doc.buffers[1].lineStarts;
@@ -401,6 +405,8 @@ document_load_from_disk :: (doc: *Document) {
 	firstPiece.bufferIndex = 0;
 
 	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
+
+	calculate_longest_line(doc);
 
 	// initial undo node
 	array_reset(*doc.undoStack);
@@ -510,7 +516,7 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 
 	// insert text at offset in document
 
-	node, remainder, nodeStartOffset := node_at_offset(doc, doc.tree, atOffset);
+	node, remainder, nodeStartOffset, line := node_at_offset(doc, doc.tree, atOffset);
 	insertCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
 
 	// need the line/column in the buffer?, lets see for later
@@ -573,9 +579,13 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 
 	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
 
-	firstNode, firstRemainder, firstNodeOffset := node_at_offset(doc, doc.tree, atOffset);
-	lastNode, lastRemainder, lastNodeOffset := node_at_offset(doc, doc.tree, atOffset + length);
+	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
+	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
 
+	if beginLine <= doc.longestLine && endLine >= doc.longestLine {
+		calculate_longest_line(doc);
+	}
+	
 	startBufferCursor := buffer_offset_to_cursor(doc, firstNode.piece, firstRemainder);
 	endBufferCursor := buffer_offset_to_cursor(doc, lastNode.piece, lastRemainder);
 
@@ -806,6 +816,8 @@ commit_history :: (doc: *Document) {
 	array_add(*doc.undoStack);
 	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
 	doc.undoStack[doc.undoStack.count-1].offset = doc.nextUndoOffset;
+	doc.undoStack[doc.undoStack.count-1].longestLine = doc.longestLine;
+	doc.undoStack[doc.undoStack.count-1].longestLineLength = doc.longestLineLength;
 	doc.nextUndoOffset = -1;
 }
 
@@ -817,6 +829,8 @@ undo :: (doc: *Document) -> s64 {
 	entry := pop(*doc.undoStack);
 	array_add(*doc.redoStack, entry);
 	doc.tree = doc.undoStack[doc.undoStack.count-1].tree;
+	doc.longestLine = doc.undoStack[doc.undoStack.count-1].longestLine;
+	doc.longestLineLength = doc.undoStack[doc.undoStack.count-1].longestLineLength;
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {
@@ -833,6 +847,8 @@ redo :: (doc: *Document) -> s64 {
 	}
 	entry := pop(*doc.redoStack);
 	doc.tree = entry.tree;
+	doc.longestLine = entry.longestLine;
+	doc.longestLineLength = entry.longestLineLength;
 	array_add(*doc.undoStack, entry);
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
@@ -1683,6 +1699,24 @@ fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
 	newRight := new_node(left.allocator, .BLACK, right.data, fused, right.right);
 	newNode := new_node(left.allocator, .RED, left.data, left.left, newRight);
 	return balance_left(newNode);
+}
+
+// Line Length array management
+
+calculate_longest_line :: (doc: *Document) {
+	// TODO: this could be slow, something to chuck in an async job
+	// and set the longest length back when finished
+
+	doc.longestLine = 0;
+	doc.longestLineLength = 0;
+
+	lineIterator := make_line_iterator(doc);
+	for lineIterator {
+		if it.text.count > doc.longestLineLength {
+			doc.longestLine = xx it_index;
+			doc.longestLineLength = xx it.text.count;
+		}
+	}
 }
 
 // debug functions

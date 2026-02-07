@@ -343,7 +343,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					metrics := get_font_metrics(box.font, xx box.fontSize);
 					box.viewOffsetTarget.y += (it.wheel_delta/it.typical_wheel_delta)*metrics.lineSpacing*3;
 					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
-					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, box.viewBounds.x, 0);
+					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
 					remove it;
 				}
 		}
@@ -673,11 +673,11 @@ spacer :: (axis: UIAxis, size: UISize) {
 	}
 }
 
-scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, visibleRange: float, axis: UIAxis) -> Vector2 {
-	// if this is a vertical scroll bar, then
-	
+scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange:float, visibleRange: float, boxToScroll: UIKey) {
 	scrollAxis := axis;
 	otherAxis := axis ^ 1;
+
+	if abs(scrollableRange) < abs(visibleRange) return;
 	
 	layout := UILayoutData.{ padding=padding_all(em(0.3))};
 	layout.size[axis^1] = fixed(em(1.2));
@@ -695,8 +695,8 @@ scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, vi
 		{
 			push_parent(scrollBarOuter); defer pop_parent();
 
-			handleSizePct := max(abs(visibleRange/(scrollRegionSize-visibleRange)), 0.05);
-			spaceBeforePct := (1.0-handleSizePct) * abs(scrollOffset/scrollRegionSize);
+			handleSizePct := max(abs(visibleRange/scrollableRange), 0.05);
+			spaceBeforePct := (1.0-handleSizePct) * scrollOffsetPct;
 
 			// space before
 			layout = UILayoutData.{};
@@ -708,13 +708,35 @@ scroll_bar :: (handleKey: UIKey, scrollOffset: float, scrollRegionSize:float, vi
 			layout = UILayoutData.{};
 			layout.size[axis^1] = grow();
 			layout.size[axis] = percent(handleSizePct);
-			scrollHandle := box(handleKey, .{
+			scrollHandle := box(key, .{
 				flags=.DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS,
 				layout=layout,
 				palette=.{background=style.backgroundLighter},
 				cornerRadius=corner_rad_all(em(0.3))
 			});
-			return signal_from_box(scrollHandle).dragDelta;
+
+			// dragging handling
+			if boxToScroll != ui_key_nil {
+				success, box:= find_box(boxToScroll);
+				if success {
+					drag := signal_from_box(scrollHandle).dragDelta;
+					scaleRatio := 1.0;
+					if box.rect.size.component[axis] != 0 {
+						scaleRatio = box.viewBounds.component[axis]/((1.0-handleSizePct)*box.rect.size.component[axis]);
+					}
+					box.viewOffset.component[axis] += drag.component[axis] * scaleRatio;
+					box.viewOffsetTarget.component[axis] += drag.component[axis] * scaleRatio;
+
+					if axis == .X {
+						box.viewOffset.x = clamp(box.viewOffset.x, 0, box.viewBounds.x);
+						box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
+					}
+					else {
+						box.viewOffset.y = clamp(box.viewOffset.y, box.viewBounds.y, 0);
+						box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
+					}
+				}
+			}
 		}
 	}
 }
@@ -770,21 +792,12 @@ scroll_list_end :: (scrollBarKey: UIKey) {
 
 	// scroll bar if there are too many elements to display
 	if container.viewBounds.y != 0.0 {
-		maxContainerHeightInner := container.layout.height.max - em(0.4)*2;
-		dragDelta := scroll_bar(scrollBarKey, container.viewOffset.y, container.viewBounds.y, maxContainerHeightInner, .Y);
-
-		// note: this mirrors the calculation of the handleSizePct
-		dragRange := (1.0 - max(abs(maxContainerHeightInner/(container.viewBounds.y-maxContainerHeightInner)), 0.05))*maxContainerHeightInner;
-		scaleRatio := ifx dragRange != 0.0 then abs(container.viewBounds.y)/dragRange else 1.0;
-		container.viewOffset -= dragDelta * scaleRatio;
-		container.viewOffsetTarget -= dragDelta * scaleRatio;
-
-		// must redo the clamping here incase of a drag
-		// @cleanup, bit messy really, could do with a tidy
-		container.viewOffset.y = clamp(container.viewOffset.y, container.viewBounds.y, 0);
-		container.viewOffset.x = clamp(container.viewOffset.x, container.viewBounds.x, 0);
-		container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
-		container.viewOffsetTarget.x = clamp(container.viewOffsetTarget.x, container.viewBounds.x, 0);
+		scrollData:= scroll_bar(scrollBarKey,
+								.Y,
+								container.viewOffset.y/container.viewBounds.y,
+								container.viewBounds.y,
+								container.layout.height.max - em(0.4)*2,
+								container.key);
 	}
 
 	pop_parent(); // outer container (inc scroll bar)

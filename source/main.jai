@@ -599,6 +599,10 @@ build_ui_panel :: (panel: *Panel) {
 	});
 	{
 		push_parent(codeContainerOuter); defer pop_parent();
+
+		
+		longestLinePixelWidth:= 0.0;
+
 		codeContainerInner := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND,
 			layout=.{childLayoutAxis = .X, width=grow(), height=grow()},
@@ -617,20 +621,17 @@ build_ui_panel :: (panel: *Panel) {
 			numDocumentLines := get_number_of_lines(panel.document);
 			metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
 			codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
-			// width of the longest line??
-			// we can work it out during rendering almost for free
-			// but I would prefer not to have a frame when we don't know
-			// we should always have _some_ value for it
-			// doing it on render data would also mean if we're in a part of a file which doesn't have scroll requirements
-			// then it won't know the whole document needs to scroll
 
-			// I feel like this is something the document should track
-			// at least the width in glyphs of the longest line
-			// codeBox.viewBounds.z = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+			// TODO: cache this calculation, it won't change much and it can be slow
+			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
+
+			// We only want to scroll horizontally such that the longest line is still mostly visible
+			// i.e. not the whole length of the line, just how much is going off screen
+			gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp).width;
+			codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
 			signal := signal_from_box(codeBox);
 
 			// mouse cursor control
-
 			set_cursor_to_mouse_location :: (doc: *Document, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
 				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
 		
@@ -680,34 +681,21 @@ build_ui_panel :: (panel: *Panel) {
 				}
 			}
 
-			// @todo: find a way to not rely on this codebox rect
-			dragDelta := scroll_bar(ui_key("codeScrollVertical"), codeBox.viewOffset.y, codeBox.viewBounds.y, codeBox.rect.h, .Y);
-
-			dragRange := (1.0 - max(abs(codeBox.rect.h/(codeBox.viewBounds.y-codeBox.rect.h)), 0.05))*codeBox.rect.h;
-			scaleRatio := ifx dragRange != 0.0 then abs(codeBox.viewBounds.y)/dragRange else 1.0;
-			codeBox.viewOffset -= dragDelta * scaleRatio;
-			codeBox.viewOffset.y = clamp(codeBox.viewOffset.y, codeBox.viewBounds.y, 0);
-			codeBox.viewOffset.x = clamp(codeBox.viewOffset.x, codeBox.viewBounds.x, 0);
-
-			codeBox.viewOffsetTarget -= dragDelta * scaleRatio;
-			codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
-			codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
+			scrollData:= scroll_bar(ui_key("codeScrollVertical"),
+									.Y,
+									codeBox.viewOffset.y/codeBox.viewBounds.y,
+									cast(float, numDocumentLines),
+									codeBox.rect.h/metrics.lineSpacing,
+									ui_key("code"));
 		}
-		// draw horizontal scroll bar
 
 		success, codeBox:= find_box(ui_key("code"));
-		dragDelta := scroll_bar(ui_key("codeScrollHorizontal"), codeBox.viewOffset.x, codeBox.viewBounds.x, codeBox.rect.w, .X);
-
-		dragRange := (1.0 - max(abs(codeBox.rect.h/(codeBox.viewBounds.x-codeBox.rect.w)), 0.05))*codeBox.rect.w;
-		scaleRatio := ifx dragRange != 0.0 then abs(codeBox.viewBounds.x)/dragRange else 1.0;
-		codeBox.viewOffset -= dragDelta * scaleRatio;
-		codeBox.viewOffset.y = clamp(codeBox.viewOffset.y, codeBox.viewBounds.y, 0);
-		codeBox.viewOffset.x = clamp(codeBox.viewOffset.x, codeBox.viewBounds.x, 0);
-
-		codeBox.viewOffsetTarget -= dragDelta * scaleRatio;
-		codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
-		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
-		
+		scrollData:= scroll_bar(ui_key("codeScrollHorizontal"),
+								.X,
+								codeBox.viewOffset.x/codeBox.viewBounds.x,
+								longestLinePixelWidth,
+								codeBox.rect.w,
+								ui_key("code"));
 	}
 
 	// Draw the search dialog
@@ -1203,7 +1191,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			}
 		}
 
-		textAreaX := box.rect.x + gutterWidth;
+		textAreaX := box.rect.x + gutterWidth - box.viewOffset.x;
 		textAreaY := box.rect.y + startOffset + box.viewOffset.y;
 
 		linesOnScreen: [..]Document.LineContent;
