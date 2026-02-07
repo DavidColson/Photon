@@ -627,7 +627,11 @@ build_ui_panel :: (panel: *Panel) {
 
 			// We only want to scroll horizontally such that the longest line is still mostly visible
 			// i.e. not the whole length of the line, just how much is going off screen
-			gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp).width;
+			gutterWidth := 0;
+			if lineNumbers {
+				maxLinesRun := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp);
+				gutterWidth = xx maxLinesRun.width;
+			}
 			codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
 			signal := signal_from_box(codeBox);
 
@@ -1177,18 +1181,10 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 		startOffset := (startVisibleLine+2) * metrics.lineSpacing - metrics.lineSpacing;
 
-		// Draw line numbers
 		gutterWidth := 0;
 		if lineNumbers {
-			y :float = box.rect.y + startOffset + box.viewOffset.y;
 			maxLinesRun := generate_text_run(tprint(" % ", documentLines), xx box.fontSize, box.font,,temp);
 			gutterWidth = xx maxLinesRun.width;
-
-			for startVisibleLine..endVisibleLine {
-				lineNoRun := generate_text_run(tprint("% ", it+1), xx box.fontSize, box.font,,temp);
-				draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, style.textSecondary);
-				y += metrics.lineSpacing;
-			}
 		}
 
 		textAreaX := box.rect.x + gutterWidth - box.viewOffset.x;
@@ -1354,6 +1350,28 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 			if cursorChar != 0 {
 				draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+			}
+		}
+		
+		// Draw gutter
+		if lineNumbers {
+			submit_instance(.{
+				dstRect = .{
+					cast(float)(box.rect.x),
+					cast(float)(box.rect.y),
+					cast(float)gutterWidth,
+					cast(float)box.rect.h
+				},
+				color = style.backgroundMid,
+				shader = .RECTS
+			});
+
+			// Draw line numbers
+			y :float = box.rect.y + startOffset + box.viewOffset.y;
+			for startVisibleLine..endVisibleLine {
+				lineNoRun := generate_text_run(tprint("% ", it+1), xx box.fontSize, box.font,,temp);
+				draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, style.textSecondary);
+				y += metrics.lineSpacing;
 			}
 		}
 	}
