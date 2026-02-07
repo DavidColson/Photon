@@ -338,12 +338,21 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					context_menu_close();
 				}
 
-			case .MOUSE_WHEEL;
+			case .MOUSE_V_WHEEL;
                 if it.wheel_delta && box_contains_cursor {
 					metrics := get_font_metrics(box.font, xx box.fontSize);
-					box.viewOffsetTarget.y += (it.wheel_delta/it.typical_wheel_delta)*metrics.lineSpacing*3;
+					box.viewOffsetTarget.y += (Input.mouse_wheel_delta.vertical/it.typical_wheel_delta)*metrics.lineSpacing*3;
 					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
+					remove it;
+				}
+			case .MOUSE_H_WHEEL;
+                if it.wheel_delta && box_contains_cursor {
+					metrics := get_font_metrics(box.font, xx box.fontSize);
+					box.viewOffsetTarget.x += (Input.mouse_wheel_delta.horizontal/it.typical_wheel_delta)*metrics.lineSpacing*3;
+					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
+					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
+					log("bounds %", box.viewBounds.x);
 					remove it;
 				}
 		}

@@ -437,7 +437,7 @@ update_cocoa_window_events :: () {
                 mouse_delta_y += cast(int) NSEvent.deltaY(nsevent);
 
             case NSEventTypeScrollWheel;
-                // delx := NSEvent.deltaX(nsevent);
+                delx := NSEvent.deltaX(nsevent);
                 dely := NSEvent.deltaY(nsevent);
                 // delz := NSEvent.deltaZ(nsevent);
                 // print("del: %, %, %\n", delx, dely, delz);
@@ -451,13 +451,20 @@ update_cocoa_window_events :: () {
                 // tune WHEEL_DELTA at some point. -josh 6 November 2018
 
                 event: Event;
-                event.type = .MOUSE_WHEEL;
-                event.typical_wheel_delta = WHEEL_DELTA;
-                event.wheel_delta = cast(s32) (dely * 10.0);
-                array_add(*events_this_frame, event);
-
-                mouse_delta_z += event.wheel_delta;
-        }
+                if delx != 0.0 {
+                    event.type = .MOUSE_H_WHEEL;
+                    event.typical_wheel_delta = WHEEL_DELTA;
+                    event.wheel_delta = cast(s32) (dely * 10.0);
+                    array_add(*events_this_frame, event);
+                    mouse_wheel_delta.horizontal += event.wheel_delta;
+                }
+                if dely != 0.0 {
+                    event.type = .MOUSE_V_WHEEL;
+                    event.typical_wheel_delta = WHEEL_DELTA;
+                    event.wheel_delta = cast(s32) (dely * 10.0);
+                    array_add(*events_this_frame, event);
+                    mouse_wheel_delta.vertical += event.wheel_delta;
+                }        }
     }
 
     NSApplication.updateWindows(NSApp);

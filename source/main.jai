@@ -625,14 +625,21 @@ build_ui_panel :: (panel: *Panel) {
 			// TODO: cache this calculation, it won't change much and it can be slow
 			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
 
-			// We only want to scroll horizontally such that the longest line is still mostly visible
-			// i.e. not the whole length of the line, just how much is going off screen
-			gutterWidth := 0;
-			if lineNumbers {
-				maxLinesRun := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp);
-				gutterWidth = xx maxLinesRun.width;
+			if longestLinePixelWidth > codeBox.rect.w {
+				gutterWidth := 0;
+				if lineNumbers {
+					maxLinesRun := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp);
+					gutterWidth = xx maxLinesRun.width;
+				}
+
+				// We only want to scroll horizontally such that the longest line is still mostly visible
+				// i.e. not the whole length of the line, just how much is going off screen
+				codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
 			}
-			codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
+			else {
+				codeBox.viewBounds.x = 0;
+			}
+
 			signal := signal_from_box(codeBox);
 
 			// mouse cursor control
