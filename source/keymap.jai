@@ -55,24 +55,44 @@ normalModeCommands :: Command.[
 	.{ "Move one char right", .["l", "<right>"], .REPEATABLE, move_one_char_right },
 	.{ "Move one line down", .["j", "<down>"], .REPEATABLE, move_one_line_down },
 	.{ "Move one line up", .["k", "<up>"], .REPEATABLE, move_one_line_up },
+	.{ "Extend one char left", .["H"], .REPEATABLE | .EXTEND, move_one_char_left },
+	.{ "Extend one char right", .["L"], .REPEATABLE | .EXTEND, move_one_char_right },
+	.{ "Extend one line down", .["J"], .REPEATABLE | .EXTEND, move_one_line_down },
+	.{ "Extend one line up", .["K"], .REPEATABLE | .EXTEND, move_one_line_up },
 
 	.{ "Goto document start", .["gk"], 0, goto_document_start },
 	.{ "Goto document end", .["gj"], 0, goto_document_end },
 	.{ "Goto line start", .["gh"], 0, goto_line_start },
 	.{ "Goto line end", .["gl"], 0, goto_line_end },
+	.{ "Extend to document start", .["Gk"], .EXTEND, goto_document_start },
+	.{ "Extend to document end", .["Gj"], .EXTEND, goto_document_end },
+	.{ "Extend to line start", .["Gh"], .EXTEND, goto_line_start },
+	.{ "Extend to line end", .["Gl"], .EXTEND, goto_line_end },
 
 	.{ "Move to next word start", .["w"], 0, move_word_start },
 	.{ "Move to next word end", .["e"], 0, move_word_end },
 	.{ "Move to prev word start", .["b"], 0, move_prev_word_start },
-	.{ "Move to next long word start", .["W"], 0, move_long_word_start },
-	.{ "Move to next long word end", .["E"], 0, move_long_word_end },
-	.{ "Move to next sub word start", .["alt+w"], 0, move_sub_word_start },
-	.{ "Move to next sub word end", .["alt+e"], 0, move_sub_word_end },
+	.{ "Extend to next word start", .["W"], .EXTEND, move_word_start },
+	.{ "Extend to next word end", .["E"], .EXTEND, move_word_end },
+	.{ "Extend to prev word start", .["B"], .EXTEND, move_prev_word_start },
+
+	.{ "Move to next long word start", .["alt+w"], 0, move_long_word_start },
+	.{ "Move to next long word end", .["alt+e"], 0, move_long_word_end },
+	.{ "Move to next sub word start", .["ctrl+w"], 0, move_sub_word_start },
+	.{ "Move to next sub word end", .["ctrl+e"], 0, move_sub_word_end },
+	.{ "Extend to next long word start", .["alt+shift+w"], .EXTEND, move_long_word_start },
+	.{ "Extend to next long word end", .["alt+shift+e"], .EXTEND, move_long_word_end },
+	.{ "Extend to next sub word start", .["ctrl+shift+w"], .EXTEND, move_sub_word_start },
+	.{ "Extend to next sub word end", .["ctrl+shift+e"], .EXTEND, move_sub_word_end },
 
 	.{ "Jump to first occurence of {char}", .["f{char}"], 0, jump_to_char },
-	.{ "Jump to last occurence of {char}", .["F{char}"], 0, jump_to_last_char },
 	.{ "Jump to just before first occurence of {char}", .["t{char}"], 0, jump_to_before_char },
-	.{ "Jump to just before last occurence of {char}", .["T{char}"], 0, jump_to_before_last_char },
+	.{ "Jump to last occurence of {char}", .["alt+f{char}"], 0, jump_to_last_char },
+	.{ "Jump to just before last occurence of {char}", .["alt+t{char}"], 0, jump_to_before_last_char },
+	.{ "Extend to first occurence of {char}", .["F{char}"], .EXTEND, jump_to_char },
+	.{ "Extend to just before first occurence of {char}", .["T{char}"], .EXTEND, jump_to_before_char },
+	.{ "Extend to last occurence of {char}", .["alt+shift+f{char}"], .EXTEND, jump_to_last_char },
+	.{ "Extend to just before last occurence of {char}", .["alt+shift+t{char}"], .EXTEND, jump_to_before_last_char },
 
 	.{ "Expand selection to full lines", .["x"], 0, expand_selection_to_lines },
 
@@ -82,7 +102,6 @@ normalModeCommands :: Command.[
 	.{ "Half Page Down", .["ctrl+d"], 0, half_page_down },
 
 	// misc normal mode
-	.{ "Toggle Extend Selections", .["v"], 0, toggle_extend_selections },
 	.{ "Select register {char}", .["\"{char}"], 0, select_register },
 	.{ "Next search result", .["n"], 0, next_search_result },
 	.{ "Previous search result", .["N"], 0, previous_search_result },
@@ -238,14 +257,14 @@ rebuild_key_map :: ()  {
 						// if there's already a leaf entry, assert
 
 					if keys.count == 0 { // leaf node
-						assert(!table_contains(curNode.children, hashKey), "Mapping already exists");
+						assert(!table_contains(curNode.children, hashKey), "Mapping for % already exists", mapping);
 						newNode := New(KeyMapNode,,keyMap.allocator);
 						newNode.cmd = cmd;
 						newNode.nArgs = xx nArgs;
 						table_add(curNode.children, hashKey, newNode);
 					}
 					else if keys.count > 0 { // non-leaf node
-						assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence");
+						assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence (for binding %)", mapping);
 						exists, entry := table_find_new(curNode.children, hashKey);
 						if !exists { 
 							newNode := New(KeyMapNode,,keyMap.allocator);
@@ -253,7 +272,7 @@ rebuild_key_map :: ()  {
 							curNode = <<table_add(curNode.children, hashKey, newNode); 
 						}
 						else {
-							assert(entry.cmd == null, "Start of this key sequence already exists as a direct mapping");
+							assert(entry.cmd == null, "Start of this (%) key sequence already exists as a direct mapping", mapping);
 							curNode = entry;
 						}
 					}
@@ -307,11 +326,11 @@ input_handler :: (event: Input.Event) {
 		if event.ctrl_pressed {
 			append(*builder, "ctrl+");
 		}
-		if event.shift_pressed {
-			append(*builder, "shift+");
-		}
 		if event.alt_pressed {
 			append(*builder, "alt+");
+		}
+		if event.shift_pressed {
+			append(*builder, "shift+");
 		}
 
 		gotInput := true;
@@ -354,6 +373,7 @@ input_handler :: (event: Input.Event) {
 		else if event.key_pressed && event.key_code >= 33 && event.key_code <= 96 && event.modifier_flags.packed {
 			// Note we only take characters as events here if there are modifiers on, otherwise we let the text
 			// input case handle it
+			// this is to disambiguate for example ctrl+shift+s vs ctrl+S
 			lowered:u8 = to_lower(cast(u8)event.key_code); 
 			append(*builder, lowered);
 		}
@@ -370,7 +390,6 @@ input_handler :: (event: Input.Event) {
 	if keyMap.pendingKeyNode == *keyMap.root[editorMode] && is_digit(keyString[0]) {
 		digit, _, _ := string_to_int(keyString);
 		keyMap.pendingCount = keyMap.pendingCount * 10 + cast(s32) digit;
-		print("pencnt: %", keyMap.pendingCount);
 	}
 
 	nodePtr: **KeyMapNode;
@@ -394,12 +413,21 @@ input_handler :: (event: Input.Event) {
 	if nodePtr {
 		node := <<nodePtr;
 		if node.cmd && keyMap.pendingArgs.count == node.nArgs {
+			// this is where we execute the actual command, subject to various
+			// flag modifiers
+
 			if keyMap.pendingCount == 0 then keyMap.pendingCount = 1;
+			if !(node.cmd.flags & .REPEATABLE) then keyMap.pendingCount = 1; 
+
 			while keyMap.pendingCount > 0 {
-				// for anyone debugging, here's where the actual magic happens,
-				// a command gets called, after we've figured out
-				// what command we're supposed to execute
-				node.cmd.execute(*focusedPanel, keyMap.pendingArgs);
+				if node.cmd.flags & .EXTEND {
+					anchor := focusedPanel.cursor.anchor;
+					node.cmd.execute(*focusedPanel, keyMap.pendingArgs);
+					focusedPanel.cursor.anchor = anchor;
+				}
+				else {
+					node.cmd.execute(*focusedPanel, keyMap.pendingArgs);
+				}
 
 				// register selection has some special behaviour as it's intended to be paired with 
 				// one other action

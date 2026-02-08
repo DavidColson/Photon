@@ -77,7 +77,6 @@ EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
 
 // globals
 editorMode := EditorMode.NORMAL;
-extendSelections := false;
 focusedPanel : Panel;
 watcher: File_Watcher(void);
 watchedFiles: [..]string;
@@ -453,10 +452,7 @@ build_ui_panel :: (panel: *Panel) {
 
 		// mode
 		modeText := "NORMAL";
-		if extendSelections && editorMode == .NORMAL {
-			modeText = "SELECT";
-		}
-		else if editorMode == .INSERT {
+		if editorMode == .INSERT {
 			modeText = "INSERT";
 		}
 		box(ui_key(modeText), .{

@@ -25,9 +25,7 @@ move_one_char_left :: (using panel: *Panel, args: []string) {
 		}
 	}
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
@@ -52,9 +50,7 @@ move_one_char_right :: (using panel: *Panel, args: []string) {
 		}
 	}
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
@@ -87,9 +83,7 @@ move_one_line_down :: (using panel: *Panel, args: []string) {
 
 	cursor.head = newLineContent.startByteOffset + targetByteOffset;
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
@@ -117,10 +111,7 @@ move_one_line_up :: (using panel: *Panel, args: []string) {
 
 	cursor.head = newLineContent.startByteOffset + targetByteOffset;
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
-
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
@@ -149,11 +140,7 @@ move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
 
 goto_document_start :: (using panel: *Panel, args: []string) {
 	cursor.head = 0;
-
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
-
+	cursor.anchor = cursor.head;
 	// scroll the window if the cursor will now become out of view
 	panel_scroll_to_line(panel, 0);
 }
@@ -168,9 +155,7 @@ goto_document_end :: (using panel: *Panel, args: []string) {
 		cursor.head -= 1;
 	}
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 
 	// scroll the window if the cursor will now become out of view
 	pageSize := panel_get_page_size(panel);
@@ -189,18 +174,14 @@ goto_line_end :: (using panel: *Panel, args: []string) {
 		cursor.head -= 1;
 	}
 
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
 goto_line_start :: (using panel: *Panel, args: []string) { 
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	cursor.head = get_line_start(document, coordinate.line);
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
 
@@ -247,9 +228,7 @@ is_upper :: inline (char: u8) -> bool {
 }
 
 move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory, CharCategory) -> bool) {
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	iter := make_iterator(document, cursor.head);
 	for iter {
 		cursor.head = iter.offset+1;
@@ -259,7 +238,7 @@ move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 		nextCharCategory := categorize_char(next);
 		if checkPosition(it, next, prevCharCategory, nextCharCategory) {
 			if it_index == 0 {
-				if !extendSelections then cursor.anchor = cursor.head;
+				cursor.anchor = cursor.head;
 			}
 			else {
 				if nextCharCategory != .LINE_ENDING {
@@ -276,9 +255,7 @@ move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 }
 
 move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory, CharCategory) -> bool) {
-	if !extendSelections {
-		cursor.anchor = cursor.head;
-	}
+	cursor.anchor = cursor.head;
 	iter := make_reverse_iterator(document, cursor.head-1);
 	prev := get_char_at(document, cursor.head);
 	for iter {
@@ -286,8 +263,8 @@ move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 		nextCharCategory := categorize_char(it);
 		prevCharCategory := categorize_char(prev);
 		if checkPosition(prev, it, prevCharCategory, nextCharCategory) {
-			if it_index == 0  && !extendSelections {
-				if !extendSelections then cursor.anchor = cursor.head+1;
+			if it_index == 0 {
+				cursor.anchor = cursor.head+1;
 			}
 			else {
 				cursor.head += 2;
@@ -402,7 +379,7 @@ move_sub_word_end :: (using panel: *Panel, args: []string) {
 }
 
 jump_to_char :: (using panel: *Panel, args: []string) { 
-	iter := make_iterator(document, cursor.head);
+	iter := make_iterator(document, cursor.head+1);
 	for iter {
 		cursor.head = iter.offset;
 		// @todo: assumes the args are single char, this may not always be true
@@ -426,7 +403,7 @@ jump_to_last_char :: (using panel: *Panel, args: []string) {
 }
 
 jump_to_before_char :: (using panel: *Panel, args: []string) { 
-	iter := make_iterator(document, cursor.head);
+	iter := make_iterator(document, cursor.head+1);
 	for iter {
 		cursor.head = iter.offset;
 		next := (iter.firstChar+1).*;
@@ -501,7 +478,6 @@ enter_normal_mode :: (panel: *Panel, args: []string) {
 	}
 	
 	editorMode = .NORMAL;
-	extendSelections = false;
 }
 
 enter_insert_mode_start :: (using panel: *Panel, args: []string) {
@@ -527,7 +503,6 @@ enter_insert_mode_end :: (using panel: *Panel, args: []string) {
 }
 
 enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
-	extendSelections = false;
 	goto_line_start(panel, args);
 
 	// put the cursor on the first non whitespace character
@@ -547,16 +522,11 @@ enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
 }
 
 enter_insert_mode_line_end :: (using panel: *Panel, args: []string) {
-	extendSelections = false;
 	goto_line_end(panel, args);
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	panel_scroll_to_cursor(panel);
-}
-
-toggle_extend_selections :: (using panel: *Panel, args: []string) { 
-	extendSelections = !extendSelections;
 }
 
 select_register :: (using panel: *Panel, args: []string) { 
@@ -966,7 +936,6 @@ insert_mode_insert_string :: (input: string) {
 		focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 	}
 
-	extendSelections = false;
 	panel_scroll_to_cursor(*focusedPanel);
 }
 
