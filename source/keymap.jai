@@ -125,6 +125,7 @@ normalModeCommands :: Command.[
 	.{ "Normalize Line Endings To CRLF", .[], 0, normalize_line_endings_crlf },];
 
 insertModeCommands :: Command.[
+	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
 	.{ "Move one char left", .["<left>"], 0, move_one_char_left },
 	.{ "Move one char right", .["<right>"], 0, move_one_char_right },
 	.{ "Move one line down", .["<down>"], 0, move_one_line_down },
@@ -145,6 +146,12 @@ dialogModeCommands :: Command.[
 	.{ "Dialog Action Item", .["<enter>"], .HIDDEN, dialog_action_item },
 	.{ "Dialog Backward Delete", .["<backspace>"], .HIDDEN, dialog_backward_delete },
 	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
+];
+
+allCommands :: []Command.[
+	normalModeCommands,
+	insertModeCommands,
+	dialogModeCommands
 ];
 
 rebuild_key_map :: ()  {
