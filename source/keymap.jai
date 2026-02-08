@@ -94,7 +94,8 @@ normalModeCommands :: Command.[
 	.{ "Extend to last occurence of {char}", .["alt+shift+f{char}"], .EXTEND, jump_to_last_char },
 	.{ "Extend to just before last occurence of {char}", .["alt+shift+t{char}"], .EXTEND, jump_to_before_last_char },
 
-	.{ "Expand selection to full lines", .["x"], 0, expand_selection_to_lines },
+	.{ "Extend selection to full lines", .["x"], 0, extend_selection_to_lines },
+	.{ "Extend selection to lines above", .["X"], 0, extend_selection_to_lines_above },
 
 	.{ "Page Up", .["ctrl+b", "<pageup>"], 0, page_up },
 	.{ "Page Down", .["ctrl+f", "<pagedown>"], 0, page_down },

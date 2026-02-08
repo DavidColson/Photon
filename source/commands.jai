@@ -428,42 +428,53 @@ jump_to_before_last_char :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
-expand_selection_to_lines :: (using panel: *Panel, args: []string) { 
-	// I would go so far as to just implement this the kakoune way now
+extend_selection_to_lines :: (using panel: *Panel, args: []string) { 
+	// flip the cursors if required
+	if min(cursor.head, cursor.anchor) == cursor.head {
+		temp := cursor.head;
+		cursor.head = cursor.anchor;
+		cursor.anchor = temp;
+		cursor.virtualColumn = S64_MAX;
+	}
 
-	// startLine := document_cursor_get_line(*cursor.head);
-	// nextLineStart := document_get_line_start(panel.document, startLine+1);
-	// lineEndingSize := ifx panel.document.lineEndings == .CRLF then 2 else 1;
+	// check if we already have whole lines selected, in which case we must select the next one
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
+	if cursor.virtualColumn == S64_MAX && anchorCoord.col == 0 {
+		coord := get_coordinate_from_offset(document, cursor.head);
+		start,end := get_line_range(document, coord.line+1);
+		cursor.head = end;
+	}
+	else {
+		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
+		cursor.anchor, cursor.head = get_line_range(document, coord.line);
+	}
 
-	// // if we are already on the end of a line, select the next one
-	// if nextLineStart == cursor.head.documentOffset+lineEndingSize {
-	// 	for cursor.head {
-	// 		currentLine := document_cursor_get_line(*cursor.head);
-	// 		if currentLine > startLine+1 {
-	// 			document_cursor_step_one_backward(*cursor.head);
-	// 			break;
-	// 		}
-	// 	}
-	// }
-	// else {
-	// 	for cursor.head {
-	// 		currentLine := document_cursor_get_line(*cursor.head);
-	// 		if currentLine > startLine {
-	// 			document_cursor_step_one_backward(*cursor.head);
-	// 			break;
-	// 		}
-	// 	}
-	// }
+	cursor.virtualColumn = S64_MAX;
+	panel_scroll_to_cursor(panel);
+}
 
-	// // iterate anchor to start of the line
-	// for < cursor.anchor {
-	// 	if it == #char "\n" {
-	// 		document_cursor_step_one_forward(*cursor.anchor);
-	// 		break;
-	// 	}
-	// }
-	
-	// panel_scroll_to_cursor(panel);
+extend_selection_to_lines_above :: (using panel: *Panel, args: []string) { 
+	// flip the cursors if required
+	if min(cursor.head, cursor.anchor) == cursor.anchor {
+		temp := cursor.head;
+		cursor.head = cursor.anchor;
+		cursor.anchor = temp;
+		cursor.virtualColumn = 0;
+	}
+
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	if cursor.virtualColumn == 0 && headCoord.col == 0 {
+		coord := get_coordinate_from_offset(document, cursor.head);
+		start,end := get_line_range(document, coord.line-1);
+		cursor.head = start;
+	}
+	else {
+		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
+		cursor.head, cursor.anchor = get_line_range(document, coord.line);
+	}
+
+	cursor.virtualColumn = 0;
+	panel_scroll_to_cursor(panel);
 }
 
 // Normal Mode Changes
