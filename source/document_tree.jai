@@ -1212,6 +1212,7 @@ for_expansion :: (iterator: *Document.Iterator, body: Code, flags: For_Flags) #e
 }
 
 raw_bytes :: (iterator: *Document.Iterator, body: Code, flags: For_Flags) #expand {
+
 	counter := 0;
 	while outer := iterator.node != null {
 		`it: u8;
@@ -1223,20 +1224,22 @@ raw_bytes :: (iterator: *Document.Iterator, body: Code, flags: For_Flags) #expan
 			endOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], iterator.node.piece.end);
 			startPtr := iterator.doc.buffers[bufferIndex].text.data + startOffset;
 			endPtr := iterator.doc.buffers[bufferIndex].text.data + endOffset;
-			if startPtr == iterator.firstChar {
-				iterator.firstChar = endPtr-1;
-				iterator.lastChar = startPtr-1;
+			if iterator.firstChar > startPtr || iterator.offset == iterator.node.leftSubtreeLength {
+				iterator.lastChar = iterator.firstChar;
+				iterator.firstChar = startPtr-1;
 			}
 			else {
-				iterator.lastChar = startPtr-1;
+				iterator.lastChar -= 1;
+				iterator.firstChar -= 1;
 			}
 
-			while iterator.firstChar > iterator.lastChar {
+
+			while iterator.firstChar < iterator.lastChar {
 				`it_index = counter;
-				`it = iterator.firstChar.*;
+				`it = iterator.lastChar.*;
 				#insert(break=break outer) body;  // If the user says break, break from the *outer* loop!
 				counter += 1;
-				iterator.firstChar -= 1;
+				iterator.lastChar -= 1;
 				iterator.offset -= 1;
 			}
 			next_node(iterator);

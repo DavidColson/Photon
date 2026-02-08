@@ -608,9 +608,20 @@ paste_after_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
 
 	// insert into document
-	insert(document, max(cursor.head, cursor.anchor)+1, textToPaste);
-	cursor.anchor = max(cursor.head, cursor.anchor)+1;
-	cursor.head = cursor.anchor + textToPaste.count - 1;
+	insertLocation := max(cursor.head, cursor.anchor);
+	if get_char_at(document, insertLocation) == #char "\r" {
+		insertLocation += 2;
+	}
+	else {
+		insertLocation += 1;
+	}
+	
+	insert(document, insertLocation, textToPaste, true);
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
+	commit_history(document);
+
+	cursor.anchor = insertLocation;
+	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
 
 	panel_scroll_to_cursor(panel);
 }
@@ -620,9 +631,13 @@ paste_before_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
 
 	// insert into document
-	insert(document, min(cursor.head, cursor.anchor), textToPaste);
-	cursor.anchor = min(cursor.head, cursor.anchor);
-	cursor.head = cursor.anchor + textToPaste.count - 1;
+	insertLocation := max(cursor.head, cursor.anchor);
+	insert(document, insertLocation, textToPaste, true);
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
+	commit_history(document);
+
+	cursor.anchor = insertLocation;
+	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
 
 	panel_scroll_to_cursor(panel);
 }
@@ -659,9 +674,13 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
 
 	// insert into document
-	insert(document, max(cursor.head, cursor.anchor), textToPaste);
-	cursor.anchor = max(cursor.head, cursor.anchor);
-	cursor.head = cursor.anchor + textToPaste.count - 1;
+	insertLocation := max(cursor.head, cursor.anchor);
+	insert(document, insertLocation, textToPaste, true);
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, textToPaste.count}, true);
+	commit_history(document);
+
+	cursor.anchor = insertLocation;
+	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
 
 	panel_scroll_to_cursor(panel);
 }
@@ -1251,13 +1270,48 @@ visualize_undos :: (using panel: *Panel, args: []string) {
 }
 
 toggle_render_line_endings :: (panel: *Panel, args: []string) {
-	// todo
+	fontCode.drawLineEndings = !fontCode.drawLineEndings;
 }
 
-normalize_line_endings_lf :: (panel: *Panel, args: []string) {
-	// document_normalize_line_endings(panel.document, .LF);
+normalize_line_endings_common :: (document: *Document, targetEndings: Document.LineEndingMode, range: Document.Range, suppressHistory := false) -> s64 {
+	// this function needs to peak ahead, which requires it to binary query the tree for every single character checked
+	// probably can make it faster, but it's fine for now
+	// you could take the strategy of going line by line, rather than char by char
+	
+	iterator := make_iterator(document, range.start);
+	end := range.end;
+	if targetEndings == .LF {
+		for :raw_bytes iterator {
+			if it == #char "\r" && get_char_at(document, iterator.offset+1) == #char "\n" {
+				delete(document, iterator.offset, 1, true);
+				iterator.offset -= 1;
+				end -= 1;
+			}
+			if iterator.offset == end then break;
+		}
+		document.lineEndings = .LF;
+	}
+	else if targetEndings == .CRLF {
+		for :raw_bytes iterator {
+			if it != #char "\r" && get_char_at(document, iterator.offset+1) == #char "\n" {
+				// this is done in two steps to ensure \r\n do not cross node boundaries in the piece tree
+				delete(document, iterator.offset+1, 1, true);
+				insert(document, iterator.offset+1, "\r\n", true);
+				iterator.offset += 1;
+				end += 1;
+			}
+			if iterator.offset == end then break;
+		}
+		document.lineEndings = .CRLF;
+	}
+	if suppressHistory == false then commit_history(document);
+	return end - range.end;
 }
 
-normalize_line_endings_crlf :: (panel: *Panel, args: []string) {
-	// document_normalize_line_endings(panel.document, .CRLF);
+normalize_line_endings_lf :: (using panel: *Panel, args: []string) {
+	normalize_line_endings_common(document, .LF, .{0, S64_MAX});
+}
+
+normalize_line_endings_crlf :: (using panel: *Panel, args: []string) {
+	normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
 }

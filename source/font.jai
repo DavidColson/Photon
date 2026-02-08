@@ -11,7 +11,7 @@ Font :: struct {
 	face: FT_Face;
 
 	drawTabs: bool;
-	drawNewLines: bool;
+	drawLineEndings: bool;
 
 	tabSize: s32;
 
@@ -72,7 +72,7 @@ init_font_cache :: () {
 	initialNode.width = atlas.texture.width;
 }
 
-load_font :: (filename: string, drawTabs:= false, tabSize := 4, drawNewLines := false) -> *Font, bool {
+load_font :: (filename: string, drawTabs:= false, tabSize := 4, drawLineEndings := false) -> *Font, bool {
 	// we support loading fonts from windows font folders. If the path is absolute, then we'll just do that
 	path: string;
 	if !is_absolute_path(filename) {
@@ -109,7 +109,7 @@ load_font :: (filename: string, drawTabs:= false, tabSize := 4, drawNewLines := 
 	font.styleTable.allocator = fontCache.allocator;
 
 	font.drawTabs = drawTabs;
-	font.drawNewLines = drawNewLines;
+	font.drawLineEndings = drawLineEndings;
 	font.tabSize = xx tabSize;
 
 	return font, true;
@@ -323,18 +323,19 @@ get_glyph_index :: (font: *Font, utf32: u32) -> u32 {
 		if utf32 == #char "\t" then utf32 = #char " ";
 	}
 
-	if font.drawNewLines {
-		if utf32 == #char "\n" then utf32 = #char "¶";
-		if utf32 == #char "\r" then utf32 = #char "←";
+	// if utf32 == #char "\n" then utf32 = #char " ";
+	// if utf32 == #char "\r" then utf32 = #char " ";
+
+	index := FT_Get_Char_Index(font.face, utf32);
+
+	if font.drawLineEndings {
+		if utf32 == #char "\n" then index = FT_Get_Char_Index(font.face, 0x240A);
+		if utf32 == #char "\r" then index = FT_Get_Char_Index(font.face, 0x240D);
 	}
 	else {
-		if utf32 == #char "\n" then utf32 = #char " ";
-		if utf32 == #char "\r" then utf32 = #char " ";
+		if utf32 == #char "\n" then index = FT_Get_Char_Index(font.face, #char " ");
+		if utf32 == #char "\r" then index = FT_Get_Char_Index(font.face, #char " ");
 	}
-	index := FT_Get_Char_Index(font.face, utf32);
-	// if index == 0 {
-	// 	return FT_Get_Char_Index(font.face, #char "©");
-	// } 
 	return index;
 }
 
