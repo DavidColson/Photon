@@ -706,6 +706,67 @@ new_line_above :: (using panel: *Panel, args: []string) {
 	enter_insert_mode_start(panel, args);
 }
 
+// TODO: should be defined alongside the language
+commentString :: "// ";
+
+toggle_comment :: (using panel: *Panel, args: []string) {
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
+
+	startLine := min(headCoord.line, anchorCoord.line);
+	endLine := max(headCoord.line, anchorCoord.line);
+
+	// first we need to work out if we want to comment this block of lines
+	// or uncomment it
+	// so we're gonna search every line to find out
+
+	toggleComment := false;
+	for startLine..endLine {
+		line := get_line_content(document, it);
+		lineTrimmed := trim_left(line.text);
+		if !begins_with(lineTrimmed, commentString) {
+			toggleComment = true;
+			break;
+		}
+	}
+
+	// add comment strings
+	offset := 0;
+	for startLine..endLine {
+		line := get_line_content(document, it);
+		firstNonBlankChar := 0;
+		for character: line.text {
+			if !is_space(character) {
+				firstNonBlankChar = it_index;
+				break;
+			}
+		}
+
+		if toggleComment {
+			insert(document, line.startByteOffset + firstNonBlankChar, commentString, true);
+			offset = 3;
+		}
+		else {
+			delete(document, line.startByteOffset + firstNonBlankChar, commentString.count, true);
+			offset = -3;
+		}
+	}
+
+	// shift the cursors along
+	if cursor.head < cursor.anchor {
+		cursor.head += offset;
+		cursor.anchor += (endLine - startLine + 1)*offset;
+	}
+	else {
+		cursor.anchor += offset;
+		cursor.head += (endLine - startLine + 1)*offset;
+	}
+
+	commit_history(document);
+
+	panel_scroll_to_cursor(panel);
+}
+
 indent_line :: (using panel: *Panel, args: []string) {
 	headCoord := get_coordinate_from_offset(document, cursor.head);
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
