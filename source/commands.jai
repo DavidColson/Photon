@@ -443,7 +443,7 @@ jump_to_before_last_char :: (using panel: *Panel, args: []string) {
 
 extend_selection_to_lines :: (using panel: *Panel, args: []string) { 
 	// flip the cursors if required
-	if min(cursor.head, cursor.anchor) == cursor.head {
+	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.head {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
 		cursor.anchor = temp;
@@ -469,7 +469,7 @@ extend_selection_to_lines :: (using panel: *Panel, args: []string) {
 
 extend_selection_to_lines_above :: (using panel: *Panel, args: []string) { 
 	// flip the cursors if required
-	if min(cursor.head, cursor.anchor) == cursor.anchor {
+	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.anchor {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
 		cursor.anchor = temp;
@@ -707,95 +707,68 @@ new_line_above :: (using panel: *Panel, args: []string) {
 }
 
 indent_line :: (using panel: *Panel, args: []string) {
-	// originalHeadLocation := cursor.head.documentOffset;
-	// originalAnchorLocation := cursor.anchor.documentOffset;
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 
-	// headLine := document_cursor_get_line(*cursor.head);
-	// headColumn := cursor.head.documentOffset - document_get_line_start(document, headLine);
-	// anchorLine := document_cursor_get_line(*cursor.anchor);
-	// anchorColumn:= cursor.anchor.documentOffset - document_get_line_start(document, anchorLine);
+	startLine := min(headCoord.line, anchorCoord.line);
+	endLine := max(headCoord.line, anchorCoord.line);
 
-	// lineStart, lineEnd := 0;
-	// if headLine >= anchorLine {
-	// 	lineStart = anchorLine;
-	// 	lineEnd = headLine;
-	// }
-	// else {
-	// 	lineStart = headLine;
-	// 	lineEnd = anchorLine;
-	// }
+	for startLine..endLine {
+		lineStartOffset := get_line_start(document, it);
+		insert(document, lineStartOffset, "\t", true);
+	}
 
-	// addedBytes := 0;
-	// for lineStart..lineEnd {
-	// 	lineStart := document_get_line_start(document, it);
-	// 	document_cursor_jump_to_offset(*cursor.head, lineStart);
-	// 	insert_tab_character(panel, args);
-	// 	addedBytes += 1;
-	// }
+	if cursor.head < cursor.anchor {
+		cursor.head += 1;
+		cursor.anchor += endLine - startLine + 1;
+	}
+	else {
+		cursor.anchor += 1;
+		cursor.head += endLine - startLine + 1;
+	}
+	commit_history(document);
 
-	// document_cursor_jump_to_line(*cursor.head, headLine);
-	// for cursor.head {
-	// 	if it_index >= headColumn then break;
-	// }
-	// document_cursor_jump_to_line(*cursor.anchor, anchorLine);
-	// for cursor.anchor {
-	// 	if it_index >= anchorColumn then break;
-	// }
-
-	// panel_scroll_to_cursor(panel);
+	panel_scroll_to_cursor(panel);
 }
 
 unindent_line :: (using panel: *Panel, args: []string) {
-	// originalHeadLocation := cursor.head.documentOffset;
-	// originalAnchorLocation := cursor.anchor.documentOffset;
 
-	// headLine := document_cursor_get_line(*cursor.head);
-	// headColumn := cursor.head.documentOffset - document_get_line_start(document, headLine);
-	// anchorLine := document_cursor_get_line(*cursor.anchor);
-	// anchorColumn:= cursor.anchor.documentOffset - document_get_line_start(document, anchorLine);
+	// delete the start char for every line, assuming it is a tab of course
 
-	// lineStart, lineEnd := 0;
-	// if headLine >= anchorLine {
-	// 	lineStart = anchorLine;
-	// 	lineEnd = headLine;
-	// }
-	// else {
-	// 	lineStart = headLine;
-	// 	lineEnd = anchorLine;
-	// }
 
-	// for lineStart..lineEnd {
-	// 	lineStart := document_get_line_start(document, it);
-	// 	document_cursor_jump_to_offset(*cursor.head, lineStart);
-	// 	if document_cursor_get_char(*cursor.head) == #char "\t"
-	// 	{
-	// 		stepCursor := cursor.head;
-	// 		document_cursor_step_one_forward(*stepCursor);
-	// 		cursor.head = document_delete_text(document, cursor.head, stepCursor);
-	// 		cursor.anchor = cursor.head;
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 
-	// 		if it == headLine then headColumn -= 1;
-	// 		if it == anchorLine then anchorColumn -= 1;
-	// 	}
-	// }
+	startLine := min(headCoord.line, anchorCoord.line);
+	endLine := max(headCoord.line, anchorCoord.line);
 
-	// headColumn = max(headColumn, 1);
-	// anchorColumn = max(anchorColumn, 1);
+	bytesDeleted := 0;
+	for startLine..endLine {
+		lineStartOffset := get_line_start(document, it);
+		if get_char_at(document, lineStartOffset) == #char "\t" {
+			delete(document, lineStartOffset, 1, true);
 
-	// document_cursor_jump_to_line(*cursor.head, headLine);
-	// if headColumn > 1 {
-	// 	for cursor.head {
-	// 		if it_index >= headColumn-1 then break;
-	// 	}
-	// }
-	// document_cursor_jump_to_line(*cursor.anchor, anchorLine);
-	// if anchorColumn > 1 {
-	// 	for cursor.anchor {
-	// 		if it_index >= anchorColumn-1 then break;
-	// 	}
-	// }
+			if it == headCoord.line {
+				cursor.head -= 1;
+			}
+			else if it == anchorCoord.line {
+				cursor.anchor -= 1;
+			}
+			else {
+				bytesDeleted += 1;
+			}
+		}
+	}
 
-	// panel_scroll_to_cursor(panel);
+	if cursor.head < cursor.anchor {
+		cursor.anchor -= bytesDeleted + 1;
+	}
+	else {
+		cursor.head -= bytesDeleted + 1;
+	}
+	commit_history(document);
+
+	panel_scroll_to_cursor(panel);
 }
 
 undo :: (using panel: *Panel, args: []string) {
