@@ -119,6 +119,7 @@ normalModeCommands :: Command.[
 	.{ "Paste after selection", .["p"], 0, paste_after_selection },
 	.{ "Paste before selection", .["P"], 0, paste_before_selection },
 	.{ "Replace selection with {char}", .["r{char}"], 0, replace_selection },
+	.{ "Replace selection with yanked", .["R"], 0, replace_selection_with_yanked },
 	.{ "New line below selection", .["o"], 0, new_line_below },
 	.{ "New line above selection", .["O"], 0, new_line_above },
 	.{ "Indent line", .[">"], 0, indent_line },

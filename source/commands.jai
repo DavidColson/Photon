@@ -636,6 +636,23 @@ replace_selection :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
+replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
+	head := cursor.head;
+	anchor := cursor.anchor;
+	rangeLength := abs(cursor.head - cursor.anchor);
+
+	delete_selection(panel, args);
+
+	textToPaste := read_register(registers.selectedRegister);
+
+	// insert into document
+	insert(document, max(cursor.head, cursor.anchor), textToPaste);
+	cursor.anchor = max(cursor.head, cursor.anchor);
+	cursor.head = cursor.anchor + textToPaste.count - 1;
+
+	panel_scroll_to_cursor(panel);
+}
+
 new_line_below :: (using panel: *Panel, args: []string) {
 	goto_line_end(panel, args);
 	insert_mode_line_break(panel, args);
