@@ -477,6 +477,12 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
+select_whole_document :: (using panel: *Panel, args: []string) {
+	cursor.anchor = 0;
+	cursor.head = get_size(document)-1;
+	panel_scroll_to_cursor(panel);
+}
+
 // Normal Mode Changes
 // ------------------------------
 

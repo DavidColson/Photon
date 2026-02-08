@@ -97,6 +97,8 @@ normalModeCommands :: Command.[
 	.{ "Extend selection to full lines", .["x"], .REPEATABLE, extend_selection_to_lines },
 	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
 
+	.{ "Select whole document", .["%"], 0, select_whole_document },
+
 	.{ "Page Up", .["ctrl+b", "<pageup>"], 0, page_up },
 	.{ "Page Down", .["ctrl+f", "<pagedown>"], 0, page_down },
 	.{ "Half Page Up", .["ctrl+u"], 0, half_page_up },
