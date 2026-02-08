@@ -441,6 +441,7 @@ extend_selection_to_lines :: (using panel: *Panel, args: []string) {
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 	if cursor.virtualColumn == S64_MAX && anchorCoord.col == 0 {
 		coord := get_coordinate_from_offset(document, cursor.head);
+		if coord.line == get_number_of_lines(document) return;
 		start,end := get_line_range(document, coord.line+1);
 		cursor.head = end;
 	}
@@ -465,6 +466,7 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 	headCoord := get_coordinate_from_offset(document, cursor.head);
 	if cursor.virtualColumn == 0 && headCoord.col == 0 {
 		coord := get_coordinate_from_offset(document, cursor.head);
+		if coord.line == 0 return;
 		start,end := get_line_range(document, coord.line-1);
 		cursor.head = start;
 	}
