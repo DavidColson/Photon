@@ -7,10 +7,8 @@ move_one_char_left :: (using panel: *Panel, args: []string) {
 
 	lineStart, lineEnd := get_line_range(panel.document, cursorCoordinate.line);
 
-	panel.cursor.head -= 1;
-	panel.cursor.head = clamp(panel.cursor.head, lineStart, lineEnd);
-	
-	character := get_char_at(document, cursor.head);
+	cursor.head -= 1;
+	cursor.head = clamp(cursor.head, lineStart, lineEnd);
 	
 	// recalculate virtual column
 	newLineContent := get_line_content(panel.document, cursorCoordinate.line);
@@ -173,8 +171,22 @@ goto_line_end :: (using panel: *Panel, args: []string) {
 	if get_char_at(document, cursor.head-1) == #char "\r" {
 		cursor.head -= 1;
 	}
-
 	cursor.anchor = cursor.head;
+
+	// recalculate virtual column
+	newCoordinate := get_coordinate_from_offset(document, cursor.head);
+	newLineContent := get_line_content(panel.document, newCoordinate.line);
+	cursor.virtualColumn = 0;
+	for newLineContent.text {
+		if it_index >= newCoordinate.col+1 then break;
+		if it == #char "\t" {
+			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
+		}
+		else {
+			cursor.virtualColumn += 1;
+		}
+	}
+
 	panel_scroll_to_cursor(panel);
 }
 
@@ -182,6 +194,7 @@ goto_line_start :: (using panel: *Panel, args: []string) {
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	cursor.head = get_line_start(document, coordinate.line);
 	cursor.anchor = cursor.head;
+	cursor.virtualColumn = 0;
 	panel_scroll_to_cursor(panel);
 }
 

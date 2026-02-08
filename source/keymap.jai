@@ -66,8 +66,8 @@ normalModeCommands :: Command.[
 	.{ "Goto line end", .["gl"], 0, goto_line_end },
 	.{ "Extend to document start", .["Gk"], .EXTEND, goto_document_start },
 	.{ "Extend to document end", .["Gj"], .EXTEND, goto_document_end },
-	.{ "Extend to line start", .["Gh"], .EXTEND, goto_line_start },
-	.{ "Extend to line end", .["Gl"], .EXTEND, goto_line_end },
+	.{ "Extend to line start", .["Gh", "alt+h"], .EXTEND, goto_line_start },
+	.{ "Extend to line end", .["Gl", "alt+l"], .EXTEND, goto_line_end },
 
 	.{ "Move to next word start", .["w"], .REPEATABLE, move_word_start },
 	.{ "Move to next word end", .["e"], .REPEATABLE, move_word_end },
