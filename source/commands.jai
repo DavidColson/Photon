@@ -498,6 +498,11 @@ select_whole_document :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
+collapse_selection :: (using panel: *Panel, args: []string) {
+	cursor.anchor = cursor.head;
+	panel_scroll_to_cursor(panel);
+}
+
 // Normal Mode Changes
 // ------------------------------
 
