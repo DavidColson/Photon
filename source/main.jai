@@ -175,16 +175,6 @@ main :: () {
 	rebuild_key_map();
 	init_async(*asyncWorker);
 
-	long_work :: (data: *void) {
-		log("Starting long work");
-		sleep_milliseconds(10*1000);
-	}
-
-	long_work_done :: (data: *void) {
-		log("long work done");
-	}
-
-	push_task(*asyncWorker, null, long_work, long_work_done);
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
@@ -281,6 +271,7 @@ update :: (deltaTime: float64) {
 	array_reset_keeping_memory(*uiState.events);
 
 	// update notifications
+
 	nNotificationsToRemove := 0;
 	it := 0;
 	while it < numActiveNotifications {
@@ -509,7 +500,7 @@ build_ui_panel :: (panel: *Panel) {
 			layout=.{ width=text_content(), height=text_content() },
 		});
 
-		if asyncWorker.pendingTasks != 0 {
+		if asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33 {
 			spacer(.X, fixed(em(2.0)));
 
 			// how do we rotate this???

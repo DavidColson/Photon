@@ -104,6 +104,7 @@ Document :: struct {
 	tsTree: *TSTree;
 	longestLine: s32;
 	longestLineLength: s32;
+	isCopy: bool;
 
 	// Undo
 	// need to store an array of tree pointers basically
@@ -133,19 +134,6 @@ Document :: struct {
 	treeMemory: Flat_Pool;
 	bufferMemory: Flat_Pool;
 	otherMemory: Flat_Pool;
-
-	// What we combine tree memory and other memory as before
-	// And could they be shared with a mutex? No cause we'd be sharing by copy?
-	// could we just have a wholly different struct to share?
-	// means we have duplicate functions or something, guess you could use some polymorphism or something
-	// Not a bad idea to be honest. Means we can dictate harshly what you can and can't do with a "DocumentView"
-	// The query functions will work fine, but editing will not
-	// You could also make a WritableView which has a pointer to the actual document, and as such
-	// can have a mutex on the memory pools, then you can make your edits
-}
-
-DocumentView :: struct {
-	tree: *Document.Node;
 }
 
 open_documents: Bucket_Array(Document, 128); // might want more when we load full projects in?
@@ -160,17 +148,18 @@ tree_test :: () {
 	insert(doc, 105, " my");
 	pretty_print_tree(doc.tree);
 
-	// views
-	view := make_view(doc);
-	log("size from view before edit: %", get_size(*view));
+	// trivial copies
+	copy := document_copy(doc);
+	log("size from view before edit: %", get_size(copy));
 
 	insert(doc, 110, "test ");
 	insert(doc, 200, "again more");
 
 	pretty_print_tree(doc.tree);
 
-	// views again, but without edit
-	log("size of doc %, size of view %", get_size(doc), get_size(*view));
+	// copies again, but without edit
+	log("size of doc %, size of view %", get_size(doc), get_size(copy));
+	free(copy);
 
 	// iterator
 	
@@ -423,13 +412,40 @@ document_load_from_disk :: (doc: *Document) {
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {
-	
-	// @todo: normalize line endings?
+	// TODO: consider an arena for the async task which will last
+	// for the duration of the task then be auto freed
+	data := New(SaveTaskData);
+	data.document = document_copy(doc);
+	data.isBackup = backup;
+	data.result = .IN_PROGRESS;
+	data.desiredPath = copy_string(path);
+	push_task(*asyncWorker, data, save_task, save_task_complete);
+}
 
-	directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(path), recursive = true);
-    if !directory_make_success push_notification("Failed to make directory for file save");
+#scope_file
+SaveTaskData :: struct {
+	document: *Document;
+	result: SaveTaskResult;
+	desiredPath: string;
+	isBackup: bool;
+	SaveTaskResult :: enum {
+		IN_PROGRESS;
+		SUCCESS;
+		FAILED_TO_MAKE_DIRECTORY;
+		FAILED_TO_OPEN_FILE_FOR_WRITE;
+	}
+}
+save_task :: (data: *void) {
+	taskData := cast(*SaveTaskData, data);
+	doc := taskData.document;
 
-	fileHandle, success := file_open(path, true, false);
+	directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(taskData.desiredPath), recursive = true);
+    if !directory_make_success {
+		taskData.result = .FAILED_TO_MAKE_DIRECTORY;
+		return;
+	}
+
+	fileHandle, success := file_open(taskData.desiredPath, true, false);
 	if success {
 		iterator := make_iterator(doc, 0);
 		while iterator.node != null {
@@ -440,14 +456,36 @@ document_save :: (doc: *Document, path: string, backup := false) {
 		}
 
 		file_close(*fileHandle);
+		taskData.result = .SUCCESS;
+		return;
 	}
 	else {
-		push_notification("Failed to save file");
+		taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
+		return;
 	}
-	if !backup {
-		if doc.path != path {
+}
+save_task_complete :: (data: *void) {
+	taskData := cast(*SaveTaskData, data);
+	doc := taskData.document;
+	// TODO: cleanup with arena
+	defer free(taskData.desiredPath);
+	defer free(taskData.document);
+	defer free(taskData);
+
+	if taskData.result == .FAILED_TO_MAKE_DIRECTORY {
+		push_notification("Failed to make directory for file save");
+		return;
+	}
+
+	if taskData.result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
+		push_notification("Failed to save file (couldn't open file)");
+		return;
+	}
+
+	if !taskData.isBackup {
+		if doc.path != taskData.desiredPath {
 			free(doc.path); // this is bad for some reason?
-			doc.path = copy_string(path);
+			doc.path = copy_string(taskData.desiredPath);
 		}
 
 		modtime, size, success := file_modtime_and_size(doc.path);
@@ -464,6 +502,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 		push_notification("Backup Saved");
 	}
 }
+#scope_export
 
 document_is_unsaved :: (doc: *Document) -> bool {
 	// there is pending edits that have not been committed yet, definitely unsaved
@@ -503,6 +542,7 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 			assert(character != #char "\r");
 		}
 	}
+	assert(!doc.isCopy, "You must not edit copies!!!");
 
 	// undo updates
 	if doc.nextUndoOffset < 0 {
@@ -568,6 +608,7 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 
 delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
 	// delete length bytes in the document at offset
+	assert(!doc.isCopy, "You must not edit copies!!!");
 
 	// undo updates
 	if doc.nextUndoOffset < 0 {
@@ -665,7 +706,7 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	}
 }
 
-get_char_at :: (doc: *$T/interface DocumentView, offset: s64) -> u8 {
+get_char_at :: (doc: *Document, offset: s64) -> u8 {
 	// get the literal char at the given offset
 
 	node, remainder, _ := node_at_offset(doc, doc.tree, offset);
@@ -675,7 +716,7 @@ get_char_at :: (doc: *$T/interface DocumentView, offset: s64) -> u8 {
 	return charPtr.*;
 }
 
-get_line_start :: (doc: *$T/interface DocumentView, line: s64) -> s64 {
+get_line_start :: (doc: *Document, line: s64) -> s64 {
 	// get the document offset of a specific line (0 indexed) via binary search
 	node := doc.tree;
 	lineInSubtree := line;
@@ -710,7 +751,7 @@ get_line_start :: (doc: *$T/interface DocumentView, line: s64) -> s64 {
 	return 0;
 }
 
-get_line_range :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> s64, s64 {
+get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s64, s64 {
 	// find the start and end offsets of the given line, with or without line endings
 	lineStart := get_line_start(doc, line);
 	lineEnd := get_line_start(doc, line+1);
@@ -728,14 +769,14 @@ get_line_range :: (doc: *$T/interface DocumentView, line: s64, includeLineEnding
 	return lineStart, lineEnd;
 }
 
-get_coordinate_from_offset :: (doc: *$T/interface DocumentView, offset: s64) -> Document.Coordinate {
+get_coordinate_from_offset :: (doc: *Document, offset: s64) -> Document.Coordinate {
 	// get line, column from a given offset
 	node, remainder, nodeStart, line := node_at_offset(doc, doc.tree, offset);
 	lineStart := get_line_start(doc, line);
 	return .{ line, offset-lineStart };
 }
 
-get_offset_from_coordinate :: (doc: *$T/interface DocumentView, coord: Document.Coordinate) -> s64 {
+get_offset_from_coordinate :: (doc: *Document, coord: Document.Coordinate) -> s64 {
 	// Note, if you provide a column that is off the length of the line, it will clamp
 	// decide at some point if that's desirable
 	lineStart, lineEnd := get_line_range(doc, coord.line);
@@ -743,7 +784,7 @@ get_offset_from_coordinate :: (doc: *$T/interface DocumentView, coord: Document.
 	return lineStart + column;
 }
 
-get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> Document.LineContent {
+get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> Document.LineContent {
 	// allocates memory for returned string!!
 
 	offset := get_line_start(doc, line);
@@ -769,7 +810,7 @@ get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndi
 	return .{ builder_to_string(*builder), offset, endOffset };
 }
 
-get_content :: (doc: *$T/interface DocumentView, offset: s64, count: s64) -> string {
+get_content :: (doc: *Document, offset: s64, count: s64) -> string {
 	// allocates memory for returned string!!
 
 	iterator := make_iterator(doc, offset);
@@ -787,11 +828,11 @@ get_content :: (doc: *$T/interface DocumentView, offset: s64, count: s64) -> str
 	return builder_to_string(*builder);
 }
 
-get_number_of_lines :: (doc: *$T/interface DocumentView) -> s64 {
+get_number_of_lines :: (doc: *Document) -> s64 {
 	return lf_count(doc.tree)+1; // plus one due to fence post problem
 }
 
-get_size :: (doc: *$T/interface DocumentView) -> s64 {
+get_size :: (doc: *Document) -> s64 {
 	return length(doc.tree);
 }
 
@@ -813,6 +854,7 @@ shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.I
 
 commit_history :: (doc: *Document) {
 	// TODO: free this memory somewhere
+	assert(!doc.isCopy, "You must not edit copies!!!");
 	array_add(*doc.undoStack);
 	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
 	doc.undoStack[doc.undoStack.count-1].offset = doc.nextUndoOffset;
@@ -822,6 +864,7 @@ commit_history :: (doc: *Document) {
 }
 
 undo :: (doc: *Document) -> s64 {
+	assert(!doc.isCopy, "You must not edit copies!!!");
 	if doc.undoStack.count == 1 {
 		push_notification("Undo history empty");
 		return -1;
@@ -835,12 +878,14 @@ undo :: (doc: *Document) -> s64 {
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {
 		ts_parser_reset(doc.parser);
+		// TODO: do we need to delete the existing tree here??
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
 	return entry.offset;
 }
 
 redo :: (doc: *Document) -> s64 {
+	assert(!doc.isCopy, "You must not edit copies!!!");
 	if doc.redoStack.count == 0 {
 		push_notification("Redo history empty");
 		return -1;
@@ -854,27 +899,28 @@ redo :: (doc: *Document) -> s64 {
 	// could be more efficient here, but don't know how to tell the diff of the undo?
 	if (doc.parser) {
 		ts_parser_reset(doc.parser);
+		// TODO: do we need to delete the existing tree here??
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
 	return entry.offset;
 }
 
-// Document Views
-
-make_view :: (doc: *Document) -> DocumentView {
-	// Trivial copy
-	view: DocumentView;
-	view.tree = doc.tree;
-	return view;
+document_copy :: (doc: *Document) -> *Document {
+	assert(!doc.isCopy, "Don't make copies of copies");
+	copy := New(Document);
+	memcpy(copy, doc, size_of(Document));
+	copy.tsTree = ts_tree_copy(doc.tsTree);
+	copy.isCopy = true;
+	return copy;
 }
  
 // Tree iterators
 
-make_iterator :: (document: *Document, startOffset: s64 = 0) -> Document.Iterator {
+make_iterator :: (doc: *Document, startOffset: s64 = 0) -> Document.Iterator {
 	// starting at some non trivial offset will require doing a binary search in the tree for that offset
 	// and saving the node, as we have done with node_at
 	iter: Document.Iterator;
-	iter.doc = document;
+	iter.doc = doc;
 	iter.stack.allocator = context.allocator; // is this leaking??
 	iter.direction = .FORWARD;
 
