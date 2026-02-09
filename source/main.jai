@@ -2212,7 +2212,7 @@ Input :: #import "Input";
 #load "renderer.jai";
 #load "font.jai";
 #load "async.jai";
-#load "document_tree.jai";
+#load "document.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";

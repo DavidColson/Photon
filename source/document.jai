@@ -1,103 +1,250 @@
 
-// @todo explain what this data structure is and some context for how it works
-
+// @todo: once this replaces the old document system it will be renamed to just "Document"
 Document :: struct {
-	// all the actual text in the document goes into document memory
-	// such that it'll never have to be moved as we reserve loads of address space
-	// All the supporting data such as the piece chain and line start arrays go in
-	// pieceChainMemory
-	documentMemory: Flat_Pool;
-	pieceChainMemory: Flat_Pool;
-	documentAlloc: Allocator;
-	pieceChainAlloc : Allocator;
 
-	originalData: Buffer;
-	addedData: Buffer;
+	Piece :: struct {
+		start: BufferCursor;
+		end: BufferCursor;
+		length: s64;
+		lineFeedCount: s64;
+		bufferIndex: u8;
+	}
 
-	pieceChainHead: *PieceChainNode;
-	pieceChainTail: *PieceChainNode;
-	
-	// @todo: this should be a tree at some point
-	// @todo: undo stack items should know whether
-	// they are saved to disk, to update the unsaved status of the file
-	undoStack: [..]PieceChainSpan;
-	redoStack: [..]PieceChainSpan;
+	Buffer :: struct {
+		text: []u8;
+		lineStarts: [..]s64;
+	}
 
-	locator: Bucket_Locator;
-	size: s64;
+	BufferCursor :: struct {
+		line: s64;
+		column: s64;
+	}
+
+	NodeData :: struct {
+		piece: Piece;
+		leftSubtreeLength : s64;
+		leftSubtreeLfCount : s64;
+	}
+
+	Node :: struct {
+		allocator: Allocator;
+		color: Color;
+		using data: NodeData;
+		left: *Node;
+		right: *Node;
+		#place left;
+		child :[2]*Node = ---;
+	}
+
+	Color :: enum {
+		RED;
+		BLACK;
+	}
+
+	LineEndingMode :: enum {
+		CRLF;
+		LF;
+		MIXED_MAJORITY_LF;
+		MIXED_MAJORITY_CRLF;
+	}
+
+	LineContent :: struct {
+		text: string;
+		startByteOffset: s64;
+		endByteOffset: s64;
+	}
+
+	Coordinate :: struct {
+		line: s64;
+		col: s64;
+	}
+
+	LineIterator :: struct {
+		doc: *Document;
+		line: s64;
+		endLine: s64;
+		node: *Node;
+		lineNumInNode: s64;
+		nodeStartOffset: s64;
+		stack: [..]*Node;
+		direction: IterateDirection;
+		lineBuffer: [..]u8;
+		lineContent: LineContent;
+	}
+
+	Iterator :: struct {
+		doc: *Document;
+		offset: s64;
+		node: *Node;
+		stack: [..]*Node;
+		firstChar: *u8;
+		lastChar: *u8;
+		direction: IterateDirection;
+	}
+
+	IterateDirection :: enum {
+		REVERSE;
+		FORWARD;
+	}
+
+	Range :: struct {
+		start: s64;
+		end: s64;
+	}
+
+	tree: *Node;
+	buffers: [2]Buffer;
+	lastInsert: BufferCursor;
 	lineEndings: LineEndingMode;
 	path: string;
-	addedBufferEnd: Coordinate;
-	unsaved: bool;
 	diskLastModtime: Apollo_Time;
-	lastDeletionOffset: s64;
-	isReadOnlyCopy: bool;
-
-	// parser stuff
+	locator: Bucket_Locator;
 	language: string;
 	parser: *TSParser;
-	tree: *TSTree;
+	tsTree: *TSTree;
+	longestLine: s32;
+	longestLineLength: s32;
+
+	// Undo
+	// need to store an array of tree pointers basically
+	// which you can just replace the tree in the document with as you go back and forth in time
+
+	UndoEntry :: struct {
+		tree: *Node;
+		offset: s64;
+		longestLine: s32;
+		longestLineLength: s32;
+		saved: bool;
+	}
+	
+	undoStack: [..]UndoEntry;
+	redoStack: [..]UndoEntry;
+	nextUndoOffset: s64 = -1;
+
+	// [ ] - Make a new_undo_event function which will save the current tree to the stack
+	//		 This will be called before anyone makes an edit
+	// [ ] - Make an undo function which will push the current tree onto the redo stack,
+	//       and then replace it with a tree from the undo stack
+	// [ ] - Make a redo function which does the opposite
+	// [ ] - Inject undo events everwhere that is appropriate
+
+	// Note it will not be threadsafe to share these pools
+	// Between copies of the tree and allow any allocation
+	treeMemory: Flat_Pool;
+	bufferMemory: Flat_Pool;
+	otherMemory: Flat_Pool;
+
+	// What we combine tree memory and other memory as before
+	// And could they be shared with a mutex? No cause we'd be sharing by copy?
+	// could we just have a wholly different struct to share?
+	// means we have duplicate functions or something, guess you could use some polymorphism or something
+	// Not a bad idea to be honest. Means we can dictate harshly what you can and can't do with a "DocumentView"
+	// The query functions will work fine, but editing will not
+	// You could also make a WritableView which has a pointer to the actual document, and as such
+	// can have a mutex on the memory pools, then you can make your edits
 }
 
-DocumentCursor :: struct {
-	doc: *Document;
-	node: *PieceChainNode;
-	documentOffset: s64;
-	// these are both document relative
-	// they are the document coordinates at the start of the current node
-	nodeStartOffset: s64;
-	nodeStartLine: s64;
+DocumentView :: struct {
+	tree: *Document.Node;
 }
 
-DocumentRange :: struct {
-	start: DocumentCursor;
-	end: DocumentCursor;
+open_documents: Bucket_Array(Document, 128); // might want more when we load full projects in?
+open_document_table: Table(string, Bucket_Locator);
+
+tree_test :: () {
+	doc := document_open("build_shorter.jai");
+
+	pretty_print_tree(doc.tree);
+
+	insert(doc, 100, "hello world");
+	insert(doc, 105, " my");
+	pretty_print_tree(doc.tree);
+
+	// views
+	view := make_view(doc);
+	log("size from view before edit: %", get_size(*view));
+
+	insert(doc, 110, "test ");
+	insert(doc, 200, "again more");
+
+	pretty_print_tree(doc.tree);
+
+	// views again, but without edit
+	log("size of doc %, size of view %", get_size(doc), get_size(*view));
+
+	// iterator
+	
+	iterator := make_iterator(doc, 0);
+	for iterator {
+		print("%", string.{1, *it});
+	}
+
+	// reverse iteration
+	iterator = make_reverse_iterator(doc, 109);
+	for iterator {
+		if it_index == 10 break;
+		print("%", string.{1, *it});
+	}
+	print("\n");
+
+	// for comparison, the same region forward
+	iterator = make_iterator(doc, 100);
+	for iterator {
+		if it_index == 10 break;
+		print("%", string.{1, *it});
+	}
+	print("\n");
+
+	count := 0;
+	iterator = make_iterator(doc, 0);
+	while iterator.node != null {
+		log("Index: %, nodeLen %", count, iterator.node.piece.length);
+		next_node(*iterator);
+		count += 1;
+	}
+
+	char1 := get_char_at(doc, 101);
+	char2 := get_char_at(doc, 113);
+	char3 := get_char_at(doc, 3);
+	log("char1 %", string.{1, *char1});
+	log("char2 %", string.{1, *char2});
+	log("char3 %", string.{1, *char3});
+
+	log("num lines %", get_number_of_lines(doc));
+
+	// line starts
+	log("line start 0, %", get_line_start(doc, 0));
+	log("line start 1, %", get_line_start(doc, 1));
+	log("line start 2, %", get_line_start(doc, 2));
+	log("line start 3, %", get_line_start(doc, 3));
+
+	// line ranges
+	start, end := get_line_range(doc, 2, false);
+	log("line range for line 2 %, %", start, end);
+
+	coord := get_coordinate_from_offset(doc, 100);
+	log("from offset 100 we get (%,%)", coord.line, coord.col);
+
+	// get content
+
+	log("second line: %", get_line_content(doc, 1));
+	log("at 100, 10 chars: %", get_content(doc, 100, 10));
+
+	// deletions
+	delete(doc, 130, 19);
+
+
+	
+	
+	pretty_print_tree(doc.tree);
+
+	iterator = make_iterator(doc, 0);
+	for iterator {
+		print("%", string.{1, *it});
+	}
 }
 
-Coordinate :: struct {
-	line: s64;
-	col: s64;
-}
-
-Buffer :: struct {
-	text: []u8;
-	lineStarts: [..]s64;
-}
-
-LineEndingMode :: enum {
-	CRLF;
-	LF;
-	MIXED_MAJORITY_LF;
-	MIXED_MAJORITY_CRLF;
-}
-
-LineContent :: struct {
-	text: string;
-	startByteOffset: s64;
-	endByteOffset: s64;
-}
-
-PieceChainNode :: struct {
-	next: *PieceChainNode;
-	prev: *PieceChainNode;
-
-	added: bool;
-	start: Coordinate;
-	end: Coordinate;
-	length: s64;
-	lineFeedCount: s64;
-}
-
-PieceChainSpan :: struct {
-	first: *PieceChainNode;
-	last: *PieceChainNode;
-	boundary: bool;
-	documentOffset: s64;
-	documentSize: s64;
-	oldSize: s64;
-	newSize: s64;
-}
-
+// Document API
 
 document_open :: (path: string) -> *Document {
 	// check if this file is already open
@@ -115,10 +262,7 @@ document_open :: (path: string) -> *Document {
 	}
 
 	doc, locator := find_and_occupy_empty_slot(*open_documents);
-
-	doc.documentMemory.alignment = 1;
-	doc.documentAlloc = Allocator.{ proc = flat_pool_allocator_proc, data = *doc.documentMemory };
-	doc.pieceChainAlloc = Allocator.{ proc = flat_pool_allocator_proc, data = *doc.pieceChainMemory };
+	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
 
 	if is_absolute_path(path) {
 		doc.path = copy_string(path);
@@ -157,19 +301,13 @@ document_open :: (path: string) -> *Document {
 
 	document_load_from_disk(doc);
 
-	// add to file watcher
-	parentPath := path_strip_filename(doc.path);
-	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	add_directories(*watcher, parentPath);
-	array_add_if_unique(*watchedFiles, doc.path);
+	// @todo: add to file watcher
 
 	push_notification("Document Opened");
 	return doc;
 }
 
 document_load_from_disk :: (doc: *Document) {
-	assert(!doc.isReadOnlyCopy);
-
 	// if this fails, we have not reset any memory yet, so the existing document will persist in memory
 	f, success := file_open(doc.path);
 	if !success {
@@ -177,58 +315,53 @@ document_load_from_disk :: (doc: *Document) {
 		return;
 	}
 
-	// if the file read fails, we must leave the document in a valid state with no content, so intialize it as such
-	array_reset_keeping_memory(*doc.undoStack);
-	array_reset_keeping_memory(*doc.redoStack);
-	array_reset_keeping_memory(*doc.originalData.lineStarts);
-	array_reset_keeping_memory(*doc.addedData.lineStarts);
-	reset(*doc.documentMemory, overwrite_memory=true);
-	reset(*doc.pieceChainMemory, overwrite_memory=true);
-	doc.size = 0;
-	doc.unsaved = false;
-	doc.lastDeletionOffset = 0;
-	doc.pieceChainHead = New(PieceChainNode,, doc.pieceChainAlloc);
-	doc.pieceChainTail = New(PieceChainNode,, doc.pieceChainAlloc);
-	doc.pieceChainHead.next = doc.pieceChainTail;
-	doc.pieceChainTail.prev = doc.pieceChainHead;
+	treeMemory: Flat_Pool;
+	bufferMemory: Flat_Pool;
+	otherMemory: Flat_Pool;
+	array_reset_keeping_memory(*doc.buffers[0].lineStarts);
+	array_reset_keeping_memory(*doc.buffers[1].lineStarts);
+	reset(*doc.treeMemory, overwrite_memory=true);
+	reset(*doc.bufferMemory, overwrite_memory=true);
+	reset(*doc.otherMemory, overwrite_memory=true);
+	doc.tree = null;
+	doc.lastInsert = .{0,0};
 
 	fileSize := file_length(f);
 	if (fileSize > (256*1024*1024)) {
 		// this is a large file, so reserve space for the file plus 30% for additions
-		init(*doc.documentMemory, cast(int)(fileSize * 1.3));
-		// @todo: better heuristic for guessing how much space you need for line endings and the piece chain
-		init(*doc.pieceChainMemory, 512 * 1024 * 1024);
+		init(*doc.bufferMemory, cast(int)(fileSize * 1.3));
+		// @todo: better heuristic for guessing how much space you need for line endings and other data
+		init(*doc.otherMemory, 512 * 1024 * 1024);
 	}
 
 	// now actually read in the file data
 	file: string;
-    file, success = read_entire_file(f,,doc.documentAlloc);
+    file, success = read_entire_file(f,,buffer_allocator(doc));
 	if !success {
 		push_notification("File read failed");
-		return;
 	}
 	file_close(*f);
 
-	doc.size = file.count;
-	doc.unsaved = false;
+	doc.buffers[0].text.data = file.data;
+	doc.buffers[0].text.count = file.count;
+	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
+	doc.buffers[1].text.count = 0;
 
-	// setup original data buffer
-	doc.originalData.text.data = file.data;
-	doc.originalData.text.count = file.count;
+	// count line starts
+	lineStarts := *doc.buffers[0].lineStarts;
+	lineStarts.allocator = other_allocator(doc);
 
-	// find and count linestarts
-	doc.originalData.lineStarts.allocator = doc.pieceChainAlloc;
-	array_add(*doc.originalData.lineStarts, 0);
+	array_add(lineStarts, 0);
 	lfCount := 0;
 	crCount := 0;
 	crlfCount := 0;
 	i := 0;
-	while i < doc.originalData.text.count {
-		byte := doc.originalData.text[i];
+	while i < doc.buffers[0].text.count {
+		byte := doc.buffers[0].text[i];
 		if byte == #char "\r" {
-			if i < file.count-1 && doc.originalData.text[i+1] == #char "\n" {
+			if i < doc.buffers[0].text.count-1 && doc.buffers[0].text[i+1] == #char "\n" {
 				crlfCount += 1;
-				array_add(*doc.originalData.lineStarts, xx (i+2));
+				array_add(lineStarts, xx (i+2));
 				i += 1; // skip \n
 			}
 			else {
@@ -237,7 +370,7 @@ document_load_from_disk :: (doc: *Document) {
 		}
 		else if byte == #char "\n" {
 			lfCount += 1;
-			array_add(*doc.originalData.lineStarts, xx (i+1));
+			array_add(lineStarts, xx (i+1));
 		}
 		i += 1;
 	}
@@ -256,94 +389,54 @@ document_load_from_disk :: (doc: *Document) {
 		}
 	}
 	else if crCount > 0 {
-		push_notification("File has CR line endings, undefined behaviour will occur");
+		push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
 	}
 
-	// setup added data buffer
-	doc.addedData.text.data = file.data + file.count;
-	doc.addedData.text.count = 0;
-	doc.addedData.lineStarts.allocator = doc.pieceChainAlloc;
-	array_add(*doc.addedData.lineStarts, 0);
-	doc.addedBufferEnd = Coordinate.{0,0};
-	doc.lastDeletionOffset = -1;
+	lineStarts2 := *doc.buffers[1].lineStarts;
+	lineStarts2.allocator = other_allocator(doc);
+	array_add(lineStarts2, 0);
 
-	// setup undo stack
-	doc.undoStack.allocator = doc.pieceChainAlloc;
-	doc.redoStack.allocator = doc.pieceChainAlloc;
+	// make root rb node
+	firstPiece: Document.Piece;
+	firstPiece.length = doc.buffers[0].text.count;
+	firstPiece.lineFeedCount = doc.buffers[0].lineStarts.count-1;
+	firstPiece.start = .{0,0};
+	firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
+	firstPiece.bufferIndex = 0;
 
-	// create the main node of the piece chain
-	if doc.size > 0 {
-		node := New(PieceChainNode,, doc.pieceChainAlloc);
-		node.start = Coordinate.{0,0}; 
-		node.end = Coordinate.{
-			doc.originalData.lineStarts.count - 1,
-			doc.originalData.text.count - doc.originalData.lineStarts[doc.originalData.lineStarts.count - 1]}; 
-		node.length = doc.originalData.text.count; 
-		node.lineFeedCount = doc.originalData.lineStarts.count-1; 
-		node.added = false;
+	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
 
-		// place the main node into the linked list
-		doc.pieceChainHead.next = node;
-		node.prev = doc.pieceChainHead;
-		node.next = doc.pieceChainTail;
-		doc.pieceChainTail.prev = node;
-	}
+	calculate_longest_line(doc);
+
+	// initial undo node
+	array_reset(*doc.undoStack);
+	array_reset(*doc.redoStack);
+	doc.nextUndoOffset = 0;
+	commit_history(doc);
+	doc.undoStack[doc.undoStack.count-1].saved = true;
 
 	// parse the document, assuming we are able to
 	if doc.parser {
 		ts_parser_reset(doc.parser);
-		
-		cursor := document_create_cursor(doc);
-		doc.tree = ts_parser_parse(doc.parser, null, .{payload=*cursor, read=document_parse_read, encoding=.UTF8});
-
-		root:= ts_tree_root_node(doc.tree);
+		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
-}
-
-document_close :: (doc: *Document) {
-	assert(!doc.isReadOnlyCopy);
-	array_unordered_remove_by_value(*watchedFiles, doc.path);
-
-	table_remove(*open_document_table, doc.path);
-	locator := doc.locator;
-
-	free(doc.path);
-	fini(*doc.documentMemory);
-	fini(*doc.pieceChainMemory);
-	initializer_of(Document)(doc);
-
-	bucket_array_remove(*open_documents, locator);
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {
-	// @todo: we want saving to be read only so threads can do it??
-	assert(!doc.isReadOnlyCopy);
-
-	if doc.lineEndings == .MIXED_MAJORITY_LF {
-		document_normalize_line_endings(doc, .LF);
-	}
-	else if doc.lineEndings == .MIXED_MAJORITY_CRLF {
-		document_normalize_line_endings(doc, .CRLF);
-	}
+	
+	// @todo: normalize line endings?
 
 	directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(path), recursive = true);
     if !directory_make_success push_notification("Failed to make directory for file save");
 
 	fileHandle, success := file_open(path, true, false);
 	if success {
-		cursor := document_create_cursor(doc);
-
-		while cursor.node != doc.pieceChainTail {
-			buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-			bufferStartOffset := buffer_cursor_to_offset(buffer, cursor.node.start);
-
-			success := file_write(*fileHandle, buffer.text.data + bufferStartOffset, cursor.node.length);
-
-			// move cursor to next node
-			cursor.documentOffset += cursor.node.length;
-			cursor.nodeStartOffset += cursor.node.length;
-			cursor.nodeStartLine += cursor.node.lineFeedCount;
-			cursor.node = cursor.node.next;
+		iterator := make_iterator(doc, 0);
+		while iterator.node != null {
+			bufferIndex := iterator.node.piece.bufferIndex;
+			startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], iterator.node.piece.start);
+			success := file_write(*fileHandle, doc.buffers[bufferIndex].text.data + startOffset, iterator.node.piece.length);
+			next_node(*iterator);
 		}
 
 		file_close(*fileHandle);
@@ -362,56 +455,33 @@ document_save :: (doc: *Document, path: string, backup := false) {
 			doc.diskLastModtime = modtime;
 		}
 
-		doc.unsaved = false;
 		push_notification("Document Saved");
+
+		// mark last undo as saved
+		doc.undoStack[doc.undoStack.count-1].saved = true;
 	}
 	else {
 		push_notification("Backup Saved");
 	}
 }
 
-document_make_read_only_copy :: (original: *Document) -> *Document {
-	doc := New(Document);
-
-	// initial shallow copy
-	doc.* = original.*;
-	
-	doc.isReadOnlyCopy = true;
-	doc.pieceChainMemory = Flat_Pool.{};
-	doc.pieceChainAlloc = Allocator.{ proc = flat_pool_allocator_proc, data = *doc.pieceChainMemory };
-
-	// copy the piece chain itself
-	originalNode := original.pieceChainHead;
-	doc.pieceChainHead = New(PieceChainNode,, doc.pieceChainAlloc);
-	newNode := doc.pieceChainHead;
-	
-	while originalNode != null {
-		// copy the original node, saving our prev
-		// pointer, set in the previous iteration
-		prev := newNode.prev;
-		newNode.* = originalNode.*;
-		newNode.prev = prev;
-
-		// allocate the next node, telling it what the prev is
-		if originalNode.next == null {
-			doc.pieceChainTail = newNode;
-		}
-		else {
-			newNode.next = New(PieceChainNode,,doc.pieceChainAlloc);
-			newNode.next.prev = newNode;
-		}
-
-		// step to next node
-		originalNode = originalNode.next;
-		newNode = newNode.next;
+document_is_unsaved :: (doc: *Document) -> bool {
+	// there is pending edits that have not been committed yet, definitely unsaved
+	if doc.nextUndoOffset != -1 {
+		return true;
 	}
-	return doc;
-}
 
-document_destroy_read_only_copy :: (doc: *Document) {
-	assert(doc.isReadOnlyCopy);
-	fini(*doc.pieceChainMemory);
-	free(doc);
+	// TODO: unclean fallback for when files fail to load
+	if doc.undoStack.count == 0 {
+		return false;
+	}
+
+	// most recent edit has not been saved
+	if doc.undoStack[doc.undoStack.count-1].saved == false {
+		return true;
+	}
+
+	return false;
 }
 
 document_get_by_path :: (path: string) -> bool, *Document {
@@ -425,839 +495,935 @@ document_get_by_path :: (path: string) -> bool, *Document {
 	return false, null;
 }
 
-document_insert_text :: (doc: *Document, at: DocumentCursor, t: string) -> DocumentCursor {
-	assert(!doc.isReadOnlyCopy);
-	if t.count == 0 return at;
-
-	doc.unsaved = true;
-	// actually add the new text to a buffer, updating linestarts and what not
-	text := copy_string(t,, doc.documentAlloc);
-	currentBufferEnd := doc.addedData.text.count;
-	doc.addedData.text.count = doc.addedData.text.count + text.count;
-	for byte, i: text {
-		if byte == #char "\n" {
-			array_add(*doc.addedData.lineStarts, xx (currentBufferEnd + i + 1));
-		}
-	}
-	doc.size += text.count;
-
-	insertBuffer: = ifx at.node.added then *doc.addedData else *doc.originalData;
-	insertPos := buffer_offset_to_cursor(insertBuffer, at.node, at.documentOffset - at.nodeStartOffset);
-
-	defer document_update_ts_tree(doc, at.documentOffset, at.documentOffset, at.documentOffset+text.count);
-
-	newspan: PieceChainSpan;
-
-	array_reset_keeping_memory(*doc.redoStack);
-
-	if insertPos == at.node.end || insertPos == at.node.start {
-		// case 1: insert at boundary
-
-		// bonus case, this node is the last insert node
-		// you can just add more to the mod buffer and increase the node length
-		if at.node.added == true && insertPos == doc.addedBufferEnd {
-			endOffset := doc.addedData.text.count;
-			endLine := doc.addedData.lineStarts.count - 1;
-			endColumn := endOffset - doc.addedData.lineStarts[endLine];
-			at.node.length = at.node.length + text.count;
-			at.node.end = Coordinate.{endLine, endColumn};
-			at.node.lineFeedCount = buffer_line_start_count(at.node.start, at.node.end);
-			doc.addedBufferEnd = at.node.end;
-
-			lastundo := *doc.undoStack[doc.undoStack.count-1];
-			lastundo.newSize += text.count;
-			lastundo.documentSize += text.count;
-			return at;
-		}
-
-		newCursor: DocumentCursor;
-		oldspan := new_undo_event(doc, doc.size-text.count, at.documentOffset, 0, text.count);
-
-		if insertPos == at.node.end {
-			span_boundary(oldspan, at.node, at.node.next);
-			// place the new cursor at the end of the new node
-			newCursor.nodeStartOffset = at.nodeStartOffset + at.node.length;
-			newCursor.nodeStartLine = at.nodeStartLine + at.node.lineFeedCount;
-		}
-		else {
-			span_boundary(oldspan, at.node.prev, at.node);
-			// place the new cursor at the start of the new node
-			newCursor.nodeStartOffset = at.nodeStartOffset;
-			newCursor.nodeStartLine = at.nodeStartLine;
-		}
-		
-		// make new piece
-		endOffset := doc.addedData.text.count;
-		endLine := doc.addedData.lineStarts.count - 1;
-		endColumn := endOffset - doc.addedData.lineStarts[endLine];
-		newPiece := New(PieceChainNode,, doc.pieceChainAlloc);
-		newPiece.added = true;
-		newPiece.start = doc.addedBufferEnd;
-		newPiece.end = Coordinate.{endLine, endColumn};
-		newPiece.length = text.count;
-		newPiece.lineFeedCount = buffer_line_start_count(newPiece.start, newPiece.end);
-		span_append(*newspan, newPiece);
-
-		// actually make the edit to the linked list
-		swap_spans(oldspan, *newspan);
-
-		doc.addedBufferEnd = newPiece.end;
-
-		// we return a new cursor that is in the same document location
-		// but now points to the new node
-		newCursor.doc = at.doc;
-		newCursor.node = newPiece;
-		newCursor.documentOffset = at.documentOffset;
-		return newCursor;
-	}
-	else {
-		// case 2: splitting a node
-		oldspan := new_undo_event(doc, doc.size-text.count, at.documentOffset, 0, text.count);
-		span_append(oldspan, at.node);
-
-		// copy the old node and then trim left and right to get the new nodes
-
-		// Make a piece for the left split of the current node
-		newPieceLeft := New(PieceChainNode,, doc.pieceChainAlloc);
-		<<newPieceLeft = <<at.node;
-		node_trim_right(newPieceLeft, insertBuffer, insertPos);
-		span_append(*newspan, newPieceLeft);
-
-		// Make a new piece for the added data in the middle
-		endOffset := doc.addedData.text.count;
-		endLine := doc.addedData.lineStarts.count - 1;
-		endColumn := endOffset - doc.addedData.lineStarts[endLine];
-		newPiece := New(PieceChainNode,, doc.pieceChainAlloc);
-		newPiece.added = true;
-		newPiece.start = doc.addedBufferEnd;
-		newPiece.end = Coordinate.{endLine, endColumn};
-		newPiece.length = text.count;
-		newPiece.lineFeedCount = buffer_line_start_count(newPiece.start, newPiece.end);
-		span_append(*newspan, newPiece);
-
-		// Make a new piece for the right split of the current node
-		newPieceRight := New(PieceChainNode,, doc.pieceChainAlloc);
-		<<newPieceRight = <<at.node;
-		node_trim_left(newPieceRight, insertBuffer, insertPos);
-		span_append(*newspan, newPieceRight);
-
-		// actually edit the linked list
-		swap_spans(oldspan, *newspan);
-
-		// update last insert cursor
-		doc.addedBufferEnd = newPiece.end;
-
-		// we return a new cursor that is in the same document location
-		// but now points to the new node
-		newCursor: DocumentCursor;
-		newCursor.doc = at.doc;
-		newCursor.node = newPiece;
-		newCursor.nodeStartOffset = at.nodeStartOffset + newPieceLeft.length;
-		newCursor.nodeStartLine = at.nodeStartLine + newPieceLeft.lineFeedCount; 
-		newCursor.documentOffset = at.documentOffset;
-		return newCursor;
-	}
-}
-
-document_delete_text :: (doc: *Document, startAt: DocumentCursor, endAt: DocumentCursor) -> DocumentCursor {
-	assert(!doc.isReadOnlyCopy);
-	doc.unsaved = true;
-	startBuffer: = ifx startAt.node.added then *doc.addedData else *doc.originalData;
-	endBuffer: = ifx endAt.node.added then *doc.addedData else *doc.originalData;
-
-	start := buffer_offset_to_cursor(startBuffer, startAt.node, startAt.documentOffset - startAt.nodeStartOffset);
-	end := buffer_offset_to_cursor(endBuffer, endAt.node, endAt.documentOffset - endAt.nodeStartOffset);
-	count := endAt.documentOffset - startAt.documentOffset;
-	if count == 0 return startAt;
-
-	doc.size -= count;
-
-	defer document_update_ts_tree(doc, startAt.documentOffset, endAt.documentOffset, startAt.documentOffset);
-
-	newCursor: DocumentCursor;
-	newCursor.doc = doc;
-	newCursor.documentOffset = startAt.documentOffset;
-
-	array_reset_keeping_memory(*doc.redoStack);
-
-	toRemove := count;
-	removeOffsetInNode := startAt.documentOffset - startAt.nodeStartOffset;
-
-	// special case: The last deletion was at this location and we want to backward delete (backspace key)
-	if end == endAt.node.end && doc.lastDeletionOffset == endAt.documentOffset {
-		if count < endAt.node.length {
-			// we'll just reduce the size of the left node
-			endAt.node.length -= count;
-			endAt.node.end = buffer_offset_to_cursor(endBuffer, endAt.node, (endAt.documentOffset - endAt.nodeStartOffset) - count); 
-			endAt.node.lineFeedCount = buffer_line_start_count(endAt.node.start, endAt.node.end);
-
-			// endAt and startAt are the same in this case, so we leave you at the end of said node
-			newCursor.node = endAt.node;
-			newCursor.nodeStartOffset = endAt.nodeStartOffset;
-			newCursor.nodeStartLine = endAt.nodeStartLine;
-
-			doc.lastDeletionOffset = startAt.documentOffset;
-
-			lastundo := *doc.undoStack[doc.undoStack.count-1];
-			lastundo.oldSize += count;
- 			lastundo.documentSize -= count;
-			return newCursor;
+insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
+	#if BUILD_TYPE == BuildType.DEBUG {
+		// Check to make sure we won't split a crlf
+		if atOffset > 0 {
+			character := get_char_at(doc, atOffset-1);
+			assert(character != #char "\r");
 		}
 	}
 
-	// General case
-	newspan: PieceChainSpan;
-	newspan.boundary = true; // by default we insert nothing
-	oldspan := new_undo_event(doc, doc.size+count, startAt.documentOffset, count, 0);
-
-	node := startAt.node;
-	doc.lastDeletionOffset = startAt.documentOffset;
-
-	// Deletion starts midway through the start node
-	if removeOffsetInNode != 0 {
-		newPieceLeft := New(PieceChainNode,, doc.pieceChainAlloc);
-		<<newPieceLeft = <<node;
-		node_trim_right(newPieceLeft, startBuffer, start);
-		span_append(*newspan, newPieceLeft);
-
-		newCursor.node = newPieceLeft;
-		newCursor.nodeStartOffset = startAt.nodeStartOffset;
-		newCursor.nodeStartLine = startAt.nodeStartLine;
-
-		// is the deletion entirely contained in this node? In which case you will need to split the node
-		// by making a right side piece with the remainder of the deletion
-		if removeOffsetInNode + toRemove < startAt.node.length {
-			newPieceRight := New(PieceChainNode,, doc.pieceChainAlloc);
-			<<newPieceRight = <<node;
-			node_trim_left(newPieceRight, startBuffer, end);
-			span_append(*newspan, newPieceRight);
-		}
-
-		span_append(oldspan, node);
-		toRemove -= min(toRemove, node.length - removeOffsetInNode);
-		node = node.next;
+	// undo updates
+	if doc.nextUndoOffset < 0 {
+		doc.nextUndoOffset = atOffset;
 	}
-	else {
-		// all of the start node will be removed
-		// place the cursor at the previous node which will remain untouched
-		if startAt.node != doc.pieceChainHead {
-			newCursor.node = startAt.node.prev;
-			newCursor.nodeStartOffset = startAt.nodeStartOffset - startAt.node.prev.length;
-			newCursor.nodeStartLine = startAt.nodeStartLine - startAt.node.prev.lineFeedCount;
-		}
-		else {
-			node = node.next; // don't delete the head node
-			newCursor.node = doc.pieceChainHead;
-			newCursor.nodeStartOffset = 0;
-			newCursor.nodeStartLine = 0;
-		}
+	if suppressHistory == false {
+		defer commit_history(doc);
 	}
 
-	// remove all nodes until you have removed the required amount of bytes
-	while (toRemove > 0 && node != doc.pieceChainTail) {
-		buffer : *Buffer;
-		ifx node.added then buffer = *doc.addedData else buffer = *doc.originalData;
+	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
 
-		if (toRemove < node.length) {
-			// The deletion ends in this node, so split it
-			newPieceRight := New(PieceChainNode,, doc.pieceChainAlloc);
-			<<newPieceRight = <<node;
-			node_trim_left(newPieceRight, buffer, end);
-			span_append(*newspan, newPieceRight);
-		}
-		// if removelen is less than a node, the left side of the node will be trimmed and removed
-		toRemove -= min(toRemove, node.length);
-		span_append(oldspan, node);
-		node = node.next;
-	}
+	// insert text at offset in document
 
-	// actually perform the edit to the chain
-	swap_spans(oldspan, *newspan);
+	node, remainder, nodeStartOffset, line := node_at_offset(doc, doc.tree, atOffset);
+	insertCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
 
-	return newCursor;
-}
-
-document_undo :: (doc: *Document, cursor: DocumentCursor) -> DocumentCursor {
-	assert(!doc.isReadOnlyCopy);
-	if doc.undoStack.count == 0 {
-		push_notification("Undo history empty");
-		return cursor;
-	}
-	span := pop(*doc.undoStack);
-	cursorOffset := span.documentOffset;
-	restore_span(doc, *span);
-	array_add(*doc.redoStack, span);
+	// need the line/column in the buffer?, lets see for later
 	
-	document_update_ts_tree(doc, cursorOffset, cursorOffset+span.oldSize, cursorOffset+span.newSize);
+	// first case, inserting at the start of a node
+	if atOffset == nodeStartOffset {
+		if atOffset != 0 {
+			// special case, if we are inserting right at the end of the last insertion
+			// and the last insertion was the added data buffer, just extend the existing node
+			prevNode, _, prevNodeStartOffset := node_at_offset(doc, doc.tree, atOffset-1);
+			if prevNode.piece.bufferIndex == 1 && prevNode.piece.end == doc.lastInsert {
+				newPiece := make_piece(doc, text);
+				doc.tree = combine_pieces(tree_allocator(doc), doc.tree, prevNode, prevNodeStartOffset, newPiece);
+				return;
+			}
+		}
+		newPiece := make_piece(doc, text);
+		doc.tree = insert_node(tree_allocator(doc), doc.tree, newPiece, atOffset);
+		return;
+	}
 
-	return document_create_cursor(doc, cursorOffset); 
+	// second case, inserting at end of a node
+	if atOffset == nodeStartOffset+node.piece.length {
+		// special case, if we are inserting right at the end of the last insertion
+		// and the last insertion was the added data buffer, just extend the existing node
+		if node.piece.bufferIndex == 1 && node.piece.end == doc.lastInsert {
+			newPiece := make_piece(doc, text);
+			doc.tree = combine_pieces(tree_allocator(doc), doc.tree, node, nodeStartOffset, newPiece);
+			return;
+		}
+		newPiece := make_piece(doc, text);
+		doc.tree = insert_node(tree_allocator(doc), doc.tree, newPiece, atOffset);
+		return;
+	}
+
+	// final case, inserting in the middle of a node
+	newPieceLeft := node_trim_right(doc, node.piece, insertCursor);
+	newPieceMiddle := make_piece(doc, text);
+	newPieceRight := node_trim_left(doc, node.piece, insertCursor);
+
+	tree := remove_node(doc.tree, nodeStartOffset);
+
+	tree = insert_node(tree_allocator(doc), tree, newPieceLeft, nodeStartOffset);
+	tree = insert_node(tree_allocator(doc), tree, newPieceMiddle, nodeStartOffset + newPieceLeft.length);
+	tree = insert_node(tree_allocator(doc), tree, newPieceRight, nodeStartOffset + newPieceLeft.length + newPieceMiddle.length);
+
+	doc.tree = tree;
 }
 
-document_redo :: (doc: *Document, cursor: DocumentCursor) -> DocumentCursor  {
-	assert(!doc.isReadOnlyCopy);
+delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
+	// delete length bytes in the document at offset
+
+	// undo updates
+	if doc.nextUndoOffset < 0 {
+		doc.nextUndoOffset = atOffset;
+	}
+	if suppressHistory == false {
+		defer commit_history(doc);
+	}
+
+	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
+
+	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
+	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
+
+	if beginLine <= doc.longestLine && endLine >= doc.longestLine {
+		calculate_longest_line(doc);
+	}
+	
+	startBufferCursor := buffer_offset_to_cursor(doc, firstNode.piece, firstRemainder);
+	endBufferCursor := buffer_offset_to_cursor(doc, lastNode.piece, lastRemainder);
+
+	// fully contained in one node
+	if firstNode == lastNode {
+
+		// deletion starts at the beginning of the node
+		if firstNodeOffset == atOffset {
+
+			// it's the entire node
+			if length == firstNode.piece.length {
+				doc.tree = remove_node(doc.tree, firstNodeOffset);
+				return;
+			}
+
+			// remove only the left side of the node
+			newPiece := node_trim_left(doc, firstNode.piece, endBufferCursor);
+			doc.tree = remove_node(doc.tree, firstNodeOffset);
+			doc.tree = insert_node(tree_allocator(doc), doc.tree, newPiece, firstNodeOffset);
+			return;
+		}
+
+		if firstNodeOffset + firstNode.piece.length == atOffset + length {
+			// in this case we are removing the right part of the node
+
+			newPiece := node_trim_right(doc, firstNode.piece, startBufferCursor);
+			doc.tree = remove_node(doc.tree, firstNodeOffset);
+			doc.tree = insert_node(tree_allocator(doc), doc.tree, newPiece, firstNodeOffset);
+			return;
+		}
+
+		// lastly we have the case where the removed section is in the middle of the node
+		// so we must trim both sides
+		
+		newPieceLeft := node_trim_right(doc, firstNode.piece, startBufferCursor);
+		newPieceRight := node_trim_left(doc, firstNode.piece, endBufferCursor);
+
+		doc.tree = remove_node(doc.tree, firstNodeOffset);
+		doc.tree = insert_node(tree_allocator(doc), doc.tree, newPieceLeft, firstNodeOffset);
+		doc.tree = insert_node(tree_allocator(doc), doc.tree, newPieceRight, firstNodeOffset + newPieceLeft.length);
+		return;
+	}
+
+	// the latter half of this function deals with the case where the deletion covers multiples nodes
+
+	remove_node_range :: (doc: *Document, tree: *Document.Node, firstOffset: s64, lengthToDelete: s64) -> *Document.Node {
+		node, remainder, nodeStartOffset := node_at_offset(doc, tree, firstOffset);
+
+		// adjust length to forcefully include the whole first node (it may not)
+		firstNodeLength := node.piece.length;
+		lengthToDelete = lengthToDelete - (firstNodeLength - remainder) + firstNodeLength;
+
+		deleteAtOffset := nodeStartOffset;
+		while lengthToDelete > 0 {
+			lengthToDelete -= node.piece.length;
+			tree = remove_node(tree, deleteAtOffset);
+			node = node_at_offset(doc, tree, deleteAtOffset);
+		}
+		return tree;
+	}
+	
+	newPieceLeft := node_trim_right(doc, firstNode.piece, startBufferCursor);
+	if lastNode == null {
+		doc.tree = remove_node_range(doc, doc.tree, atOffset, length);
+	}
+	else {
+		newPieceRight := node_trim_left(doc, lastNode.piece, endBufferCursor);
+		doc.tree = remove_node_range(doc, doc.tree, atOffset, length);
+
+		if lastRemainder != 0 && newPieceRight.length != 0 {
+			doc.tree = insert_node(tree_allocator(doc), doc.tree, newPieceRight, firstNodeOffset);
+		}
+	}
+
+	if newPieceLeft.length != 0 {
+		doc.tree = insert_node(tree_allocator(doc), doc.tree, newPieceLeft, firstNodeOffset);
+	}
+}
+
+get_char_at :: (doc: *$T/interface DocumentView, offset: s64) -> u8 {
+	// get the literal char at the given offset
+
+	node, remainder, _ := node_at_offset(doc, doc.tree, offset);
+	bufferIndex := node.piece.bufferIndex;
+	startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], node.piece.start);
+	charPtr := doc.buffers[bufferIndex].text.data + startOffset + remainder;
+	return charPtr.*;
+}
+
+get_line_start :: (doc: *$T/interface DocumentView, line: s64) -> s64 {
+	// get the document offset of a specific line (0 indexed) via binary search
+	node := doc.tree;
+	lineInSubtree := line;
+	nodeStartOffset: s64;
+	lineFeedCount: s64;
+	while node != null {
+		if lineInSubtree <= node.leftSubtreeLfCount {
+			// Target must be in the left side of the tree
+			node = node.left;
+		}
+		else if lineInSubtree <= node.leftSubtreeLfCount + node.piece.lineFeedCount {
+			// Target must be within this node
+			nodeStartOffset += node.leftSubtreeLength;
+			lineFeedCount += node.leftSubtreeLfCount;
+
+			lineInThisNode := line - lineFeedCount;
+			buffer := *doc.buffers[node.piece.bufferIndex];
+			return nodeStartOffset + (buffer_cursor_to_offset(buffer, .{node.piece.start.line + lineInThisNode, 0}) - buffer_cursor_to_offset(buffer, node.piece.start));
+		}
+		else {
+			if node.right == null {
+				return length(doc.tree); // at end of document, just return the length
+			}
+			// Target must be in the right side of the tree
+			lineInSubtree -= node.leftSubtreeLfCount + node.piece.lineFeedCount;
+			nodeStartOffset += node.leftSubtreeLength + node.piece.length;
+			lineFeedCount += node.leftSubtreeLfCount + node.piece.lineFeedCount;
+			node = node.right;
+		}
+	}
+
+	return 0;
+}
+
+get_line_range :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> s64, s64 {
+	// find the start and end offsets of the given line, with or without line endings
+	lineStart := get_line_start(doc, line);
+	lineEnd := get_line_start(doc, line+1);
+
+	if !includeLineEndings {
+		rem := 0;
+		if get_char_at(doc, lineEnd-1) == #char "\n" {
+			rem += 1;
+		}
+		if get_char_at(doc, lineEnd-2) == #char "\r" {
+			rem += 1;
+		}
+		return lineStart, lineEnd - rem;
+	}
+	return lineStart, lineEnd;
+}
+
+get_coordinate_from_offset :: (doc: *$T/interface DocumentView, offset: s64) -> Document.Coordinate {
+	// get line, column from a given offset
+	node, remainder, nodeStart, line := node_at_offset(doc, doc.tree, offset);
+	lineStart := get_line_start(doc, line);
+	return .{ line, offset-lineStart };
+}
+
+get_offset_from_coordinate :: (doc: *$T/interface DocumentView, coord: Document.Coordinate) -> s64 {
+	// Note, if you provide a column that is off the length of the line, it will clamp
+	// decide at some point if that's desirable
+	lineStart, lineEnd := get_line_range(doc, coord.line);
+	column := min(lineEnd-lineStart, coord.col);
+	return lineStart + column;
+}
+
+get_line_content :: (doc: *$T/interface DocumentView, line: s64, includeLineEndings := false) -> Document.LineContent {
+	// allocates memory for returned string!!
+
+	offset := get_line_start(doc, line);
+	iterator := make_iterator(doc, offset);
+	builder: String_Builder;
+	builder.allocator = temp;
+	prev: u8;
+	endOffset := 0;
+
+	for iterator {
+		if !includeLineEndings && (it == #char "\n" || it == #char "\r") {
+			endOffset = offset + it_index;
+			break;
+		}
+		else if includeLineEndings && (prev == #char "\n") {
+			endOffset = offset + it_index;
+			break;
+		}
+		append(*builder, it);
+		prev = it;
+	}
+
+	return .{ builder_to_string(*builder), offset, endOffset };
+}
+
+get_content :: (doc: *$T/interface DocumentView, offset: s64, count: s64) -> string {
+	// allocates memory for returned string!!
+
+	iterator := make_iterator(doc, offset);
+	builder: String_Builder;
+	builder.allocator = temp;
+
+	test : [200]u8;
+	for iterator {
+		if it_index == count {
+			break;
+		}
+		test[it_index] = it;
+		append(*builder, it);
+	}
+	return builder_to_string(*builder);
+}
+
+get_number_of_lines :: (doc: *$T/interface DocumentView) -> s64 {
+	return lf_count(doc.tree)+1; // plus one due to fence post problem
+}
+
+get_size :: (doc: *$T/interface DocumentView) -> s64 {
+	return length(doc.tree);
+}
+
+shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.IterateDirection) -> s64 {
+	// if offset is sat in between \r and \n, that is \r is the char behind it, then shift
+	// in the desired direction
+	if direction == .FORWARD {
+		if get_char_at(doc, offset-1) == #char "\r" {
+			return offset + 1;
+		}
+	}
+	else {
+		if get_char_at(doc, offset-1) == #char "\r" {
+			return offset - 1;
+		}
+	}
+	return offset;
+}
+
+commit_history :: (doc: *Document) {
+	// TODO: free this memory somewhere
+	array_add(*doc.undoStack);
+	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
+	doc.undoStack[doc.undoStack.count-1].offset = doc.nextUndoOffset;
+	doc.undoStack[doc.undoStack.count-1].longestLine = doc.longestLine;
+	doc.undoStack[doc.undoStack.count-1].longestLineLength = doc.longestLineLength;
+	doc.nextUndoOffset = -1;
+}
+
+undo :: (doc: *Document) -> s64 {
+	if doc.undoStack.count == 1 {
+		push_notification("Undo history empty");
+		return -1;
+	}
+	entry := pop(*doc.undoStack);
+	array_add(*doc.redoStack, entry);
+	doc.tree = doc.undoStack[doc.undoStack.count-1].tree;
+	doc.longestLine = doc.undoStack[doc.undoStack.count-1].longestLine;
+	doc.longestLineLength = doc.undoStack[doc.undoStack.count-1].longestLineLength;
+
+	// could be more efficient here, but don't know how to tell the diff of the undo?
+	if (doc.parser) {
+		ts_parser_reset(doc.parser);
+		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
+	}
+	return entry.offset;
+}
+
+redo :: (doc: *Document) -> s64 {
 	if doc.redoStack.count == 0 {
 		push_notification("Redo history empty");
-		return cursor;
+		return -1;
 	}
-	span := pop(*doc.redoStack);
-	docSizeInitial := span.documentSize;
-	cursorOffset := span.documentOffset;
-	restore_span(doc, *span);
-	delta := docSizeInitial - span.documentSize;
-	array_add(*doc.undoStack, span);
+	entry := pop(*doc.redoStack);
+	doc.tree = entry.tree;
+	doc.longestLine = entry.longestLine;
+	doc.longestLineLength = entry.longestLineLength;
+	array_add(*doc.undoStack, entry);
 
-	document_update_ts_tree(doc, cursorOffset, cursorOffset+span.oldSize, cursorOffset+span.newSize);
-
-	return document_create_cursor(doc, cursorOffset); 
+	// could be more efficient here, but don't know how to tell the diff of the undo?
+	if (doc.parser) {
+		ts_parser_reset(doc.parser);
+		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
+	}
+	return entry.offset;
 }
 
-document_create_cursor :: (document: *Document, startOffset: s64 = 0) -> DocumentCursor {
-	newCursor : DocumentCursor;
-	newCursor.doc = document;
-	newCursor.node = document.pieceChainHead;
-	if startOffset != 0 {
-		document_cursor_jump_to_offset(*newCursor, startOffset);
-	}
-	return newCursor;
+// Document Views
+
+make_view :: (doc: *Document) -> DocumentView {
+	// Trivial copy
+	view: DocumentView;
+	view.tree = doc.tree;
+	return view;
+}
+ 
+// Tree iterators
+
+make_iterator :: (document: *Document, startOffset: s64 = 0) -> Document.Iterator {
+	// starting at some non trivial offset will require doing a binary search in the tree for that offset
+	// and saving the node, as we have done with node_at
+	iter: Document.Iterator;
+	iter.doc = document;
+	iter.stack.allocator = context.allocator; // is this leaking??
+	iter.direction = .FORWARD;
+
+	jump_to(*iter, startOffset);
+	return iter;
 }
 
-document_cursor_jump_to_offset :: (cursor: *DocumentCursor, offset: s64) {
-	if offset == cursor.documentOffset return;
+make_reverse_iterator :: (document: *Document, startOffset: s64 = 0) -> Document.Iterator {
+	// starting at some non trivial offset will require doing a binary search in the tree for that offset
+	// and saving the node, as we have done with node_at
+	iter: Document.Iterator;
+	iter.doc = document;
+	iter.stack.allocator = context.allocator; // is this leaking??
+	iter.direction = .REVERSE;
 
-	nodeStartOffset: s64 = cursor.nodeStartOffset;
-	nodeStartLine: s64 = cursor.nodeStartLine;
+	jump_to(*iter, startOffset);
+	return iter;
+}
 
-	direction := ifx offset < cursor.documentOffset then -1 else 1;
+make_line_iterator :: (document: *Document, startLine: s64 = 0, endLine: s64 = -1) -> Document.LineIterator {
+	iter: Document.LineIterator;
+	iter.doc = document;
+	iter.stack.allocator = context.allocator; // is this leaking??
+	iter.direction = .FORWARD;
+	iter.lineBuffer.allocator = context.allocator;
+	iter.endLine = ifx endLine > 0 then endLine else get_number_of_lines(document);
 
-	// now we loop through nodes in the desired direction
-	node := cursor.node;
-	while node != null {
-		// we now calculate the document end coordinates
-		nodeEndOffset: s64 = nodeStartOffset + node.length;
-		nodeEndLine: s64 = nodeStartLine + node.lineFeedCount;
+	jump_to_line(*iter, startLine);
+	return iter;
+}
 
-		if (offset > nodeStartOffset && offset <= nodeEndOffset) || (offset == 0 && node.prev == null) {
-			// the target offset is inside this node
-			cursor.node = node;
-			cursor.documentOffset = offset;
-			cursor.nodeStartOffset = nodeStartOffset;
-			cursor.nodeStartLine = nodeStartLine;
-			return;
-		}
+next_node :: (iterator: *Document.Iterator) {
+	// NOTE: This does not update iterator.offset
+	// in a for expansion it will be done at each iteration step
+	// in other situations you may require calculating it manually, or contextually
+	// With no context it'll be another binary search of the tree to find the offset
+	// you could store nodeStartOffset in the iterator, such that you can set the offset based on that
+	// by adding the current node length or subtracting the previous depending on direction
+	// no need at the moment though so I'll leave this as is
 
-		// if this is not the desired node, update the start position and move on to next node
-		if direction > 0 {
-			nodeStartOffset = nodeEndOffset;
-			nodeStartLine = nodeEndLine;
-			node = node.next;
+	node := iterator.node.child[iterator.direction];
+	while iterator.stack.count > 0 || node != null {
+		if node != null {
+			// all parents are added to the stack
+			array_add(*iterator.stack, node);
+			node = node.child[1 - iterator.direction];
 		}
 		else {
-			node = node.prev;
-			nodeStartOffset = nodeStartOffset - node.length;
-			nodeStartLine = nodeStartLine - node.lineFeedCount;
+			// the node we return is not left in the stack
+			node = iterator.stack[iterator.stack.count-1];
+			iterator.stack.count -= 1;
+			break;
 		}
 	}
-}
 
-document_cursor_jump_to_line :: (cursor: *DocumentCursor, line: s64) {
-	currentLine := document_cursor_get_line(cursor);
+	// node was found, setup the range pointers
+	if node != null {
+		bufferIndex := node.piece.bufferIndex;
+		startOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], node.piece.start);
+		endOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], node.piece.end);
 
-	// If we're already on the right line, just go back to it's start
-	if currentLine == line {
-		for < cursor {
-			if it == #char "\n" {
-				document_cursor_step_one_forward(cursor);
-				break;
-			}
-		}
+		iterator.firstChar = iterator.doc.buffers[bufferIndex].text.data + startOffset;
+		iterator.lastChar = iterator.doc.buffers[bufferIndex].text.data + endOffset;
+
+		iterator.node = node;
 		return;
 	}
 
-	nodeStartOffset: s64 = cursor.nodeStartOffset;
-	nodeStartLine: s64 = cursor.nodeStartLine;
-
-	direction := ifx line < currentLine then -1 else 1;
-
-	// now we loop through nodes in the desired direction
-	node := cursor.node;
-	while node != null {
-		// we now calculate the document end coordinates
-		nodeEndOffset: s64 = nodeStartOffset + node.length;
-		nodeEndLine: s64 = nodeStartLine + node.lineFeedCount;
-
-		if (line > nodeStartLine && line <= nodeEndLine) || (line == 0 && node.prev == null) {
-			// the target line is inside this node
-			cursor.node = node;
-			cursor.nodeStartOffset = nodeStartOffset;
-			cursor.nodeStartLine = nodeStartLine;
-
-			lineInThisNode := node.start.line + (line - nodeStartLine);
-			buffer: = ifx node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-			offsetInThisNode := buffer.lineStarts[lineInThisNode] - buffer_cursor_to_offset(buffer, node.start);
-			cursor.documentOffset = nodeStartOffset + offsetInThisNode;
-			return;
-		}
-
-		// if this is not the desired node, update the start position and move on to next node
-		if direction > 0 {
-			nodeStartOffset = nodeEndOffset;
-			nodeStartLine = nodeEndLine;
-			node = node.next;
-		}
-		else {
-			node = node.prev;
-			nodeStartOffset = nodeStartOffset - node.length;
-			nodeStartLine = nodeStartLine - node.lineFeedCount;
-		}
-	}
+	// if no node found
+	iterator.node = null;
+	iterator.firstChar = null;
+	iterator.lastChar = null;
+	array_reset(*iterator.stack);
 }
 
-document_cursor_step_one_forward :: (cursor: *DocumentCursor, skipReturns := true) -> u8 {
-	buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	offsetInNode := cursor.documentOffset - cursor.nodeStartOffset;
-
-	if offsetInNode >= cursor.node.length && (cursor.node.next == cursor.doc.pieceChainTail || cursor.node == cursor.doc.pieceChainTail) {
-		return 0; // end of document
-	}
-
-	if offsetInNode >= cursor.node.length {
-		// we're about to overflow into the next node
-		cursor.nodeStartOffset += cursor.node.length;
-		cursor.nodeStartLine += cursor.node.lineFeedCount;
-		cursor.node = cursor.node.next;
-		offsetInNode = 0;
-		buffer = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	}
-
-	// read the character in the current location before we step to the next location
-	bufferOffset := buffer_cursor_to_offset(buffer, cursor.node.start) + offsetInNode;
-	character := buffer.text[bufferOffset];
-
-	cursor.documentOffset += 1;
-
-	// CRLF handling, skip over the return, pretending it's not there
-	if skipReturns && character == #char "\r" {
-		return document_cursor_step_one_forward(cursor, false);
-	}
-	return character;
-}
-
-document_cursor_step_one_backward :: (cursor: *DocumentCursor, skipReturns := true) -> u8 {
-	cursor.documentOffset -= 1;
-	buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	offsetInNode := cursor.documentOffset - cursor.nodeStartOffset;
-	
-	if offsetInNode <= 0 && (cursor.node.prev == cursor.doc.pieceChainHead || cursor.node == cursor.doc.pieceChainHead) {
-		cursor.documentOffset = 0;
-		return 0; // start of document
-	}
-
-	if offsetInNode < 0 {
-		// we're about to underflow to the previous node
-		cursor.nodeStartOffset -= cursor.node.prev.length;
-		cursor.nodeStartLine -= cursor.node.prev.lineFeedCount;
-		cursor.node = cursor.node.prev;
-		offsetInNode = cursor.node.length-1;
-		buffer = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	}
-
-	bufferOffset := buffer_cursor_to_offset(buffer, cursor.node.start) + offsetInNode;
-	character := buffer.text[bufferOffset];
-
-	// CRLF handling, skip over the return, pretending it's not there
-	if skipReturns && character == #char "\n" {
-		newChar := document_cursor_step_one_backward(cursor, false);
-		if newChar == #char "\r" {
-			return character;
-		}
-		else {
-			// if no CRLF ending, just undo what we did
-			return document_cursor_step_one_forward(cursor, false);
-		}
-	}
-
-	return character;
-}
-
-raw_bytes :: (cursor: *DocumentCursor, body: Code, flags: For_Flags) #expand {
-	counter := 0;
-	while cursor.documentOffset <= cursor.doc.size {
-		// this tells you how far you've iterated since the start
-		`it_index := counter;
-		`it := ifx flags & .REVERSE then document_cursor_step_one_backward(cursor, false) else document_cursor_step_one_forward(cursor, false);
-		#insert body;
-		counter += 1;
-		if cursor.documentOffset == 0 then break;
-		if cursor.documentOffset == cursor.doc.size then break;
-	}
-}
-
-for_expansion :: (cursor: *DocumentCursor, body: Code, flags: For_Flags) #expand {
-	counter := 0;
-	while cursor.documentOffset <= cursor.doc.size {
-		// this tells you how far you've iterated since the start
-		`it_index := counter;
-		`it := ifx flags & .REVERSE then document_cursor_step_one_backward(cursor) else document_cursor_step_one_forward(cursor);
-		#insert body;
-		counter += 1;
-		if cursor.documentOffset == 0 then break;
-		if cursor.documentOffset == cursor.doc.size then break;
-	}
-}
-
-document_cursor_get_line :: (cursor: *DocumentCursor) -> s64 {
-	// convert the offset to a buffer coordinate, add that to the start line
-	buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	bufferCursor := buffer_offset_to_cursor(buffer, cursor.node, cursor.documentOffset - cursor.nodeStartOffset);
-	return cursor.nodeStartLine + (bufferCursor.line - cursor.node.start.line);
-}
-
-document_get_line_start :: (doc: *Document, line: s64) -> s64 {
-	// this function is used a lot for navigating lines
-	// if there was ever a function that made me want to use trees, this is the one
-	// however I will resist the temptation to overcomplicate things and allow this to exist
-	// until I have an actual performance issue on my hands
-
-	// my prediction is that this algorithm will stay fast for a very high number of nodes
-	if line == 0 return 0;
+jump_to :: (iterator: *Document.Iterator, offset: s64) {
+	iterator.offset = offset;
+	node := iterator.doc.tree;
+	remainder := 0;
 
 	nodeStartOffset := 0;
-	nodeStartLine := 0;
-	node := doc.pieceChainHead;
 	while node != null {
-		nodeEndOffset: s64 = nodeStartOffset + node.length;
-		nodeEndLine: s64 = nodeStartLine + node.lineFeedCount;
-
-		if nodeStartLine <= line && line <= nodeEndLine {
-			// this node contains the line
-			lineInThisNode := node.start.line + (line - nodeStartLine);
-			buffer: = ifx node.added then *doc.addedData else *doc.originalData;
-			offsetInThisNode := buffer.lineStarts[lineInThisNode] - buffer_cursor_to_offset(buffer, node.start);
-			return nodeStartOffset + offsetInThisNode;
+		// you only want to store nodes that you would visit in a forward/reverse iteration here
+		// rather than every parent
+		if offset < node.leftSubtreeLength {
+			// Target must be in the left side of the tree
+			if iterator.direction == .FORWARD {
+				array_add(*iterator.stack, node);
+			}
+			node = node.left;
 		}
-		nodeStartOffset += node.length;
-		nodeStartLine += node.lineFeedCount;
-		node = node.next;
-	}
-	return nodeStartOffset;
-}
-
-document_get_line_range :: (doc: *Document, line: s64, excludeLineEndings := false) -> s64, s64 {
-	lineStartNext := document_get_line_start(doc, line+1);
-
-	if excludeLineEndings {
-		tempCursor := document_create_cursor(doc, lineStartNext-2);
-		if document_cursor_get_char(*tempCursor) == #char "\r" {
-			return document_get_line_start(doc, line), lineStartNext-3;
+		else if offset <= node.leftSubtreeLength + node.piece.length {
+			// Target must be within this node
+			nodeStartOffset += node.leftSubtreeLength;
+			remainder = iterator.offset - nodeStartOffset;
+			break;
 		}
 		else {
-			return document_get_line_start(doc, line), lineStartNext-2;
+			// Target must be in the right side of the tree
+			if iterator.direction == .REVERSE {
+				array_add(*iterator.stack, node);
+			}
+			leftSideOffset := node.leftSubtreeLength + node.piece.length;
+			nodeStartOffset += leftSideOffset;
+			offset -= leftSideOffset; // Our offset now must be relative to the right side of the tree
+			node = node.right;
 		}
 	}
 
-	return document_get_line_start(doc, line), lineStartNext-1;
-}
+	// node was found
+	if node != null {
+		bufferIndex := node.piece.bufferIndex;
+		startOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], node.piece.start);
+		endOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], node.piece.end);
 
-document_get_num_lines :: (doc: *Document) -> s64 {
-	lines := 1;
-	node: *PieceChainNode = doc.pieceChainHead;
-	while node != null {
-		lines = lines + node.lineFeedCount;
-		node = node.next;
-	}
-	return lines;
-}
-
-document_cursor_get_char :: (cursor: *DocumentCursor) -> u8 {
-	offsetInNode := cursor.documentOffset - cursor.nodeStartOffset;
-
-	// we allow cursors to sit at the end of a node (for inserting), 
-	// but in that case, if we're at the end of a node, the char is actually in the next buffer
-	if offsetInNode == cursor.node.length {
-		if cursor.node.next == cursor.doc.pieceChainTail return 0; 
-		buffer: = ifx cursor.node.next.added then *cursor.doc.addedData else *cursor.doc.originalData;
-		bufferOffset := buffer_cursor_to_offset(buffer, cursor.node.next.start);
-		char := buffer.text[bufferOffset];
-		return char;
-	}
-
-	buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-	bufferOffset := buffer_cursor_to_offset(buffer, cursor.node.start) + offsetInNode;
-	char := buffer.text[bufferOffset];
-	return char;
-}
-
-document_cursor_get_coordinate :: (cursor: *DocumentCursor) -> Coordinate {
-	curLine := document_cursor_get_line(cursor);
-	curLineStart := document_get_line_start(cursor.doc, curLine);
-	curColumn := cursor.documentOffset - curLineStart;
-
-	return .{curLine, curColumn};
-}
-
-flip_cursors :: (cursorA: *DocumentCursor, cursorB: *DocumentCursor) {
-	temp := <<cursorA;
-	<<cursorA = <<cursorB;
-	<<cursorB = temp;
-}
-
-document_normalize_line_endings :: (doc: *Document, desiredEndings: LineEndingMode) {
-	assert(!doc.isReadOnlyCopy);
-	// not valid ending options
-	if desiredEndings == .MIXED_MAJORITY_LF || desiredEndings == .MIXED_MAJORITY_CRLF {
+		iterator.firstChar = iterator.doc.buffers[bufferIndex].text.data + startOffset + remainder;
+		iterator.lastChar = iterator.doc.buffers[bufferIndex].text.data + endOffset;
+		iterator.node = node;
 		return;
 	}
 
-	cursor := document_create_cursor(doc, 0);
-
-	// manually implemented for_expansion so we can edit the cursor as we iterate
-	counter := 0;
-	while cursor.documentOffset <= cursor.doc.size {
-		it := document_cursor_step_one_forward(*cursor, false);
-
-		if it == #char "\r" {
-			// lookahead one
-			cursorCopy := cursor;
-			next := document_cursor_step_one_forward(*cursorCopy, false);
-			if next == #char "\n" {
-				// crlf
-				if desiredEndings == .LF {
-					cursorStart := cursor;
-					document_cursor_step_one_backward(*cursorStart, false);
-					cursorEnd := cursor;
-					document_cursor_step_one_forward(*cursorEnd, false);
-					cursor = document_delete_text(doc, cursorStart, cursorEnd);
-					cursor = document_insert_text(doc, cursor, "\n");
-				}
-				document_cursor_step_one_forward(*cursor, false); // step over \n
-			}
-			else {
-				// cr
-				if desiredEndings == .LF {
-					cursorStart := cursor;
-					document_cursor_step_one_backward(*cursorStart, false);
-					cursor = document_delete_text(doc, cursorStart, cursor);
-					cursor = document_insert_text(doc, cursor, "\n");
-					document_cursor_step_one_forward(*cursor, false);
-				}
-				else if desiredEndings == .CRLF {
-					cursorStart := cursor;
-					document_cursor_step_one_backward(*cursorStart, false);
-					cursor = document_delete_text(doc, cursorStart, cursor);
-					cursor = document_insert_text(doc, cursor, "\r\n");
-					document_cursor_step_one_forward(*cursor, false);
-					document_cursor_step_one_forward(*cursor, false); // step over new newline
-				}
-			}
-		}
-		else if it == #char "\n" {
-			// lf
-			if desiredEndings == .CRLF {
-				cursorStart := cursor;
-				document_cursor_step_one_backward(*cursorStart, false);
-				cursor = document_delete_text(doc, cursorStart, cursor);
-				cursor = document_insert_text(doc, cursor, "\r\n");
-				document_cursor_step_one_forward(*cursor, false);
-				document_cursor_step_one_forward(*cursor, false); // step over new newline
-			}
-		}
-		counter += 1;
-		if cursor.documentOffset == cursor.doc.size then break;
-	}
-	doc.lineEndings = desiredEndings;
-	if desiredEndings == .LF {
-		push_notification("Normalized line endings to LF");
-	}
-	else {
-		push_notification("Normalized line endings to CRLF");
-	}
+	// if no node found
+	iterator.node = null;
+	iterator.firstChar = null;
+	iterator.lastChar = null;
+	array_reset(*iterator.stack);
 }
 
-document_debug_print_piece_chain :: (doc: *Document) {
-	builder: String_Builder;
-	builder.allocator = temp;
+jump_to_line :: (iterator: *Document.LineIterator, line: s64) {
+	iterator.line = line;
+	node := iterator.doc.tree;
 
-	node: *PieceChainNode = doc.pieceChainHead;
+	// first we scan to find the start of the desired line in which ever node it lives in
+	lineInSubtree := line;
+	lineInNode := -1;
+	nodeStartOffset: s64;
+	lineFeedCount: s64;
 	while node != null {
-		buffer : *Buffer;
-		ifx node.added then buffer = *doc.addedData else buffer = *doc.originalData;
+		// you only want to store nodes that you would visit in a forward/reverse iteration here
+		// rather than every parent
+		if lineInSubtree <= node.leftSubtreeLfCount {
+			// Target must be in the left side of the tree
 
-		print_to_builder(*builder, "[a=%,l=%,lfc=%,s=(%,%),e=(%,%),\"",
-			node.added, node.length, node.lineFeedCount, node.start.line, node.start.col, node.end.line, node.end.col);
+			// special case for first line
+			if node.left == null && lineInSubtree == 0 && node.leftSubtreeLfCount == 0 {
+				lineInNode = 0;
+				break;
+			}
 
-		startOffset:= buffer_cursor_to_offset(buffer, node.start);
-		endOffset := buffer_cursor_to_offset(buffer, node.end);
-		text := string.{endOffset-startOffset, buffer.text.data + startOffset};
-		for text {
-			if it == #char "\r" {
-				append(*builder, "CR");
-			} 
-			else if it == #char "\n" {
-				append(*builder, "LF\n");
+			if iterator.direction == .FORWARD {
+				array_add(*iterator.stack, node);
+			}
+			node = node.left;
+		}
+		else if lineInSubtree <= node.leftSubtreeLfCount + node.piece.lineFeedCount {
+			// Target must be within this node
+			nodeStartOffset += node.leftSubtreeLength;
+			lineFeedCount += node.leftSubtreeLfCount;
+
+			lineInNode = line - lineFeedCount;
+			break;
+		}
+		else {
+			if iterator.direction == .REVERSE {
+				array_add(*iterator.stack, node);
+			}
+
+			// Target must be in the right side of the tree
+			lineInSubtree -= node.leftSubtreeLfCount + node.piece.lineFeedCount;
+			nodeStartOffset += node.leftSubtreeLength + node.piece.length;
+			lineFeedCount += node.leftSubtreeLfCount + node.piece.lineFeedCount;
+			node = node.right;
+		}
+	}
+
+	// either way the output of the above search is two things
+	iterator.node = node;
+	iterator.lineNumInNode = iterator.node.piece.start.line + lineInNode;
+	iterator.nodeStartOffset = nodeStartOffset;
+}
+
+step_line :: (iter: *Document.LineIterator) {
+	// so what's actually involved in this process??
+
+	if iter.lineNumInNode < iter.node.piece.end.line {
+		// line is fully contained in this node
+
+		buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
+		startOffset := buffer_cursor_to_offset(buffer, .{iter.lineNumInNode, 0} );
+		endOffset := buffer_cursor_to_offset(buffer, .{iter.lineNumInNode + 1, 0});
+		lineLength := endOffset - startOffset;
+
+		iter.lineContent.text = .{ lineLength, buffer.text.data + startOffset };
+		iter.lineContent.startByteOffset = iter.nodeStartOffset + (startOffset - buffer_cursor_to_offset(buffer, iter.node.piece.start));
+		iter.lineContent.endByteOffset = iter.nodeStartOffset + (endOffset - buffer_cursor_to_offset(buffer, iter.node.piece.start));
+	}
+	else {
+		// line is not fully contained in this node
+		array_reset_keeping_memory(*iter.lineBuffer);
+
+		// copy the remaining memory of the node
+		buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
+		startOffset := max(buffer_cursor_to_offset(buffer, .{iter.lineNumInNode, 0} ), buffer_cursor_to_offset(buffer, iter.node.piece.start ));
+		endOffset := buffer_cursor_to_offset(buffer, iter.node.piece.end);
+		sectionLength := endOffset - startOffset;
+		array_reserve(*iter.lineBuffer, sectionLength);
+		memcpy(iter.lineBuffer.data, buffer.text.data + startOffset, sectionLength);
+		iter.lineBuffer.count = sectionLength;
+		iter.lineContent.startByteOffset = iter.nodeStartOffset + (startOffset - buffer_cursor_to_offset(buffer, iter.node.piece.start));
+
+		// we'll loop over nodes, copying text until we reach the end of the line
+		// or the end of the tree
+		while iter.node {
+			// find the next node
+			node := iter.node.child[iter.direction];
+			while iter.stack.count > 0 || node != null {
+				if node != null {
+					// all parents are added to the stack
+					array_add(*iter.stack, node);
+					node = node.child[1 - iter.direction];
+				}
+				else {
+					// the node we return is not left in the stack
+					node = iter.stack[iter.stack.count-1];
+					iter.stack.count -= 1;
+					break;
+				}
+			}
+
+			// next node found
+			if node != null {
+				iter.nodeStartOffset = iter.nodeStartOffset + iter.node.piece.length;
+				iter.node = node;
+				iter.lineNumInNode = node.piece.start.line;
+
+				// See if the next node contains the rest of the line
+				if iter.node.piece.lineFeedCount > 0 {
+					// copy up to the first newline of this node
+					buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
+					startOffset := buffer_cursor_to_offset(buffer, iter.node.piece.start );
+					endOffset := buffer_cursor_to_offset(buffer, .{iter.node.piece.start.line + 1, 0});
+					sectionLength := endOffset - startOffset;
+					array_reserve(*iter.lineBuffer, iter.lineBuffer.count + sectionLength);
+					memcpy(iter.lineBuffer.data+iter.lineBuffer.count, buffer.text.data + startOffset, sectionLength);
+					iter.lineBuffer.count = iter.lineBuffer.count + sectionLength;
+					iter.lineContent.endByteOffset = iter.lineContent.startByteOffset + iter.lineBuffer.count;
+					break; // we're finished
+				}
+				else {
+					// copy the whole node, and then loop again
+					buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
+					startOffset := buffer_cursor_to_offset(buffer, iter.node.piece.start );
+					endOffset := buffer_cursor_to_offset(buffer, iter.node.piece.end);
+					sectionLength := endOffset - startOffset;
+					array_reserve(*iter.lineBuffer, iter.lineBuffer.count + sectionLength);
+					memcpy(iter.lineBuffer.data+iter.lineBuffer.count, buffer.text.data + startOffset, sectionLength);
+					iter.lineBuffer.count = iter.lineBuffer.count + sectionLength;
+				}
 			}
 			else {
-				append(*builder, it);
+				iter.node = node;
 			}
 		}
-		append(*builder, "\"]");
-		node = node.next;
+
+		iter.lineContent.text = .{ iter.lineBuffer.count, iter.lineBuffer.data };
 	}
-	print(builder_to_string(*builder,,temp));
+
+	// move on to next line
+	iter.line = iter.line + 1;
+	iter.lineNumInNode = iter.lineNumInNode + 1;
 }
 
-document_debug_print_undos :: (doc: *Document) {
-	builder: String_Builder;
-	builder.allocator = temp;
+for_expansion :: (iterator: *Document.LineIterator, body: Code, flags: For_Flags) #expand {
+	while iterator.node {
+		step_line(iterator);
 
-	redostack: [..]PieceChainSpan;
-	redostack.allocator = temp;
+		`it := iterator.lineContent;
+		`it_index := iterator.line;
+		
+		#insert body;
 
-	for < doc.undoStack {
-		print_to_builder(*builder, "\n----- Change #% -----\n", it_index);
-		span := it;
-		spanDelta := span.newSize - span.oldSize;
+		if iterator.endLine+1 == iterator.line then break;
+	}
+}
 
-		changeOpenBracket:u8 = #char "[";
-		changeCloseBracket:u8 = #char "]";
+for_expansion :: (iterator: *Document.Iterator, body: Code, flags: For_Flags) #expand {
 
-		// this span is a deletion, so we'll perform the undo, then
-		// print the text, which will show us the deleted text
-		if spanDelta < 0 {
-			restore_span(doc, *span);
-			array_add(*redostack, span);
-			changeOpenBracket = #char "]";
-			changeCloseBracket = #char "[";
-		}
-
-		cursor := document_create_cursor(doc, span.documentOffset);
-
-		// iterate backward to get to the start of the line, and then go back one more line
-		paddingLines := 2;
-		paddingCount := 0;
-		for < :raw_bytes cursor {
-			if it == #char "\n" {
-				paddingLines -= 1;
-				if paddingLines == 0 break;
+	counter := 0;
+	while outer := iterator.node != null {
+		`it: u8;
+		`it_index := 0;
+		if iterator.direction == .REVERSE {
+			// need to adjust the start and end pointers if we're going backward
+			bufferIndex := iterator.node.piece.bufferIndex;
+			startOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], iterator.node.piece.start);
+			endOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], iterator.node.piece.end);
+			startPtr := iterator.doc.buffers[bufferIndex].text.data + startOffset;
+			endPtr := iterator.doc.buffers[bufferIndex].text.data + endOffset;
+			if iterator.firstChar > startPtr || iterator.offset == iterator.node.leftSubtreeLength {
+				iterator.lastChar = iterator.firstChar;
+				iterator.firstChar = startPtr-1;
 			}
-			paddingCount += 1;
-		}
-
-		// iterate forward building up the text to display
-		paddingLines = 3;
-		text: [..]u8;
-		spanStart := span.documentOffset - cursor.documentOffset - 1;
-		for :raw_bytes cursor {
-			array_add(*text, it,,temp);
-
-			if it_index == spanStart {
-				array_add(*text, changeOpenBracket ,,temp);
+			else {
+				iterator.lastChar -= 1;
+				iterator.firstChar -= 1;
 			}
 
-			if it_index == spanStart+abs(spanDelta) {
-				array_add(*text, changeCloseBracket ,,temp);
-			}
 
-			if it_index > (paddingCount+abs(spanDelta)) {
-				if it == #char "\n" {
-					paddingLines-=1;
+			while iterator.firstChar < iterator.lastChar {
+				`it_index = counter;
+				`it = iterator.lastChar.*;
+				if `it != #char "\r" {
+					#insert(break=break outer) body;  // If the user says break, break from the *outer* loop!
+					counter += 1;
 				}
-				if paddingLines == 0 break;
+				iterator.lastChar -= 1;
+				iterator.offset -= 1;
 			}
-		}
-
-		// this span is an addition, so we've printed the document 
-		// BEFORE doing the undo, so we can see the added text
-		if spanDelta > 0 {
-			restore_span(doc, *span);
-			array_add(*redostack, span);
-		}
-
-		append(*builder, string.{text.count, text.data});
-		append(*builder, "\n");
-	}
-
-	// put the document back to what it's supposed to be
-	for < redostack {
-		restore_span(doc, *it);
-	}
-
-	print(builder_to_string(*builder,,temp));
-}
-
-document_dump_tree_to_dot_graph :: (doc: *Document) {
-	O_RDWR    :: 0x2;     // Open for reading and writing
-	Crt      :: #system_library "msvcrt";
-	_open_osfhandle :: (osfhandle: s64, flags: s32) -> s32 #foreign Crt;
-
-	f, success := file_open("dotGraph.gv", for_writing=true);
-	fd := _open_osfhandle(cast(s64, f.handle), O_RDWR);
-	ts_tree_print_dot_graph(doc.tree, fd);
-}
-
-operator == :: (a: Coordinate, b: Coordinate) -> bool {
-	return a.line == b.line && a.col == b.col;
-}
-
-operator < :: (a: Coordinate, b: Coordinate) -> bool {
-	if a.line == b.line {
-		if a.col < b.col {
-			return true; // a is before b
+			next_node(iterator);
 		}
 		else {
-			return false; // b is before a
+			while iterator.firstChar < iterator.lastChar {
+				`it_index = counter;
+				`it = iterator.firstChar.*;
+				if `it != #char "\r" {
+					#insert(break=break outer) body;  // If the user says break, break from the *outer* loop!
+					counter += 1;
+				}
+				iterator.firstChar += 1;
+				iterator.offset += 1;
+			}
+			next_node(iterator);
 		}
-	}
-	else if a.line < b.line {
-		return true; // a is before b
-	}
-	else {
-		return false; // b is before a
-	}
-}
-operator <= :: (a: Coordinate, b: Coordinate) -> bool {
-	if a == b {
-		return true;
-	} 
-	else {
-		return a < b;
 	}
 }
 
-operator > :: (a: Coordinate, b: Coordinate) -> bool {
-	if a.line == b.line {
-		if a.col > b.col {
-			return true; // a is after b
+raw_bytes :: (iterator: *Document.Iterator, body: Code, flags: For_Flags) #expand {
+
+	counter := 0;
+	while outer := iterator.node != null {
+		`it: u8;
+		`it_index := 0;
+		if iterator.direction == .REVERSE {
+			// need to adjust the start and end pointers if we're going backward
+			bufferIndex := iterator.node.piece.bufferIndex;
+			startOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], iterator.node.piece.start);
+			endOffset := buffer_cursor_to_offset(*iterator.doc.buffers[bufferIndex], iterator.node.piece.end);
+			startPtr := iterator.doc.buffers[bufferIndex].text.data + startOffset;
+			endPtr := iterator.doc.buffers[bufferIndex].text.data + endOffset;
+			if iterator.firstChar > startPtr || iterator.offset == iterator.node.leftSubtreeLength {
+				iterator.lastChar = iterator.firstChar;
+				iterator.firstChar = startPtr-1;
+			}
+			else {
+				iterator.lastChar -= 1;
+				iterator.firstChar -= 1;
+			}
+
+
+			while iterator.firstChar < iterator.lastChar {
+				`it_index = counter;
+				`it = iterator.lastChar.*;
+				#insert(break=break outer) body;  // If the user says break, break from the *outer* loop!
+				counter += 1;
+				iterator.lastChar -= 1;
+				iterator.offset -= 1;
+			}
+			next_node(iterator);
 		}
 		else {
-			return false; // b is after a
+			while iterator.firstChar < iterator.lastChar {
+				`it_index = counter;
+				`it = iterator.firstChar.*;
+				#insert(break=break outer) body;  // If the user says break, break from the *outer* loop!
+				counter += 1;
+				iterator.firstChar += 1;
+				iterator.offset += 1;
+			}
+			next_node(iterator);
 		}
 	}
-	else if a.line > b.line {
-		return true; // a is after b
-	}
-	else {
-		return false; // b is after a
-	}
-}
-operator >= :: (a: Coordinate, b: Coordinate) -> bool {
-	if a == b {
-		return true;
-	} 
-	else {
-		return a > b;
-	}
 }
 
+// syntax highlight stuff
 
-#scope_file
+document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, bytesRead: *u32) -> *u8 #c_call {
+	push_context {
+		doc := cast(*Document, payload);
+		
+		node, remainder, nodeStartOffset := node_at_offset(doc, doc.tree, byteOffset);
+		bufferIndex := node.piece.bufferIndex;
+		startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], node.piece.start);
+		endOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], node.piece.end);
+		charPtr := doc.buffers[bufferIndex].text.data + startOffset + remainder;
 
-// Calculate a buffer cursor for a given offset _within_ the given node,
-// that is offset >= 0 && offset < node.length
-buffer_offset_to_cursor :: (buffer: *Buffer, node: *PieceChainNode, offsetInNode: s64) -> Coordinate {
-	// binary search for a line inside the given node
-	offset := buffer_cursor_to_offset(buffer, node.start) + offsetInNode;
-	low := node.start.line;
-	high := node.end.line;
+		bytesRead.* = cast(u32, endOffset - (startOffset + remainder));
+		return charPtr;
+	}
+}
+
+document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
+	if doc.parser && doc.language {
+		inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	
+		doc.tsTree = ts_parser_parse(doc.parser, doc.tsTree, .{payload=doc, read=document_parse_read, encoding=.UTF8});
+	}
+}
+
+
+// helpers
+
+pretty_print_tree :: (node: *Document.Node) {
+	pretty_print_tree(node, "", false);
+}
+
+operator == :: (a: Document.BufferCursor, b: Document.BufferCursor) -> bool {
+	return a.line == b.line && a.column == b.column;
+}
+
+node_at_offset :: (doc: *Document, node: *Document.Node, offset: s64) -> node: *Document.Node, remainder: s64, nodeStartOffset: s64, line: s64 {
+	// This is basically a binary search
+
+	offsetInSubtree := offset;
+	nodeStartOffset: s64;
+	lineFeedCount: s64;
+	while node != null {
+		if offsetInSubtree < node.leftSubtreeLength {
+			// Target must be in the left side of the tree
+			node = node.left;
+		}
+		else if offsetInSubtree < node.leftSubtreeLength + node.piece.length {
+			// Target must be within this node
+			nodeStartOffset += node.leftSubtreeLength;
+			lineFeedCount += node.leftSubtreeLfCount;
+			remainder := offset - nodeStartOffset;
+			
+			bufferCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
+			lineFeedCount += bufferCursor.line - node.piece.start.line;
+			return node, remainder, nodeStartOffset, lineFeedCount;
+		}
+		else {
+			if node.right == null {
+				// end of the tree, we'll just go with the current node, at the very end
+				leftSideOffset := node.leftSubtreeLength;
+				nodeStartOffset += leftSideOffset;
+				lineFeedCount += node.leftSubtreeLfCount + node.piece.lineFeedCount;
+				remainder := node.piece.length;
+				return node, remainder, nodeStartOffset, lineFeedCount;
+			}
+
+			// Target must be in the right side of the tree
+			leftSideOffset := node.leftSubtreeLength + node.piece.length;
+			
+			offsetInSubtree -= leftSideOffset; // Our offset now must be relative to the right side of the tree
+
+			nodeStartOffset += leftSideOffset;
+			lineFeedCount += node.leftSubtreeLfCount + node.piece.lineFeedCount;
+			node = node.right;
+		}
+	}
+
+	return null, 0, 0, 0;
+}
+
+// Piece Tree helpers
+
+// commented out because search is using internal stuff
+// intention is that core search function gets moved to this file
+// #scope_file
+
+make_piece :: (pieceTree: *Document, t: string) -> Document.Piece {
+	// firstly copy the text into the add buffer
+
+	newPiece: Document.Piece;
+	newPiece.length = t.count;
+	newPiece.bufferIndex = 1; // add buffer
+
+	text := copy_string(t,, buffer_allocator(pieceTree));
+	currentBufferEnd := pieceTree.buffers[1].text.count;
+	pieceTree.buffers[1].text.count = pieceTree.buffers[1].text.count + text.count;
+
+	// count line endings
+	// @todo: might be a good location to correct bad line endings
+	// @todo: otherwise mark if the line endings have changed based on something new
+	lineFeedCount := 0;
+	for byte, i: text {
+		if byte == #char "\n" {
+			array_add(*pieceTree.buffers[1].lineStarts, xx (currentBufferEnd + i + 1));
+			lineFeedCount += 1;
+		}
+	}
+	newPiece.lineFeedCount = lineFeedCount;
+
+	newPiece.start = pieceTree.lastInsert;
+	endLine := pieceTree.buffers[1].lineStarts.count-1;
+	newPiece.end = .{ endLine, pieceTree.buffers[1].text.count - pieceTree.buffers[1].lineStarts[endLine] };
+	pieceTree.lastInsert = newPiece.end;
+
+	return newPiece;
+}
+
+node_trim_left :: (pieceTree: *Document, piece: Document.Piece, pos: Document.BufferCursor) -> Document.Piece {
+	buffer := *pieceTree.buffers[piece.bufferIndex];
+	newPiece := piece;
+
+	// remove the left side of piece up to pos
+	bufferOffsetStart := buffer_cursor_to_offset(buffer, piece.start);
+	bufferOffsetSplit := buffer_cursor_to_offset(buffer, pos);
+	lenRight := (bufferOffsetStart + piece.length) - bufferOffsetSplit;
+
+	newPiece.start = pos;
+	newPiece.length = lenRight;
+	newPiece.lineFeedCount = buffer_line_start_count(newPiece.start, newPiece.end);
+	return newPiece;
+}
+
+node_trim_right :: (pieceTree: *Document, piece: Document.Piece, pos: Document.BufferCursor) -> Document.Piece {
+	buffer := *pieceTree.buffers[piece.bufferIndex];
+	newPiece := piece;
+
+	// remove the right side of piece from pos
+	bufferOffsetStart := buffer_cursor_to_offset(buffer, piece.start);
+	bufferOffsetSplit := buffer_cursor_to_offset(buffer, pos);
+	lenLeft := bufferOffsetSplit - bufferOffsetStart;
+
+	newPiece.end = pos;
+	newPiece.length = lenLeft;
+	newPiece.lineFeedCount = buffer_line_start_count(newPiece.start, newPiece.end);
+	return newPiece;
+}
+
+combine_pieces :: (allocator: Allocator, tree: *Document.Node, prevNode: *Document.Node, prevNodeStartOffset: s64, newPiece: Document.Piece) -> *Document.Node {
+	newPieceCopy := newPiece;
+	newPieceCopy.start = prevNode.piece.start;
+	newPieceCopy.lineFeedCount = newPiece.lineFeedCount + prevNode.piece.lineFeedCount;
+	newPieceCopy.length= newPiece.length + prevNode.piece.length;
+	tree = remove_node(tree, prevNodeStartOffset);
+	return insert_node(allocator, tree, newPieceCopy , prevNodeStartOffset);
+}
+
+buffer_offset_to_cursor :: (pieceTree: *Document, piece: Document.Piece, offsetInNode: s64) -> Document.BufferCursor {
+	// Calculate a buffer cursor for a given offset _within_ the given node,
+	// that is offset >= 0 && offset < node.length
+
+	buffer := *pieceTree.buffers[piece.bufferIndex];
+	offset := buffer_cursor_to_offset(buffer, piece.start) + offsetInNode;
+	low := piece.start.line;
+	high := piece.end.line;
 	mid := 0;
 	midStartOffset := 0;
 	midEndOffset := 0;
@@ -1285,205 +1451,319 @@ buffer_offset_to_cursor :: (buffer: *Buffer, node: *PieceChainNode, offsetInNode
 		}
 	}
 
-	return Coordinate.{mid, offset - midStartOffset};
+	return .{mid, offset - midStartOffset};
 }
 
-// Find the actual offset into the given buffer from a cursor for that buffer
-buffer_cursor_to_offset :: (buffer: *Buffer, pos: Coordinate) -> s64 {
-	return buffer.lineStarts[pos.line] + pos.col;
+buffer_cursor_to_offset :: (buffer: *Document.Buffer, pos: Document.BufferCursor) -> s64 {
+	return buffer.lineStarts[pos.line] + pos.column;
 }
 
-// figure out how many linestarts are between start and length in the given buffer
-buffer_line_start_count :: (start: Coordinate, end: Coordinate) -> s64 {
+buffer_line_start_count :: (start: Document.BufferCursor, end: Document.BufferCursor) -> s64 {
 	return (end.line - start.line);
 }
 
-node_trim_left :: (node: *PieceChainNode, buffer: *Buffer, pos: Coordinate) {
-	// remove the left side of node up to pos
-	bufferOffsetStart := buffer_cursor_to_offset(buffer, node.start);
-	bufferOffsetSplit := buffer_cursor_to_offset(buffer, pos);
-	lenRight := (bufferOffsetStart + node.length) - bufferOffsetSplit;
+// Allocator helpers
 
-	node.start = pos;
-	node.length = lenRight;
-	node.lineFeedCount = buffer_line_start_count(node.start, node.end);
+tree_allocator :: (pieceTree: *Document) -> Allocator {
+	return Allocator.{ proc = flat_pool_allocator_proc, data = *pieceTree.treeMemory };
 }
 
-node_trim_right :: (node: *PieceChainNode, buffer: *Buffer, pos: Coordinate) {
-	// remove the right side of node from pos
-	bufferOffsetStart := buffer_cursor_to_offset(buffer, node.start);
-	bufferOffsetSplit := buffer_cursor_to_offset(buffer, pos);
-	lenLeft := bufferOffsetSplit - bufferOffsetStart;
-
-	node.end = pos;
-	node.length = lenLeft;
-	node.lineFeedCount = buffer_line_start_count(node.start, node.end);
+buffer_allocator :: (pieceTree: *Document) -> Allocator {
+	return Allocator.{ proc = flat_pool_allocator_proc, data = *pieceTree.bufferMemory };
 }
 
-span_append :: (span: *PieceChainSpan, node: *PieceChainNode) {
-	if span.first == null {
-		span.first = node;
+other_allocator :: (pieceTree: *Document) -> Allocator {
+	return Allocator.{ proc = flat_pool_allocator_proc, data = *pieceTree.otherMemory };
+}
+
+// Basic Red Black tree API
+
+make_rb_tree :: (allocator: Allocator, piece: Document.Piece) -> *Document.Node {
+	return new_node(allocator, .BLACK, .{ piece, 0, 0 }, null, null);
+}
+
+insert_node :: (allocator: Allocator, root: *Document.Node, piece: Document.Piece, at: s64) -> *Document.Node {
+	if root == null then return make_rb_tree(allocator, piece);
+
+	t :=  internal_insert(root.allocator, root, .{piece, 0, 0}, at, 0);
+	return new_node(root.allocator, .BLACK, t.data, t.left, t.right);
+}
+
+remove_node :: (root: *Document.Node, at: s64) -> *Document.Node {
+	t := internal_remove(root, at, 0);
+	if t == null then return null;
+	return new_node(root.allocator, .BLACK, t.data, t.left, t.right);
+}
+
+length :: (root: *Document.Node) -> s64 {
+	if root == null {
+		return 0;
 	}
+	return root.leftSubtreeLength + root.piece.length + length(root.right);
+ }
+
+lf_count :: (root: *Document.Node) -> s64 {
+	if root == null {
+		return 0;
+	}
+	return root.leftSubtreeLfCount + root.piece.lineFeedCount + lf_count(root.right);
+}
+
+
+// insertion helpers
+
+new_node :: (allocator: Allocator, color: Document.Color, data: Document.NodeData, left: *Document.Node, right: *Document.Node) -> *Document.Node {
+	newNode := New(Document.Node,,allocator);
+	newNode.allocator = allocator;
+	newNode.color = color;
+	newNode.data = data;
+	newNode.leftSubtreeLength = length(left);
+	newNode.leftSubtreeLfCount = lf_count(left);
+	newNode.left= left;
+	newNode.right= right;
+	return newNode;
+}
+
+internal_insert :: (allocator: Allocator, root: *Document.Node, nodeData: Document.NodeData, at: s64, totalOffset: s64) -> *Document.Node {
+	// ending case of the recursion, just make a new leaf node
+	if root == null {
+		return new_node(allocator, .RED, nodeData, null, null);
+	}
+
+	// in this case we insert on the left side of the tree (modifying the left node)
+	if at < (totalOffset + root.leftSubtreeLength + root.piece.length) {
+		newLeft := internal_insert(allocator, root.left, nodeData, at, totalOffset);
+		return balance(allocator, root.color, root.data, newLeft, root.right);
+	}
+
+	// in this case we insert on the right side of the tree (modifying the right node)
 	else {
-		span.last.next = node;
-		node.prev = span.last;
-	}
-	span.last = node;
-	span.boundary = false;
-}
-
-span_boundary :: (span: *PieceChainSpan, before: *PieceChainNode, after: *PieceChainNode) {
-	span.first = before;
-	span.last = after;
-	span.boundary = true;
-}
-
-new_undo_event :: (doc: *Document, docSize: s64, docOffset: s64, oldSize: s64, newSize: s64) -> *PieceChainSpan {
-	span := array_add(*doc.undoStack);
-	span.documentSize = docSize;
-	span.documentOffset = docOffset;
-	span.oldSize = oldSize;
-	span.newSize = newSize;
-	return span;
-}
-
-swap_spans :: (src: *PieceChainSpan, dst: *PieceChainSpan) {
-	if src.boundary {
-		// in this case src is a gap, so we're just inserting dst in between the gap
-		if !dst.boundary {
-			src.first.next = dst.first;
-			src.last.prev = dst.last;
-			dst.first.prev = src.first;
-			dst.last.next = src.last;
-		}
-	}
-	else {
-		// in this case dst is just a gap, so you need to remove
-		// the whole span from src.first to src.last
-		if dst.boundary {
-			src.first.prev.next = src.last.next;
-			src.last.next.prev = src.first.prev;
-		}
-		// this is the general case, a straight swap
-		else {
-			src.first.prev.next = dst.first;
-			src.last.next.prev = dst.last;
-			dst.first.prev = src.first.prev;
-			dst.last.next = src.last.next;
-		}
+		newRight := internal_insert(allocator, root.right, nodeData, at, totalOffset + root.leftSubtreeLength + root.piece.length);
+		return balance(allocator, root.color, root.data, root.left, newRight);
 	}
 }
 
-restore_span :: (doc: *Document, span: *PieceChainSpan) {
-	// the given span is something that's been pulled from the undo stack
-	// and represents a section of the linked list which thinks it's linked into the real one
-	// but it's actually not
+balance :: (allocator: Allocator, c: Document.Color, data: Document.NodeData, left: *Document.Node, right: *Document.Node) -> *Document.Node {
+	// We cannot have a parent and child both be red
+	// so what we are doing here is checking for that case on either the left or right side
+	// and if it is doubled, we rotate to fix it up
+	// see  https://bartoszmilewski.com/2013/11/25/functional-data-structures-in-c-trees/
 
-	// the goal here is to grab the prev and next nodes which this span points to, and tell those nodes
-	// to point to this span, effectively swapping it in
-
-	// our edits will edit the main linked list, and the span in question will mutate into it's inverse
-
-	if span.boundary {
-		// this means the span is really an "absence" of nodes, so we want to remove the span that exists
-		// between "first" and "last"
-
-		// these are the nodes we want to remove
-		first := span.first.next;
-		last := span.last.prev;
-
-		// remove from first to last
-		span.first.next = span.last;
-		span.last.prev = span.first;
-
-		// store what we just removed
-		span.first = first;
-		span.last = last;
-		span.boundary = false;
+	// each case will find a possible double red, and rotate it such that the red violation percolates
+	// up to the top of the tree. Repeatedly doing this will correct the tree
+	if c == .BLACK && doubled_left(left) {
+		newRight := new_node(allocator, .BLACK, data, left.right, right);
+		return new_node(allocator, .RED, left.data, paint(left.left, .BLACK), newRight);
 	}
-	else {
-		first := span.first.prev;
-		last := span.last.next;
-
-		// is this span in between two nodes that are directly connected? I.e. this is a boundary
-		// and we must insert inbetween this boundary
-		if first.next == last {
-			first.next = span.first;
-			last.prev = span.last;
-
-			// store what we just removed
-			span.first = first;
-			span.last = last;
-			span.boundary = true;
-		}
-		// general case, we need to swap one range with another
-		else {
-			first = first.next;
-			last = last.prev;
-
-			first.prev.next = span.first;
-			last.next.prev = span.last;
-
-			// store what we just removed
-			span.first = first;
-			span.last = last;
-			span.boundary = false;
-		}
+	else if c == .BLACK && doubled_right(left) {
+		newLeft := new_node(allocator, .BLACK, left.data, left.left, left.right.left);
+		newRight := new_node(allocator, .BLACK, data, left.right.right, right);
+		return new_node(allocator, .RED, left.right.data, newLeft, newRight);
 	}
-
-	// The span has now become it's inverse, so flip the sizes and deltas
-	currentSize := doc.size;
-	doc.size = span.documentSize;
-	span.documentSize = currentSize;
-
-	temp := span.newSize;
-	span.newSize = span.oldSize;
-	span.oldSize = temp;
+	else if c == .BLACK && doubled_left(right) {
+		newLeft := new_node(allocator, .BLACK, data, left, right.left.left);
+		newRight := new_node(allocator, .BLACK, right.data, right.left.right, right.right);
+		return new_node(allocator, .RED, right.left.data, newLeft, newRight);
+	}
+	else if c == .BLACK && doubled_right(right) {
+		newLeft := new_node(allocator, .BLACK, data, left, right.left);
+		return new_node(allocator, .RED, right.data, newLeft, paint(right.right, .BLACK));
+	}
+	return new_node(allocator, c, data, left, right);
 }
 
-document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, bytesRead: *u32) -> *u8 #c_call {
-	push_context {
-		cursor := cast(*DocumentCursor, payload);
+doubled_left :: (node: *Document.Node) -> bool {
+	return node != null && node.color == .RED && node.left != null && node.left.color == .RED;
+}
 
-		if cursor.documentOffset != byteOffset {
-			document_cursor_jump_to_offset(cursor, byteOffset);
-		}
+doubled_right :: (node: *Document.Node) -> bool {
+	return node != null && node.color == .RED && node.right != null && node.right.color == .RED;
+}
 
-		// if we lie at the end of a node which isn't the tail, then step onto the next node before returning anything
-		if cursor.node != cursor.doc.pieceChainTail && cursor.documentOffset == (cursor.nodeStartOffset + cursor.node.length) {
-			cursor.documentOffset = cursor.nodeStartOffset + cursor.node.length;
-			cursor.nodeStartOffset = cursor.documentOffset;
-			cursor.nodeStartLine = cursor.nodeStartLine + cursor.node.lineFeedCount;
-			cursor.node = cursor.node.next;
-		}
+paint :: (node: *Document.Node, color: Document.Color) -> *Document.Node {
+	assert(node != null);
+	return new_node(node.allocator, color, node.data, node.left, node.right);
+}
 
-		// @todo: this pattern is used a lot, might be nice to have a function like "get_node/cursor_buffer"
-		// which returns to you the start pointer and length
-		 
-		buffer: = ifx cursor.node.added then *cursor.doc.addedData else *cursor.doc.originalData;
-		offsetInNode := cursor.documentOffset - cursor.nodeStartOffset;
-		bufferOffset := buffer_cursor_to_offset(buffer, cursor.node.start) + offsetInNode;
+// Removal helpers
+
+internal_remove :: (root: *Document.Node, at: s64, totalOffset: s64) -> *Document.Node {
+	if root == null then return null;
+
+	if at < totalOffset + root.leftSubtreeLength {
+		return remove_left(root, at, totalOffset);
+	}
+	if at == totalOffset + root.leftSubtreeLength {
+		return fuse(root.left, root.right);
+	}
+	return remove_right(root, at, totalOffset);
+}
+
+remove_left :: (root: *Document.Node, at: s64, totalOffset: s64) -> *Document.Node {
+	newLeft := internal_remove(root.left, at, totalOffset);
+	newNode := new_node(root.allocator, .RED, root.data, newLeft, root.right);
+
+	if root.left && root.left.color == .BLACK {
+		return balance_left(newNode);
+	}
+	return newNode;
+}
+
+remove_right :: (root: *Document.Node, at: s64, totalOffset: s64) -> *Document.Node {
+	newRight := internal_remove(root.right, at, totalOffset + root.leftSubtreeLength + root.piece.length);
+	newNode := new_node(root.allocator, .RED, root.data, root.left, newRight);
+
+	if root.right && root.right.color == .BLACK {
+		return balance_right(newNode);
+	}
+	return newNode;
+}
+
+balance_right :: (right: *Document.Node) -> *Document.Node {
+	if right.right != null && right.right.color == .RED {
+		return new_node(right.allocator, .RED, right.data, right.left, paint(right.right, .BLACK));
+	}
+	if right.left != null && right.left.color == .BLACK {
+		newRight := new_node(right.allocator, .BLACK, right.data, paint(right.left, .RED), right.right);
+		return balance(newRight);
+	}
+	if right.left != null && right.left.color == .RED && right.left.right != null && right.left.right.color == .BLACK {
+		unbalancedNewLeft := new_node(right.allocator, .BLACK, right.left.data, paint(right.left.left, .RED), right.left.right.left);
+
+		newLeft := balance(unbalancedNewLeft);
+		newRight := new_node(right.allocator, .BLACK, right.data, right.left.right.right, right.right);
+
+		return new_node(right.allocator, .RED, right.left.right.data, newLeft, newRight);
+	}
+	assert(false); // should be unreachable
+	return right;
+}
+
+balance_left :: (left: *Document.Node) -> *Document.Node {
+	if left.left != null && left.left.color == .RED {
+		return new_node(left.allocator, .RED, left.data, paint(left.left, .BLACK), left.right);
+	}
+	if left.right != null && left.right.color == .BLACK {
+		newLeft := new_node(left.allocator, .BLACK, left.data, left.left, paint(left.right, .RED));
+		return balance(newLeft);
+	}
+	if left.right != null && left.right.color == .RED && left.right.left != null && left.right.left.color == .BLACK {
+		unbalancedNewRight := new_node(left.allocator, .BLACK, left.right.data, left.right.left.right, paint(left.right.right, .RED));
 		
-		bytesRead.* = cast(u32, cursor.node.length - offsetInNode);
+		newRight := balance(unbalancedNewRight);
+		newLeft := new_node(left.allocator, .BLACK, left.data, left.left, left.right.left.left);
 
-		// step the cursor one node for next iteration
-		if cursor.node != cursor.doc.pieceChainTail {
-			cursor.documentOffset = cursor.nodeStartOffset + cursor.node.length;
-			cursor.nodeStartOffset = cursor.documentOffset;
-			cursor.nodeStartLine = cursor.nodeStartLine + cursor.node.lineFeedCount;
-			cursor.node = cursor.node.next;
+		return new_node(left.allocator, .RED, left.right.left.data, newLeft, newRight);
+	}
+	assert(false); // should be unreachable
+	return left;
+}
+
+balance :: (node: *Document.Node) -> *Document.Node {
+	if node.left != null && node.left.color == .RED && node.right != null && node.right.color == .RED {
+		left := paint(node.left, .BLACK);
+		right := paint(node.right, .BLACK);
+		return new_node(node.allocator, .RED, node.data, left, right);
+	}
+	assert(node.color == .BLACK);
+	return balance(node.allocator, node.color, node.data, node.left, node.right);
+}
+
+fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
+	if left == null then return right;
+	if right == null then return left;
+
+	if left.color == .BLACK && right.color == .RED {
+		return new_node(left.allocator, .RED, right.data, fuse(left, right.left), right.right);
+	}
+
+	if left.color == .RED && right.color == .BLACK {
+		return new_node(left.allocator, .RED, left.data, left.left, fuse(left.right, right));
+	}
+
+	if left.color == .RED && right.color == .RED {
+		fused := fuse(left.right, right.left);
+		if fused != null && fused.color == .RED {
+			newLeft := new_node(left.allocator, .RED, left.data, left.left, fused.left);
+			newRight := new_node(left.allocator, .RED, right.data, fused.right, right.right);
+			return new_node(left.allocator, .RED, fused.data, newLeft, newRight);
 		}
-		
-		return buffer.text.data + bufferOffset;
+		newRight := new_node(left.allocator, .RED, right.data, fused, right.right);
+		return new_node(left.allocator, .RED, left.data, left.left, newRight);
+	}
+
+	assert(left.color == right.color && left.color == .BLACK);
+	fused := fuse(left.right, right.left);
+	if fused != null && fused.color == .RED {
+		newLeft := new_node(left.allocator, .BLACK, left.data, left.left, fused.left);
+		newRight := new_node(left.allocator, .BLACK, right.data, fused.right, right.right);
+		return new_node(left.allocator, .RED, fused.data, newLeft, newRight);
+	}
+	newRight := new_node(left.allocator, .BLACK, right.data, fused, right.right);
+	newNode := new_node(left.allocator, .RED, left.data, left.left, newRight);
+	return balance_left(newNode);
+}
+
+// Line Length array management
+
+calculate_longest_line :: (doc: *Document) {
+	// TODO: this could be slow, something to chuck in an async job
+	// and set the longest length back when finished
+
+	doc.longestLine = 0;
+	doc.longestLineLength = 0;
+
+	lineIterator := make_line_iterator(doc);
+	for lineIterator {
+		if it.text.count > doc.longestLineLength {
+			doc.longestLine = xx it_index;
+			doc.longestLineLength = xx it.text.count;
+		}
 	}
 }
 
-document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
-	if doc.parser && doc.language {
-		inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
-		ts_tree_edit(doc.tree, *inputEdit);
-	
-		cursor := document_create_cursor(doc);
-		doc.tree = ts_parser_parse(doc.parser, doc.tree, .{payload=*cursor, read=document_parse_read, encoding=.UTF8});
+// debug functions
+ 
+check_black_node_invariant :: (node: *Document.Node) -> s32 {
+	if node == null then return 1;
+
+	if node.color == .RED && ((node.left && node.left.color == .RED) || (node.right && node.right.color == .RED)) {
+		return 1;
+	}
+
+	l := check_black_node_invariant(node.left);
+	r := check_black_node_invariant(node.right);
+
+	if l != 0 && r != 0 && l != r
+		return 0;
+
+	if l != 0 && r != 0
+		return ifx node.color == .RED then l else l + 1; 
+	return 0;
+}
+
+satisfies_rb_invariants :: (node: *Document.Node) {
+	if node == null || (node.left == null && node.right == null)
+		return;
+	assert(check_black_node_invariant(node) != 0);
+}
+
+pretty_print_tree :: (node: *Document.Node, prefix: string, isLeft: bool) {
+	if node {
+		print("%", prefix);
+
+		if isLeft {
+			print("|--");
+		}
+		else {
+			print("L--");
+		}
+
+		print(" %(%,%)-(%,%)\n", ifx node.color == .RED then "R" else "B", node.piece.length, node.piece.lineFeedCount, node.leftSubtreeLength, node.leftSubtreeLfCount);
+		// this version prints the node pointer value, helpful for tracking which node you're looking at in the debugger
+		// print(" %-%(%,%)-(%,%)\n", node, ifx node.color == .RED then "R" else "B", node.piece.length, node.piece.lineFeedCount, node.leftSubtreeLength, node.leftSubtreeLfCount);
+
+		pretty_print_tree(node.right, tprint("%1%2", prefix, ifx isLeft then "|   " else "    "), true);
+		pretty_print_tree(node.left, tprint("%1%2", prefix, ifx isLeft then "|   " else "    "), false);
 	}
 }
