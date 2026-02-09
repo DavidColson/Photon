@@ -43,6 +43,7 @@ Instance :: struct {
 	cornerRadii: Vector4 = .{0.0, 0.0, 0.0, 0.0};
 	edgeSoftness: float = 0.0; // negative will result in inverse rounded corners
 	borderThickness: float = 0.0;
+	angle: float = 0.0;
 	texture: *Bitmap = null;
 	shader: Shader;
 }
@@ -124,6 +125,11 @@ init_renderer :: (_window: Window_Type) {
 		glEnableVertexAttribArray(5);
 		glVertexAttribPointer(5, 1, GL_FLOAT, xx false, stride, xx *offset.borderThickness);
 		glVertexAttribDivisor(5, 1);
+
+		// angle
+		glEnableVertexAttribArray(6);
+		glVertexAttribPointer(6, 1, GL_FLOAT, xx false, stride, xx *offset.angle);
+		glVertexAttribDivisor(6, 1);
 
 		DumpGLErrors("vao");
 	}
@@ -284,8 +290,8 @@ load_bitmap_to_gpu :: (bitmap: *Bitmap) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,     GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,     GL_CLAMP_TO_EDGE);
 	// @todo: probably want to allow this to be customized?
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glformat := GL_RGBA;
 	if bitmap.format == .R8 {
@@ -371,6 +377,7 @@ layout (location = 2) in vec4 inColor;
 layout (location = 3) in vec4 inCornerRadii;
 layout (location = 4) in float inEdgeSoftness;
 layout (location = 5) in float inBorderThickness;
+layout (location = 6) in float angle;
 
 uniform vec2 resolution;
 uniform sampler2D bitmap;
@@ -393,14 +400,18 @@ void main()
         vec2( 0.0,  1.0)
     );
 
-	vec2 screenPos = dstRect.xy + (quadVerts[gl_VertexID]) * dstRect.zw;
+	vec2 pivotShift = vec2(0.5, 0.5);
+	mat2 rotate = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+	vec2 vert = rotate * (quadVerts[gl_VertexID] - pivotShift);
+	vert = vert + pivotShift;
+
+	vec2 screenPos = dstRect.xy + (vert) * dstRect.zw;
 
 	vec2 pos;
 	pos.x = (screenPos.x / resolution.x) * 2.0 - 1.0;
 	pos.y = 1.0 - (screenPos.y / resolution.y) * 2.0;
 
     gl_Position = vec4(pos, 0.0, 1.0);
-
 
 	vec2 texSize = textureSize(bitmap, 0);
 	uv = srcRect.xy + quadVerts[gl_VertexID] * srcRect.zw;
@@ -455,7 +466,7 @@ void main()
 	float dist = sdfRoundedBox(pt, halfSize, cornerRadii);
 	float mainSDFfactor = 1 - smoothstep(-edgeSoftness, 0, dist);
 
-	fragmentColor.a *= mainSDFfactor * borderFactor;
+	// fragmentColor.a *= mainSDFfactor * borderFactor;
 } 
 END
 

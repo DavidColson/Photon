@@ -435,8 +435,9 @@ try_add_glyph_to_atlas :: (atlas: *Atlas, face: FT_Face, glyphData: *GlyphData) 
 	bestNode: s32 = -1;
 	bestX, bestY: s32;
 
-	glyphWidth:s32 = xx face.glyph.bitmap.width;
-	glyphHeight:s32 = xx face.glyph.bitmap.rows;
+	padding:s32 = 1;
+	glyphWidth:s32 = xx face.glyph.bitmap.width + padding*2;
+	glyphHeight:s32 = xx face.glyph.bitmap.rows + padding*2;
 
 	// find the best location for the glyph
 	for * atlas.nodes {
@@ -500,6 +501,9 @@ try_add_glyph_to_atlas :: (atlas: *Atlas, face: FT_Face, glyphData: *GlyphData) 
 		}
 		i += 1;
 	}
+
+	bestX += padding;
+	bestY += padding;
 
 	// actually copy the bitmap data into the atlas
 	rows  := cast(s32) face.glyph.bitmap.rows;

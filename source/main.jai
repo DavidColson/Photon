@@ -54,6 +54,7 @@ style : struct {
 	iconAlignLeft :: #run to_string(*convert_utf32_to_utf8(0xf036));
 	iconFolder :: #run to_string(*convert_utf32_to_utf8(0xf07c));
 	iconFile :: #run to_string(*convert_utf32_to_utf8(0xf15b));
+	iconSpinner :: #run to_string(*convert_utf32_to_utf8(0xf110));
 
 	// animations
 	scrollAnimRate := 14;
@@ -91,6 +92,7 @@ deltaTime:float64 = 0.016;
 lastTime:float64 = 0.0;
 asyncWorker: Async;
 logger: LoggerData;
+startTime: Apollo_Time;
 
 notifications : [10]Notification;
 numActiveNotifications := 0;
@@ -136,6 +138,7 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 }
 
 main :: () {
+	startTime = current_time_monotonic();
 	file :=  file_open(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), for_writing=true, keep_existing_content=false);
 	logger.logFile = file;
 
@@ -172,16 +175,16 @@ main :: () {
 	rebuild_key_map();
 	init_async(*asyncWorker);
 
-	// long_work :: (data: *void) {
-	// 	log("Starting long work");
-	// 	sleep_milliseconds(10*1000);
-	// }
+	long_work :: (data: *void) {
+		log("Starting long work");
+		sleep_milliseconds(10*1000);
+	}
 
-	// long_work_done :: (data: *void) {
-	// 	log("long work done");
-	// }
+	long_work_done :: (data: *void) {
+		log("long work done");
+	}
 
-	// push_task(*asyncWorker, null, long_work, long_work_done);
+	push_task(*asyncWorker, null, long_work, long_work_done);
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
@@ -505,6 +508,19 @@ build_ui_panel :: (panel: *Panel) {
 			flags=.DRAW_TEXT,
 			layout=.{ width=text_content(), height=text_content() },
 		});
+
+		if asyncWorker.pendingTasks != 0 {
+			spacer(.X, fixed(em(2.0)));
+
+			// how do we rotate this???
+			spinner := box(ui_key_nil, .{
+				layout=.{ width=text_content(), height=text_content() },
+				fontSize=em(1.0),
+				font=fontIcons
+			});
+			spinner.customDrawFunction = custom_draw_spinner;
+			spinner.customDrawUdata = cast(*void) panel;
+		}
 
 		spacer(.X, fixed(em(2.0)));
 
@@ -1134,6 +1150,35 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			}
 		}
 	}
+}
+
+custom_draw_spinner :: (box: *UIBox, udata: *void) {
+	// there's no simple way to make a box rotate so for now spinners have custom drawing code
+	// that let us rotate them in the shader
+	
+	box.textRun = generate_text_run(style.iconSpinner, xx box.fontSize, box.font,,temp);
+	metrics := get_font_metrics(box.font, xx box.fontSize);
+	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
+	xPos := box.rect.x;
+
+	xPos += box.textPadding;
+	xPos = floor(xPos);
+
+	time := to_milliseconds (current_time_monotonic() - startTime);
+
+	instance := box.textRun.instances[0];
+	instance.dstRect.x = round(xPos + instance.dstRect.x);
+	instance.dstRect.y = round(yPos + instance.dstRect.y);
+
+	// this is a bit of a hack, for some reason if you don't shift the uv's slighly
+	// then the spinner wobbles. Probably due to some issue we have with rendering fonts that are not
+	// perfectly aligned. Something to look into one day
+	instance.srcRect.x = instance.srcRect.x+0.5;
+	instance.srcRect.y = instance.srcRect.y+0.5;
+	instance.color = box.palette.text;
+	instance.angle = cast(float, time) / 1000.0 * 10;
+	submit_instance(instance);
+
 }
 
 custom_draw_input_field :: (box: *UIBox, udata: *void) {
