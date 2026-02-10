@@ -290,7 +290,11 @@ document_open :: (path: string) -> *Document {
 
 	document_load_from_disk(doc);
 
-	// @todo: add to file watcher
+	// add to file watcher
+	parentPath := path_strip_filename(doc.path);
+	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
+	add_directories(*watcher, parentPath);
+	array_add_if_unique(*watchedFiles, doc.path);
 
 	return doc;
 }
@@ -299,8 +303,12 @@ document_load_from_disk :: (doc: *Document) {
 	data := New(LoadFromDiskTaskData);
 	data.originalDocument = doc;
 	data.workingDocument = New(Document);
+	data.workingDocument.path = doc.path;
+	data.workingDocument.parser = doc.parser;
+	data.workingDocument.locator = doc.locator;
+	data.workingDocument.language = doc.language;
+
 	data.result = .IN_PROGRESS;
-	memcpy(data.workingDocument, data.originalDocument, size_of(Document));
 	push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
 }
 
@@ -317,6 +325,12 @@ LoadFromDiskTaskData :: struct {
 	}
 }
 load_from_disk_task :: (data: *void) {
+	// @todo: I'm mildly uncomfortable with the memory management happening here with file loading
+	// particularly because we must keep the original file in memory briefly while loading the new one
+	// Additionally the undo tree memory is not part of the pools so it can be hard to track
+	// at some point I would like to try consolidate the memory for each document so it's much easier to control
+	// and give me some confidence there are definitely no leaks
+	
 	taskData := cast(*LoadFromDiskTaskData, data);
 	doc := taskData.workingDocument;
 
@@ -326,17 +340,6 @@ load_from_disk_task :: (data: *void) {
 		taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
 		return;
 	}
-
-	treeMemory: Flat_Pool;
-	bufferMemory: Flat_Pool;
-	otherMemory: Flat_Pool;
-	array_reset_keeping_memory(*doc.buffers[0].lineStarts);
-	array_reset_keeping_memory(*doc.buffers[1].lineStarts);
-	reset(*doc.treeMemory, overwrite_memory=true);
-	reset(*doc.bufferMemory, overwrite_memory=true);
-	reset(*doc.otherMemory, overwrite_memory=true);
-	doc.tree = null;
-	doc.lastInsert = .{0,0};
 
 	fileSize := file_length(f);
 	if (fileSize > (256*1024*1024)) {
@@ -422,13 +425,6 @@ load_from_disk_task :: (data: *void) {
 
 	calculate_longest_line(doc);
 
-	// initial undo node
-	array_reset(*doc.undoStack);
-	array_reset(*doc.redoStack);
-	doc.nextUndoOffset = 0;
-	commit_history(doc);
-	doc.undoStack[doc.undoStack.count-1].saved = true;
-
 	// parse the document, assuming we are able to
 	if doc.parser {
 		ts_parser_reset(doc.parser);
@@ -442,7 +438,24 @@ load_from_disk_complete :: (data: *void) {
 	taskData := cast(*LoadFromDiskTaskData, data);
 
 	if taskData.result == .SUCCESS {
+		// the memory pools will be set to the ones from the workingDocument, so we're done with these
+		fini(*taskData.originalDocument.treeMemory);
+		fini(*taskData.originalDocument.bufferMemory);
+		fini(*taskData.originalDocument.otherMemory);
+
 		memcpy(taskData.originalDocument, taskData.workingDocument, size_of(Document));
+
+		// initial undo node
+		array_reset(*taskData.originalDocument.undoStack);
+		array_reset(*taskData.originalDocument.redoStack);
+		taskData.originalDocument.nextUndoOffset = 0;
+		commit_history(taskData.originalDocument);
+		taskData.originalDocument.undoStack[taskData.originalDocument.undoStack.count-1].saved = true;
+
+
+		log("TreeMemory Committed %", taskData.workingDocument.treeMemory.first_uncommitted_page - taskData.workingDocument.treeMemory.memory_base);
+		log("Other Committed %", taskData.workingDocument.otherMemory.first_uncommitted_page - taskData.workingDocument.otherMemory.memory_base);
+		log("Buffer Committed %", taskData.workingDocument.bufferMemory.first_uncommitted_page - taskData.workingDocument.bufferMemory.memory_base);
 		push_notification("Document Opened");
 	}
 	else if taskData.result == .FAILED_TO_READ_FILE_DATA {
@@ -452,6 +465,7 @@ load_from_disk_complete :: (data: *void) {
 		push_notification("File open failed");			
 	}
 	free(taskData.workingDocument);
+	free(taskData);
 }
 #scope_export
 
