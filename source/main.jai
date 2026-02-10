@@ -1328,7 +1328,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 		// Draw code
 		success, language := get_language(panel.document.language);
-		if success && language.highlightsQuery {
+		if success && panel.document.tsTree && language.highlightsQuery {
 			queryCursor := ts_query_cursor_new();
 			rangeStartByte := linesOnScreen[0].startByteOffset;
 			rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;

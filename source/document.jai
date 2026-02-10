@@ -425,12 +425,6 @@ load_from_disk_task :: (data: *void) {
 
 	calculate_longest_line(doc);
 
-	// parse the document, assuming we are able to
-	if doc.parser {
-		ts_parser_reset(doc.parser);
-		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
-	}
-
 	taskData.result = .SUCCESS;
 }
 load_from_disk_complete :: (data: *void) {
@@ -452,10 +446,8 @@ load_from_disk_complete :: (data: *void) {
 		commit_history(taskData.originalDocument);
 		taskData.originalDocument.undoStack[taskData.originalDocument.undoStack.count-1].saved = true;
 
+		document_reparse_ts_tree(taskData.originalDocument);
 
-		log("TreeMemory Committed %", taskData.workingDocument.treeMemory.first_uncommitted_page - taskData.workingDocument.treeMemory.memory_base);
-		log("Other Committed %", taskData.workingDocument.otherMemory.first_uncommitted_page - taskData.workingDocument.otherMemory.memory_base);
-		log("Buffer Committed %", taskData.workingDocument.bufferMemory.first_uncommitted_page - taskData.workingDocument.bufferMemory.memory_base);
 		push_notification("Document Opened");
 	}
 	else if taskData.result == .FAILED_TO_READ_FILE_DATA {
@@ -931,11 +923,7 @@ undo :: (doc: *Document) -> s64 {
 	doc.longestLineLength = doc.undoStack[doc.undoStack.count-1].longestLineLength;
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
-	if (doc.parser) {
-		ts_parser_reset(doc.parser);
-		// TODO: do we need to delete the existing tree here??
-		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
-	}
+	document_reparse_ts_tree(doc);
 	return entry.offset;
 }
 
@@ -952,11 +940,7 @@ redo :: (doc: *Document) -> s64 {
 	array_add(*doc.undoStack, entry);
 
 	// could be more efficient here, but don't know how to tell the diff of the undo?
-	if (doc.parser) {
-		ts_parser_reset(doc.parser);
-		// TODO: do we need to delete the existing tree here??
-		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
-	}
+	document_reparse_ts_tree(doc);
 	return entry.offset;
 }
 
@@ -1376,15 +1360,53 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 	}
 }
 
-document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
-	if doc.parser && doc.language {
-		inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
-		ts_tree_edit(doc.tsTree, *inputEdit);
-	
-		doc.tsTree = ts_parser_parse(doc.parser, doc.tsTree, .{payload=doc, read=document_parse_read, encoding=.UTF8});
-	}
+document_reparse_ts_tree :: (doc: *Document) {
+	task := New(TSParseTaskData);
+	task.document = doc;
+	task.tsTreeCopy = null;
+	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 }
 
+document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
+	task := New(TSParseTaskData);
+	task.document = doc;
+	task.tsTreeCopy =ts_tree_copy(doc.tsTree);
+	task.startOffset = startOffset;
+	task.oldEndOffset = oldEndOffset;
+	task.newEndOffset = newEndOffset;
+	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
+}
+
+#scope_file
+TSParseTaskData :: struct {
+	document: *Document;
+	tsTreeCopy: *TSTree;
+	startOffset: s64;
+	oldEndOffset: s64;
+	newEndOffset: s64;
+}
+ts_parse_task :: (data: *void) {
+	taskData := cast(*TSParseTaskData, data);
+
+	if taskData.document.parser && taskData.document.language {
+		if taskData.tsTreeCopy {
+			inputEdit := TSInputEdit.{start_byte=xx taskData.startOffset, old_end_byte=xx taskData.oldEndOffset, new_end_byte=xx taskData.newEndOffset};
+			ts_tree_edit(taskData.tsTreeCopy, *inputEdit);
+			taskData.tsTreeCopy = ts_parser_parse(taskData.document.parser, taskData.tsTreeCopy, .{payload=taskData.document, read=document_parse_read, encoding=.UTF8});
+		}
+		else {
+			taskData.tsTreeCopy = ts_parser_parse(taskData.document.parser, null, .{payload=taskData.document, read=document_parse_read, encoding=.UTF8});
+		}
+	}
+}
+ts_parse_task_complete :: (data: *void) {
+	taskData := cast(*TSParseTaskData, data);
+
+	// @todo: do I have to delete the existing ts tree before I overwrite it? test this out
+	taskData.document.tsTree = taskData.tsTreeCopy;
+}
+
+#scope_export
 
 // helpers
 
