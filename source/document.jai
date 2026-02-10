@@ -292,15 +292,38 @@ document_open :: (path: string) -> *Document {
 
 	// @todo: add to file watcher
 
-	push_notification("Document Opened");
 	return doc;
 }
 
 document_load_from_disk :: (doc: *Document) {
+	data := New(LoadFromDiskTaskData);
+	data.originalDocument = doc;
+	data.workingDocument = New(Document);
+	data.result = .IN_PROGRESS;
+	memcpy(data.workingDocument, data.originalDocument, size_of(Document));
+	push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
+}
+
+#scope_file
+LoadFromDiskTaskData :: struct {
+	originalDocument: *Document;
+	workingDocument: *Document;
+	result: Result;
+	Result :: enum {
+		IN_PROGRESS;
+		SUCCESS;
+		FAILED_TO_READ_FILE_DATA;
+		FAILED_TO_OPEN_FILE_FOR_WRITE;
+	}
+}
+load_from_disk_task :: (data: *void) {
+	taskData := cast(*LoadFromDiskTaskData, data);
+	doc := taskData.workingDocument;
+
 	// if this fails, we have not reset any memory yet, so the existing document will persist in memory
 	f, success := file_open(doc.path);
 	if !success {
-		push_notification("File open failed");
+		taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
 		return;
 	}
 
@@ -326,10 +349,12 @@ document_load_from_disk :: (doc: *Document) {
 	// now actually read in the file data
 	file: string;
     file, success = read_entire_file(f,,buffer_allocator(doc));
-	if !success {
-		push_notification("File read failed");
-	}
 	file_close(*f);
+
+	if !success {
+		taskData.result = .FAILED_TO_READ_FILE_DATA;
+		return;
+	}
 
 	doc.buffers[0].text.data = file.data;
 	doc.buffers[0].text.count = file.count;
@@ -409,11 +434,28 @@ document_load_from_disk :: (doc: *Document) {
 		ts_parser_reset(doc.parser);
 		doc.tsTree = ts_parser_parse(doc.parser, null, .{payload=doc, read=document_parse_read, encoding=.UTF8});
 	}
+
+	taskData.result = .SUCCESS;
 }
+load_from_disk_complete :: (data: *void) {
+	// Assuming we had a success you need to copy all the new data and memory pools into the original document
+	taskData := cast(*LoadFromDiskTaskData, data);
+
+	if taskData.result == .SUCCESS {
+		memcpy(taskData.originalDocument, taskData.workingDocument, size_of(Document));
+		push_notification("Document Opened");
+	}
+	else if taskData.result == .FAILED_TO_READ_FILE_DATA {
+		push_notification("File read failed");			
+	}
+	else if taskData.result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
+		push_notification("File open failed");			
+	}
+	free(taskData.workingDocument);
+}
+#scope_export
 
 document_save :: (doc: *Document, path: string, backup := false) {
-	// TODO: consider an arena for the async task which will last
-	// for the duration of the task then be auto freed
 	data := New(SaveTaskData);
 	data.document = document_copy(doc);
 	data.isBackup = backup;
@@ -467,7 +509,6 @@ save_task :: (data: *void) {
 save_task_complete :: (data: *void) {
 	taskData := cast(*SaveTaskData, data);
 	doc := taskData.document;
-	// TODO: cleanup with arena
 	defer free(taskData.desiredPath);
 	defer free(taskData.document);
 	defer free(taskData);

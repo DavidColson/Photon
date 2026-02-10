@@ -191,17 +191,6 @@ main :: () {
 	if filesToOpen.count > 0 {
 		doc := document_open(filesToOpen[0]);
 
-		// test document copies
-		// copy := document_make_read_only_copy(doc);
-		// cursor := document_create_cursor(copy);
-		// log("print content from a copy file:");
-		// for cursor {
-		// 	print("%", string.{1, *it});
-		// 	if it_index == 200 then break;
-		// }
-		// document_destroy_read_only_copy(copy);
-
-
 		if doc {
 			panel_set_active_document(*focusedPanel, doc);
 		}
@@ -358,7 +347,12 @@ build_ui :: () {
 	
 	// Draw the panel
 	if focusedPanel.document {
-		build_ui_panel(*focusedPanel);
+		if focusedPanel.document.tree {
+			build_ui_panel(*focusedPanel);
+		}
+		else {
+			build_ui_loading_panel(*focusedPanel);
+		}
 	}
 	else {
 		build_ui_empty_panel(*focusedPanel);
@@ -420,6 +414,66 @@ build_ui_empty_panel :: (panel: *Panel) {
 		flags=.DRAW_TEXT,
 		layout=.{ width=text_content(), height=text_content() },
 	});
+}
+
+build_ui_loading_panel :: (panel: *Panel) {
+	panelBox := box(ui_key("panel1"), .{
+		flags=.DRAW_BACKGROUND,
+		layout=.{
+			childLayoutAxis = .Y,
+			width=fixed(panel.layoutRect.w),
+			height=fixed(panel.layoutRect.h),
+			childAlignment=.CENTER
+		},
+	});
+	push_parent(panelBox); defer pop_parent();
+
+	header := box(ui_key_nil, .{
+		flags=.DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM,
+		layout=.{ 
+			childLayoutAxis = .X,
+			width=grow(),
+			height=fit(),
+			padding= padding_all(em(0.3))
+		},
+		palette=.{ background=style.backgroundLight },
+		borderThickness=1.0
+	});
+	{
+		push_parent(header); defer pop_parent();
+		box(ui_key("DUMMY"), .{
+			flags=0,
+			layout=.{ width=text_content(), height=text_content() },
+		});
+	}
+
+	spacer(.Y, fixed(em(5.0)));
+	
+	if asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33 {
+		loadingBox := box(ui_key_nil, .{
+			layout=.{ 
+				childLayoutAxis = .X,
+				width=fit(),
+				height=fit(),
+				padding= padding_all(em(0.3))
+			},
+		});
+		{
+			push_parent(loadingBox); defer pop_parent();
+			box(ui_key("Loading % ...", panel.document.path), .{
+				flags=.DRAW_TEXT,
+				layout=.{ width=text_content(), height=text_content() },
+			});
+
+			spinner := box(ui_key_nil, .{
+				layout=.{ width=text_content(), height=text_content() },
+				fontSize=em(1.0),
+				font=fontIcons
+			});
+			spinner.customDrawFunction = custom_draw_spinner;
+			spinner.customDrawUdata = cast(*void) panel;
+		}
+	}
 }
 
 build_ui_panel :: (panel: *Panel) {
@@ -503,7 +557,6 @@ build_ui_panel :: (panel: *Panel) {
 		if asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33 {
 			spacer(.X, fixed(em(2.0)));
 
-			// how do we rotate this???
 			spinner := box(ui_key_nil, .{
 				layout=.{ width=text_content(), height=text_content() },
 				fontSize=em(1.0),
