@@ -299,7 +299,156 @@ document_open :: (path: string) -> *Document {
 }
 
 document_load_from_disk :: (doc: *Document) {
-	data := New(LoadFromDiskTaskData);
+	TaskData :: struct {
+		originalDocument: *Document;
+		workingDocument: *Document;
+		result: Result;
+		Result :: enum {
+			IN_PROGRESS;
+			SUCCESS;
+			FAILED_TO_READ_FILE_DATA;
+			FAILED_TO_OPEN_FILE_FOR_WRITE;
+		}
+	}
+	load_from_disk_task :: (data: *void) {
+		// @todo: I'm mildly uncomfortable with the memory management happening here with file loading
+		// particularly because we must keep the original file in memory briefly while loading the new one
+		// Additionally the undo tree memory is not part of the pools so it can be hard to track
+		// at some point I would like to try consolidate the memory for each document so it's much easier to control
+		// and give me some confidence there are definitely no leaks
+	
+		taskData := cast(*TaskData, data);
+		doc := taskData.workingDocument;
+
+		doc.bufferMemory.alignment = 1; // important!! make this hard to miss
+
+		// if this fails, we have not reset any memory yet, so the existing document will persist in memory
+		f, success := file_open(doc.path);
+		if !success {
+			taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
+			return;
+		}
+
+		fileSize := file_length(f);
+		if (fileSize > (256*1024*1024)) {
+			// this is a large file, so reserve space for the file plus 30% for additions
+			init(*doc.bufferMemory, cast(int)(fileSize * 1.3));
+			// @todo: better heuristic for guessing how much space you need for line endings and other data
+			init(*doc.otherMemory, 512 * 1024 * 1024);
+		}
+
+		// now actually read in the file data
+		file: string;
+	    file, success = read_entire_file(f,,buffer_allocator(doc));
+		file_close(*f);
+
+		if !success {
+			taskData.result = .FAILED_TO_READ_FILE_DATA;
+			return;
+		}
+
+		doc.buffers[0].text.data = file.data;
+		doc.buffers[0].text.count = file.count;
+		doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
+		doc.buffers[1].text.count = 0;
+
+		// count line starts
+		lineStarts := *doc.buffers[0].lineStarts;
+		lineStarts.allocator = other_allocator(doc);
+
+		array_add(lineStarts, 0);
+		lfCount := 0;
+		crCount := 0;
+		crlfCount := 0;
+		i := 0;
+		while i < doc.buffers[0].text.count {
+			byte := doc.buffers[0].text[i];
+			if byte == #char "\r" {
+				if i < doc.buffers[0].text.count-1 && doc.buffers[0].text[i+1] == #char "\n" {
+					crlfCount += 1;
+					array_add(lineStarts, xx (i+2));
+					i += 1; // skip \n
+				}
+				else {
+					crCount += 1;
+				}
+			}
+			else if byte == #char "\n" {
+				lfCount += 1;
+				array_add(lineStarts, xx (i+1));
+			}
+			i += 1;
+		}
+		if lfCount > 0 && crlfCount == 0 && crCount == 0 {
+			doc.lineEndings = .LF;
+		}
+		else if lfCount == 0 && crlfCount > 0 && crCount == 0 {
+			doc.lineEndings = .CRLF;
+		}
+		else if lfCount > 0 && crlfCount > 0 && crCount == 0 {
+			if lfCount > crlfCount {
+				doc.lineEndings = .MIXED_MAJORITY_LF;
+			}
+			else {
+				doc.lineEndings = .MIXED_MAJORITY_CRLF;
+			}
+		}
+		else if crCount > 0 {
+			push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
+		}
+
+		lineStarts2 := *doc.buffers[1].lineStarts;
+		lineStarts2.allocator = other_allocator(doc);
+		array_add(lineStarts2, 0);
+
+		// make root rb node
+		firstPiece: Document.Piece;
+		firstPiece.length = doc.buffers[0].text.count;
+		firstPiece.lineFeedCount = doc.buffers[0].lineStarts.count-1;
+		firstPiece.start = .{0,0};
+		firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
+		firstPiece.bufferIndex = 0;
+
+		doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
+
+		taskData.result = .SUCCESS;
+	}
+
+	load_from_disk_complete :: (data: *void) {
+		// Assuming we had a success you need to copy all the new data and memory pools into the original document
+		using taskData := cast(*TaskData, data);
+
+		if result == .SUCCESS {
+			// the memory pools will be set to the ones from the workingDocument, so we're done with these
+			fini(*originalDocument.treeMemory);
+			fini(*originalDocument.bufferMemory);
+			fini(*originalDocument.otherMemory);
+
+			memcpy(originalDocument, workingDocument, size_of(Document));
+
+			// initial undo node
+			array_reset(*originalDocument.undoStack);
+			array_reset(*originalDocument.redoStack);
+			originalDocument.nextUndoOffset = 0;
+			commit_history(originalDocument);
+			originalDocument.undoStack[originalDocument.undoStack.count-1].saved = true;
+
+			calculate_longest_line(originalDocument);
+			document_reparse_ts_tree(originalDocument);
+
+			push_notification("Document Opened");
+		}
+		else if result == .FAILED_TO_READ_FILE_DATA {
+			push_notification("File read failed");			
+		}
+		else if result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
+			push_notification("File open failed");			
+		}
+		free(taskData.workingDocument);
+		free(taskData);
+	}
+
+	data := New(TaskData);
 	data.originalDocument = doc;
 	data.workingDocument = New(Document);
 	data.workingDocument.path = doc.path;
@@ -311,246 +460,93 @@ document_load_from_disk :: (doc: *Document) {
 	push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
 }
 
-#scope_file
-LoadFromDiskTaskData :: struct {
-	originalDocument: *Document;
-	workingDocument: *Document;
-	result: Result;
-	Result :: enum {
-		IN_PROGRESS;
-		SUCCESS;
-		FAILED_TO_READ_FILE_DATA;
-		FAILED_TO_OPEN_FILE_FOR_WRITE;
-	}
-}
-load_from_disk_task :: (data: *void) {
-	// @todo: I'm mildly uncomfortable with the memory management happening here with file loading
-	// particularly because we must keep the original file in memory briefly while loading the new one
-	// Additionally the undo tree memory is not part of the pools so it can be hard to track
-	// at some point I would like to try consolidate the memory for each document so it's much easier to control
-	// and give me some confidence there are definitely no leaks
-	
-	taskData := cast(*LoadFromDiskTaskData, data);
-	doc := taskData.workingDocument;
-
-	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
-
-	// if this fails, we have not reset any memory yet, so the existing document will persist in memory
-	f, success := file_open(doc.path);
-	if !success {
-		taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
-		return;
-	}
-
-	fileSize := file_length(f);
-	if (fileSize > (256*1024*1024)) {
-		// this is a large file, so reserve space for the file plus 30% for additions
-		init(*doc.bufferMemory, cast(int)(fileSize * 1.3));
-		// @todo: better heuristic for guessing how much space you need for line endings and other data
-		init(*doc.otherMemory, 512 * 1024 * 1024);
-	}
-
-	// now actually read in the file data
-	file: string;
-    file, success = read_entire_file(f,,buffer_allocator(doc));
-	file_close(*f);
-
-	if !success {
-		taskData.result = .FAILED_TO_READ_FILE_DATA;
-		return;
-	}
-
-	doc.buffers[0].text.data = file.data;
-	doc.buffers[0].text.count = file.count;
-	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
-	doc.buffers[1].text.count = 0;
-
-	// count line starts
-	lineStarts := *doc.buffers[0].lineStarts;
-	lineStarts.allocator = other_allocator(doc);
-
-	array_add(lineStarts, 0);
-	lfCount := 0;
-	crCount := 0;
-	crlfCount := 0;
-	i := 0;
-	while i < doc.buffers[0].text.count {
-		byte := doc.buffers[0].text[i];
-		if byte == #char "\r" {
-			if i < doc.buffers[0].text.count-1 && doc.buffers[0].text[i+1] == #char "\n" {
-				crlfCount += 1;
-				array_add(lineStarts, xx (i+2));
-				i += 1; // skip \n
-			}
-			else {
-				crCount += 1;
-			}
+document_save :: (doc: *Document, path: string, backup := false) {
+	TaskData :: struct {
+		document: *Document;
+		result: Result;
+		desiredPath: string;
+		isBackup: bool;
+		Result :: enum {
+			IN_PROGRESS;
+			SUCCESS;
+			FAILED_TO_MAKE_DIRECTORY;
+			FAILED_TO_OPEN_FILE_FOR_WRITE;
 		}
-		else if byte == #char "\n" {
-			lfCount += 1;
-			array_add(lineStarts, xx (i+1));
+	}
+	save_task :: (data: *void) {
+		using taskData := cast(*TaskData, data);
+		doc := taskData.document;
+
+		directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(desiredPath), recursive = true);
+	    if !directory_make_success {
+			result = .FAILED_TO_MAKE_DIRECTORY;
+			return;
 		}
-		i += 1;
-	}
-	if lfCount > 0 && crlfCount == 0 && crCount == 0 {
-		doc.lineEndings = .LF;
-	}
-	else if lfCount == 0 && crlfCount > 0 && crCount == 0 {
-		doc.lineEndings = .CRLF;
-	}
-	else if lfCount > 0 && crlfCount > 0 && crCount == 0 {
-		if lfCount > crlfCount {
-			doc.lineEndings = .MIXED_MAJORITY_LF;
+
+		fileHandle, success := file_open(desiredPath, true, false);
+		if success {
+			iterator := make_iterator(doc, 0);
+			while iterator.node != null {
+				bufferIndex := iterator.node.piece.bufferIndex;
+				startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], iterator.node.piece.start);
+				success := file_write(*fileHandle, doc.buffers[bufferIndex].text.data + startOffset, iterator.node.piece.length);
+				next_node(*iterator);
+			}
+
+			file_close(*fileHandle);
+			result = .SUCCESS;
+			return;
 		}
 		else {
-			doc.lineEndings = .MIXED_MAJORITY_CRLF;
+			result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
+			return;
 		}
 	}
-	else if crCount > 0 {
-		push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
+	save_task_complete :: (data: *void) {
+		using taskData := cast(*TaskData, data);
+		doc := taskData.document;
+		defer free(desiredPath);
+		defer free(document);
+		defer free(taskData);
+
+		if result == .FAILED_TO_MAKE_DIRECTORY {
+			push_notification("Failed to make directory for file save");
+			return;
+		}
+
+		if result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
+			push_notification("Failed to save file (couldn't open file)");
+			return;
+		}
+
+		if !isBackup {
+			if doc.path != desiredPath {
+				free(doc.path); // this is bad for some reason?
+				doc.path = copy_string(desiredPath);
+			}
+
+			modtime, size, success := file_modtime_and_size(doc.path);
+			if success {
+				doc.diskLastModtime = modtime;
+			}
+
+			push_notification("Document Saved");
+
+			// mark last undo as saved
+			doc.undoStack[doc.undoStack.count-1].saved = true;
+		}
+		else {
+			push_notification("Backup Saved");
+		}
 	}
 
-	lineStarts2 := *doc.buffers[1].lineStarts;
-	lineStarts2.allocator = other_allocator(doc);
-	array_add(lineStarts2, 0);
-
-	// make root rb node
-	firstPiece: Document.Piece;
-	firstPiece.length = doc.buffers[0].text.count;
-	firstPiece.lineFeedCount = doc.buffers[0].lineStarts.count-1;
-	firstPiece.start = .{0,0};
-	firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
-	firstPiece.bufferIndex = 0;
-
-	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
-
-	calculate_longest_line(doc);
-
-	taskData.result = .SUCCESS;
-}
-load_from_disk_complete :: (data: *void) {
-	// Assuming we had a success you need to copy all the new data and memory pools into the original document
-	taskData := cast(*LoadFromDiskTaskData, data);
-
-	if taskData.result == .SUCCESS {
-		// the memory pools will be set to the ones from the workingDocument, so we're done with these
-		fini(*taskData.originalDocument.treeMemory);
-		fini(*taskData.originalDocument.bufferMemory);
-		fini(*taskData.originalDocument.otherMemory);
-
-		memcpy(taskData.originalDocument, taskData.workingDocument, size_of(Document));
-
-		// initial undo node
-		array_reset(*taskData.originalDocument.undoStack);
-		array_reset(*taskData.originalDocument.redoStack);
-		taskData.originalDocument.nextUndoOffset = 0;
-		commit_history(taskData.originalDocument);
-		taskData.originalDocument.undoStack[taskData.originalDocument.undoStack.count-1].saved = true;
-
-		document_reparse_ts_tree(taskData.originalDocument);
-
-		push_notification("Document Opened");
-	}
-	else if taskData.result == .FAILED_TO_READ_FILE_DATA {
-		push_notification("File read failed");			
-	}
-	else if taskData.result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
-		push_notification("File open failed");			
-	}
-	free(taskData.workingDocument);
-	free(taskData);
-}
-#scope_export
-
-document_save :: (doc: *Document, path: string, backup := false) {
-	data := New(SaveTaskData);
+	data := New(TaskData);
 	data.document = document_copy(doc);
 	data.isBackup = backup;
 	data.result = .IN_PROGRESS;
 	data.desiredPath = copy_string(path);
 	push_task(*asyncWorker, data, save_task, save_task_complete);
 }
-
-#scope_file
-SaveTaskData :: struct {
-	document: *Document;
-	result: SaveTaskResult;
-	desiredPath: string;
-	isBackup: bool;
-	SaveTaskResult :: enum {
-		IN_PROGRESS;
-		SUCCESS;
-		FAILED_TO_MAKE_DIRECTORY;
-		FAILED_TO_OPEN_FILE_FOR_WRITE;
-	}
-}
-save_task :: (data: *void) {
-	taskData := cast(*SaveTaskData, data);
-	doc := taskData.document;
-
-	directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(taskData.desiredPath), recursive = true);
-    if !directory_make_success {
-		taskData.result = .FAILED_TO_MAKE_DIRECTORY;
-		return;
-	}
-
-	fileHandle, success := file_open(taskData.desiredPath, true, false);
-	if success {
-		iterator := make_iterator(doc, 0);
-		while iterator.node != null {
-			bufferIndex := iterator.node.piece.bufferIndex;
-			startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], iterator.node.piece.start);
-			success := file_write(*fileHandle, doc.buffers[bufferIndex].text.data + startOffset, iterator.node.piece.length);
-			next_node(*iterator);
-		}
-
-		file_close(*fileHandle);
-		taskData.result = .SUCCESS;
-		return;
-	}
-	else {
-		taskData.result = .FAILED_TO_OPEN_FILE_FOR_WRITE;
-		return;
-	}
-}
-save_task_complete :: (data: *void) {
-	taskData := cast(*SaveTaskData, data);
-	doc := taskData.document;
-	defer free(taskData.desiredPath);
-	defer free(taskData.document);
-	defer free(taskData);
-
-	if taskData.result == .FAILED_TO_MAKE_DIRECTORY {
-		push_notification("Failed to make directory for file save");
-		return;
-	}
-
-	if taskData.result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
-		push_notification("Failed to save file (couldn't open file)");
-		return;
-	}
-
-	if !taskData.isBackup {
-		if doc.path != taskData.desiredPath {
-			free(doc.path); // this is bad for some reason?
-			doc.path = copy_string(taskData.desiredPath);
-		}
-
-		modtime, size, success := file_modtime_and_size(doc.path);
-		if success {
-			doc.diskLastModtime = modtime;
-		}
-
-		push_notification("Document Saved");
-
-		// mark last undo as saved
-		doc.undoStack[doc.undoStack.count-1].saved = true;
-	}
-	else {
-		push_notification("Backup Saved");
-	}
-}
-#scope_export
 
 document_is_unsaved :: (doc: *Document) -> bool {
 	// there is pending edits that have not been committed yet, definitely unsaved
@@ -1831,19 +1827,35 @@ fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
 // Line Length array management
 
 calculate_longest_line :: (doc: *Document) {
-	// TODO: this could be slow, something to chuck in an async job
-	// and set the longest length back when finished
+	TaskData :: struct {
+		document: *Document;
+		longestLine: s32;
+		longestLineLength: s32;
+	}
+	task:: (data: *void) {
+		using taskData := cast(*TaskData , data);
 
-	doc.longestLine = 0;
-	doc.longestLineLength = 0;
+		longestLine = 0;
+		longestLineLength = 0;
 
-	lineIterator := make_line_iterator(doc);
-	for lineIterator {
-		if it.text.count > doc.longestLineLength {
-			doc.longestLine = xx it_index;
-			doc.longestLineLength = xx it.text.count;
+		lineIterator := make_line_iterator(document);
+		for lineIterator {
+			if it.text.count > longestLineLength {
+				longestLine = xx it_index;
+				longestLineLength = xx it.text.count;
+			}
 		}
 	}
+	task_done :: (data: *void) {
+		using taskData := cast(*TaskData , data);
+
+		taskData.document.longestLine = taskData.longestLine;
+		taskData.document.longestLineLength = taskData.longestLineLength;
+	}
+
+	taskData := New(TaskData);
+	taskData.document = doc;
+	push_task(*asyncWorker, taskData, task, task_done);
 }
 
 // debug functions
