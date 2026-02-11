@@ -251,7 +251,6 @@ document_open :: (path: string) -> *Document {
 	}
 
 	doc, locator := find_and_occupy_empty_slot(*open_documents);
-	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
 
 	if is_absolute_path(path) {
 		doc.path = copy_string(path);
@@ -333,6 +332,8 @@ load_from_disk_task :: (data: *void) {
 	
 	taskData := cast(*LoadFromDiskTaskData, data);
 	doc := taskData.workingDocument;
+
+	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
 
 	// if this fails, we have not reset any memory yet, so the existing document will persist in memory
 	f, success := file_open(doc.path);
