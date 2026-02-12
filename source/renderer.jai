@@ -466,7 +466,7 @@ void main()
 	float dist = sdfRoundedBox(pt, halfSize, cornerRadii);
 	float mainSDFfactor = 1 - smoothstep(-edgeSoftness, 0, dist);
 
-	// fragmentColor.a *= mainSDFfactor * borderFactor;
+	fragmentColor.a *= mainSDFfactor * borderFactor;
 } 
 END
 
