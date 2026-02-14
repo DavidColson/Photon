@@ -1465,6 +1465,8 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 }
 
 document_reparse_ts_tree :: (doc: *Document) {
+	if doc.asyncParser == null return;
+
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
@@ -1473,6 +1475,8 @@ document_reparse_ts_tree :: (doc: *Document) {
 }
 
 document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
+	if doc.asyncParser == null return;
+
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
