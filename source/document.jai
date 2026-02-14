@@ -106,11 +106,20 @@ Document :: struct {
 	diskLastModtime: Apollo_Time;
 	locator: Bucket_Locator;
 	language: string;
-	parser: *TSParser;
-	tsTree: *TSTree;
 	longestLine: s32;
 	longestLineLength: s32;
 	isCopy: bool;
+	tsTree: *TSTree;
+
+	// managed by async thread, do not touch
+	// unfortunately due to incremental parsing, we must retain the parser
+	// and tree state between each successive reparse
+	// so if there are many edits within a frame, we need to use the most up
+	// to date parser and ts tree for every parse task on the async thread
+	// at the end of each async job we'll copy asyncTsTree to the actual tsTree
+	// for use on the main thread
+	asyncParser: *TSParser;
+	asyncTsTree: *TSTree;
 
 	// Undo
 	// need to store an array of tree pointers basically
@@ -165,7 +174,7 @@ tree_test :: () {
 
 	// copies again, but without edit
 	log("size of doc %, size of view %", get_size(doc), get_size(copy));
-	free(copy);
+	document_copy_free(copy);
 
 	// iterator
 	
@@ -274,8 +283,8 @@ document_open :: (path: string) -> *Document {
 		log("No language support for file '%' with language '%'", doc.path, doc.language);
 	}
 	else {
-		doc.parser = ts_parser_new();
-		if !ts_parser_set_language(doc.parser, language.treesitterLang) {
+		doc.asyncParser = ts_parser_new();
+		if !ts_parser_set_language(doc.asyncParser , language.treesitterLang) {
 			log("Language ABI mismatch: Language(%) is % and treesitter is %", doc.language, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(language.treesitterLang));
 		}
 
@@ -286,7 +295,7 @@ document_open :: (path: string) -> *Document {
 			        log("%", to_string(buffer));
 			    }
 			}
-			ts_parser_set_logger(doc.parser, .{null, treesitter_logger});
+			ts_parser_set_logger(doc.asyncParser , .{null, treesitter_logger});
 		}
 	}
 
@@ -458,7 +467,7 @@ document_load_from_disk :: (doc: *Document) {
 	data.originalDocument = doc;
 	data.workingDocument = New(Document);
 	data.workingDocument.path = doc.path;
-	data.workingDocument.parser = doc.parser;
+	data.workingDocument.asyncParser = doc.asyncParser;
 	data.workingDocument.locator = doc.locator;
 	data.workingDocument.language = doc.language;
 
@@ -512,7 +521,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 		using taskData := cast(*TaskData, data);
 		doc := taskData.document;
 		defer free(desiredPath);
-		defer free(document);
+		defer document_copy_free(document);
 		defer free(taskData);
 
 		if result == .FAILED_TO_MAKE_DIRECTORY {
@@ -673,7 +682,7 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
 	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
 
-	if beginLine <= doc.longestLine && endLine >= doc.longestLine {
+	defer if beginLine <= doc.longestLine && endLine >= doc.longestLine {
 		calculate_longest_line(doc);
 	}
 	
@@ -1030,11 +1039,19 @@ document_copy :: (doc: *Document) -> *Document {
 	assert(!doc.isCopy, "Don't make copies of copies");
 	copy := New(Document);
 	memcpy(copy, doc, size_of(Document));
-	copy.tsTree = ts_tree_copy(doc.tsTree);
+	if doc.tsTree {
+		copy.tsTree = ts_tree_copy(doc.tsTree);
+	}
 	copy.isCopy = true;
 	return copy;
 }
  
+document_copy_free :: (doc: *Document) {
+	assert(doc.isCopy, "Don't delete actual document");
+	ts_tree_delete(doc.tsTree);
+	free(doc);
+}
+
 // Tree iterators
 
 make_iterator :: (doc: *Document, startOffset: s64 = 0) -> Document.Iterator {
@@ -1438,21 +1455,22 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 		charPtr := doc.buffers[bufferIndex].text.data + startOffset + remainder;
 
 		bytesRead.* = cast(u32, endOffset - (startOffset + remainder));
+
 		return charPtr;
 	}
 }
 
 document_reparse_ts_tree :: (doc: *Document) {
 	task := New(TSParseTaskData);
-	task.document = doc;
-	task.tsTreeCopy = null;
+	task.doc = doc;
+	task.docCopy = document_copy(doc);
 	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 }
 
 document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
 	task := New(TSParseTaskData);
-	task.document = doc;
-	task.tsTreeCopy =ts_tree_copy(doc.tsTree);
+	task.doc = doc;
+	task.docCopy = document_copy(doc);
 	task.startOffset = startOffset;
 	task.oldEndOffset = oldEndOffset;
 	task.newEndOffset = newEndOffset;
@@ -1461,31 +1479,36 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 
 #scope_file
 TSParseTaskData :: struct {
-	document: *Document;
-	tsTreeCopy: *TSTree;
+	doc: *Document;
+	docCopy: *Document;
 	startOffset: s64;
 	oldEndOffset: s64;
 	newEndOffset: s64;
 }
 ts_parse_task :: (data: *void) {
-	taskData := cast(*TSParseTaskData, data);
+	using taskData := cast(*TSParseTaskData, data);
 
-	if taskData.document.parser && taskData.document.language {
-		if taskData.tsTreeCopy {
-			inputEdit := TSInputEdit.{start_byte=xx taskData.startOffset, old_end_byte=xx taskData.oldEndOffset, new_end_byte=xx taskData.newEndOffset};
-			ts_tree_edit(taskData.tsTreeCopy, *inputEdit);
-			taskData.tsTreeCopy = ts_parser_parse(taskData.document.parser, taskData.tsTreeCopy, .{payload=taskData.document, read=document_parse_read, encoding=.UTF8});
+	if doc.asyncParser && doc.language {
+		if docCopy.tsTree {
+			inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
+			ts_tree_edit(doc.asyncTsTree, *inputEdit);
+			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 		else {
-			taskData.tsTreeCopy = ts_parser_parse(taskData.document.parser, null, .{payload=taskData.document, read=document_parse_read, encoding=.UTF8});
+			ts_parser_reset(docCopy.asyncParser);
+			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, null, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 	}
 }
 ts_parse_task_complete :: (data: *void) {
-	taskData := cast(*TSParseTaskData, data);
+	using taskData := cast(*TSParseTaskData, data);
 
-	// @todo: do I have to delete the existing ts tree before I overwrite it? test this out
-	taskData.document.tsTree = taskData.tsTreeCopy;
+	// swap the ts trees
+	ts_tree_delete(doc.tsTree);
+	doc.tsTree = ts_tree_copy(doc.asyncTsTree);
+
+	document_copy_free(taskData.docCopy);
+	free(taskData);
 }
 
 #scope_export
@@ -1914,6 +1937,7 @@ fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
 calculate_longest_line :: (doc: *Document) {
 	TaskData :: struct {
 		document: *Document;
+		documentCopy: *Document;
 		longestLine: s32;
 		longestLineLength: s32;
 	}
@@ -1923,7 +1947,7 @@ calculate_longest_line :: (doc: *Document) {
 		longestLine = 0;
 		longestLineLength = 0;
 
-		lineIterator := make_line_iterator(document);
+		lineIterator := make_line_iterator(documentCopy);
 		for lineIterator {
 			if it.text.count > longestLineLength {
 				longestLine = xx it_index;
@@ -1936,10 +1960,13 @@ calculate_longest_line :: (doc: *Document) {
 
 		taskData.document.longestLine = taskData.longestLine;
 		taskData.document.longestLineLength = taskData.longestLineLength;
+		document_copy_free(taskData.documentCopy);
+		free(taskData);
 	}
 
 	taskData := New(TaskData);
 	taskData.document = doc;
+	taskData.documentCopy = document_copy(doc);
 	push_task(*asyncWorker, taskData, task, task_done);
 }
 

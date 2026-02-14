@@ -40,6 +40,7 @@ build :: () {
              "/wd4701", // disable 'potentially uninitialized local variable'
              "/we4022", // treat 'incompatible types' as an error
              "/MD",
+             "/Zi",
              "/W3");
         for includePaths {
             array_add(*extraArgs, tprint("/I%/%", SOURCE_PATH, it));

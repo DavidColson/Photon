@@ -9,6 +9,7 @@ Async :: struct {
 		workFunc: #type (data: *void);
 		completeFunc: #type (data: *void);
 		next: *Task;
+		id: s32;
 	}
 
 	TaskList :: struct {
@@ -25,6 +26,7 @@ Async :: struct {
 	shutdown: bool;
 	pendingTasks: s32;
 	waitStartTime: Apollo_Time;
+	taskCounter: s32;
 }
 
 init_async :: (using async: *Async) {
@@ -51,6 +53,8 @@ push_task :: (using async: *Async, data: *void, func: #type (data: *void), compl
 	task.workFunc = func;
 	task.completeFunc = completeFunc;
 	task.data = data;
+	task.id = taskCounter;
+	taskCounter += 1;
 	pendingTasks += 1;
 	push_task(*async.available, task);
 	if async.waitStartTime == APOLLO_TIME_INVALID then async.waitStartTime = current_time_monotonic();
@@ -82,6 +86,7 @@ process_completed_tasks :: (using async: *Async) -> s32 {
 		free(task);
 		pendingTasks -= 1;
 	}
+
 	if pendingTasks == 0 then async.waitStartTime = APOLLO_TIME_INVALID;
 	return pendingTasks;
 }
@@ -134,6 +139,7 @@ async_thread_entry :: (thread: *Thread) -> s64 {
 		task = pop_task(*async.available);
 
 		if task {
+			task.next = null;
 			if task.workFunc then task.workFunc(task.data);
 			push_task(*async.completed, task);
 		}
