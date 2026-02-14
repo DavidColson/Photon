@@ -203,6 +203,11 @@ main :: () {
     while !pendingQuit {
 		frameStart := seconds_since_init();
 		update(deltaTime);
+
+		#if BUILD_TYPE == BuildType.DEBUG {
+			memory_visualizer_per_frame_update();
+		}
+
 		updateTime := seconds_since_init() - frameStart;
 
 		// not ideal, should vsync to something else if above 16ms
@@ -211,7 +216,8 @@ main :: () {
 
 		deltaTime = seconds_since_init() - frameStart;
 	}
-     file_close(*logger.logFile);
+	file_close(*logger.logFile);
+	// report_memory_leaks();
 }
 
 update :: (deltaTime: float64) {
@@ -1501,7 +1507,7 @@ evaluate_query_predicates :: (lang: *Language, tsMatch: TSQueryMatch, document: 
 		if predicate.type == {
 			case .MATCH;
 				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
-				matched, captures := match(captureText, predicate.regex);
+				matched, captures := match(captureText, predicate.regex,,temp);
 				if !matched return false ^ predicate.not;
 			case .ANY_OF;
 				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
