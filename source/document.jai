@@ -1013,7 +1013,11 @@ undo :: (doc: *Document) -> s64 {
 	doc.longestLine = doc.undoStack[doc.undoStack.count-1].longestLine;
 	doc.longestLineLength = doc.undoStack[doc.undoStack.count-1].longestLineLength;
 
-	// could be more efficient here, but don't know how to tell the diff of the undo?
+	// @todo: track and coalesce edits such that we can reparse after an undo more precisely
+	// You coalesce edits by doing something like this:
+	// combinedStart = min(combinedStart, start)
+	// combinedOldEnd = max(combinedOldEnd, oldEnd)
+	// combinedNewEnd = combinedOldEnd + totalDeltaBytes
 	document_reparse_ts_tree(doc);
 	return entry.offset;
 }
