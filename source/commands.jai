@@ -922,11 +922,11 @@ next_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = document_search(panel.document, max(panel.cursor.head, panel.cursor.anchor), panel.currentSearchTerm);
+	panel.hasMatches, panel.results = search(panel.document, max(panel.cursor.head, panel.cursor.anchor), panel.currentSearchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = document_search(panel.document, 0, panel.currentSearchTerm);
+		panel.hasMatches, panel.results = search(panel.document, 0, panel.currentSearchTerm);
 	}
 
 	if panel.hasMatches {
@@ -945,7 +945,7 @@ previous_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = document_search(panel.document, 0, panel.currentSearchTerm, stopAtFirstResult=false);
+	panel.hasMatches, panel.results = search(panel.document, 0, panel.currentSearchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -977,7 +977,7 @@ document_search_on_edit :: (userData: *void, input: string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = document_search(panel.document, max(panel.cursor.head, panel.cursor.anchor), input);
+	panel.hasMatches, panel.results = search(panel.document, max(panel.cursor.head, panel.cursor.anchor), input);
 
 	// is the result off the edge of the screen? if so scroll so it's centered
 	if panel.hasMatches {
@@ -988,37 +988,6 @@ document_search_on_edit :: (userData: *void, input: string) {
 		}
 	}
 }
-
-document_search :: (doc: *Document, fromOffset: s64, searchTerm: string, stopAtFirstResult: bool = true) -> bool, [..]Document.Range {
-	startCoordinate := get_coordinate_from_offset(doc, fromOffset);
-
-	matched := false;
-	results : [..]Document.Range;
-
-	// iterate over all the lines
-	lineIterator := make_line_iterator(doc, startCoordinate.line, get_number_of_lines(doc));
-	for lineIterator {
-		i := -1;
-		if it_index == startCoordinate.line+1 {
-			it.text.data += startCoordinate.col;
-			it.text.count -= startCoordinate.col;
-			i = find_index_from_left_nocase(it.text, searchTerm);
-			if i >= 0 then i += startCoordinate.col;
-		}
-		else {
-			i = find_index_from_left_nocase(it.text, searchTerm);
-		}
-
-		if i >= 0 {
-			// found a match, report it
-			matched = true;
-			array_add(*results, Document.Range.{it.startByteOffset+i, it.startByteOffset+i+searchTerm.count});
-			if stopAtFirstResult then break;
-		}
-	}
-	return matched, results;
-}
-
 
 // Insert Mode
 // -----------------------------
@@ -1354,3 +1323,4 @@ normalize_line_endings_lf :: (using panel: *Panel, args: []string) {
 normalize_line_endings_crlf :: (using panel: *Panel, args: []string) {
 	normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
 }
+	

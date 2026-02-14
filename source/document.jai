@@ -750,6 +750,71 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	}
 }
 
+search :: (doc: *Document, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
+	startCoordinate := get_coordinate_from_offset(doc, fromOffset);
+
+	matched := false;
+	results : [..]Document.Range;
+	
+	iter := make_line_iterator(doc, startCoordinate.line);
+	currentNode := iter.node;
+	for iter {
+		// first lets get our string to search
+		haystack: string;
+		haystackStartOffset: s64;
+		haystackEndOffset: s64;
+
+		// current node has not changed, so there could be more lines for us to copy
+		moreLinesInThisNode := ifx iter.node then iter.lineNumInNode < iter.node.piece.end.line else false;
+		if currentNode == iter.node && moreLinesInThisNode {
+			// okay there are more lines available in this file
+			buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
+			startOffset := buffer_cursor_to_offset(buffer, .{iter.lineNumInNode - 1, 0} );
+			endOffset := buffer_cursor_to_offset(buffer, .{iter.node.piece.end.line, 0});
+
+			haystack = string.{endOffset - startOffset, buffer.text.data + startOffset};
+			haystackStartOffset = it.startByteOffset;
+			haystackEndOffset = it.startByteOffset + haystack.count;
+
+			// log("block:\n");
+			// log("%", haystack);
+
+			linesMoved := iter.node.piece.end.line - iter.lineNumInNode;
+			iter.line = iter.line + linesMoved;
+			iter.lineNumInNode = iter.node.piece.end.line;
+
+		}
+		else {
+			haystack = it.text;
+			haystackStartOffset = it.startByteOffset;
+			haystackEndOffset = it.endByteOffset;
+		
+			// log("block:\n");
+			// log("%", it.text);
+		}
+		currentNode = iter.node;
+
+		i := -1;
+		if it_index == startCoordinate.line+1 {
+			haystack.data += startCoordinate.col;
+			haystack.count -= startCoordinate.col;
+			i = find_index_from_left_fast(haystack, searchTerm);
+			if i >= 0 then i += startCoordinate.col;
+		}
+		else {
+			i = find_index_from_left_fast(haystack, searchTerm);
+		}
+
+		if i >= 0 {
+			// found a match, report it
+			matched = true;
+			array_add(*results, Document.Range.{haystackStartOffset+i, haystackStartOffset+i+searchTerm.count});
+			if stopAtFirstResult then break;
+		}
+	}
+	return matched, results;
+}
+
 get_char_at :: (doc: *Document, offset: s64) -> u8 {
 	// get the literal char at the given offset
 

@@ -1757,6 +1757,80 @@ find_index_from_left_nocase :: (s: string, substring: string, start_index := 0) 
     return -1;
 }
 
+find_index_from_left_fast :: (s: string, substring: string, start_index := 0) -> s64 {
+	cursor := start_index;
+
+	if substring.count == 0 then return -1;
+
+	SIMD_WIDTH :: 16; // 16 bytes, 128 bits
+
+	furthestValid := s.count - substring.count;
+	byte1 := substring[0];
+	byte2 := substring[substring.count-1];
+
+    #if CPU == .X64 {
+
+        #asm {
+			// makes a register of all zeroes
+            pxor.x      zeroes:, zeroes;
+
+			// puts our needle into the lowest 32 bit slot of the "first" register
+            movd        first:, byte1;
+			// puts our needle into every slot
+            pshufb.x    first, zeroes;
+
+			// same again but for the last needle
+            movd        last:, byte2;
+            pshufb.x    last, zeroes;
+        }
+
+        while cursor + SIMD_WIDTH < furthestValid {
+            point0 := s.data + cursor;
+            point1 := s.data + cursor + substring.count - 1;
+
+            mask:    u32 = ---;
+            advance: u32;
+            #asm {
+				// loads the next 16 bytes into test registers
+                movdqu.x    test0:, [point0];
+                movdqu.x    test1:, [point1];
+
+				// actually does the test
+                pcmpeqb.x   test0, first;
+                pcmpeqb.x   test1, last;
+
+				// and the results together
+				pand.x test0, test1;
+
+				// takes the most significant bit of each byte and packs them into 16 bit mask
+                pmovmskb.x  mask, test0;
+
+				// bit scan forward to find the index of the first nonzero bit
+                bsf.d       advance, mask;
+            }
+
+			while mask != 0 {
+			    candidate := cursor + advance;
+			    if memcmp(s.data + candidate, substring.data, substring.count) == 0 {
+			        return candidate;
+			    }
+			    mask &= mask - 1; // clear lowest set bit
+			}
+
+            cursor += 16;
+            continue;
+        }
+    }
+
+    while cursor + substring.count < s.count {
+        t := slice(s, cursor, substring.count);
+        if equal(t, substring) return cursor;
+        cursor += 1;
+    }
+
+    return -1;
+}
+
 // notifications
 
 // this function will not copy the string
@@ -2271,7 +2345,7 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 Input :: #import "Input";
 #import "Window_Creation";
 #import "Process";
-#import "Basic";
+#import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Math";
 #import "System";
 #import "String";
@@ -2288,6 +2362,7 @@ Input :: #import "Input";
 #import "Bucket_Array";
 #import "treesitter";
 #import "uniform";
+#import "Bit_Operations";
 
 #load "rect.jai";
 #load "command_picker.jai";
