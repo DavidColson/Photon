@@ -1468,6 +1468,7 @@ document_reparse_ts_tree :: (doc: *Document) {
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
+	task.forceReparse = true;
 	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 }
 
@@ -1475,6 +1476,7 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
+	task.forceReparse = false;
 	task.startOffset = startOffset;
 	task.oldEndOffset = oldEndOffset;
 	task.newEndOffset = newEndOffset;
@@ -1485,6 +1487,7 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 TSParseTaskData :: struct {
 	doc: *Document;
 	docCopy: *Document;
+	forceReparse: bool;
 	startOffset: s64;
 	oldEndOffset: s64;
 	newEndOffset: s64;
@@ -1493,7 +1496,7 @@ ts_parse_task :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
 	if doc.asyncParser && doc.language {
-		if docCopy.tsTree {
+		if !forceReparse {
 			inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
 			ts_tree_edit(doc.asyncTsTree, *inputEdit);
 			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
