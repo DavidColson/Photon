@@ -130,8 +130,8 @@ LoggerData :: struct {
 loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	logger: *LoggerData;
 	logger = cast(*LoggerData)data;
-    
-    write_string(message);
+	
+	write_string(message);
 	write_string("\n");
 	file_write(*logger.logFile, message);
 	file_write(*logger.logFile, "\n");
@@ -142,16 +142,16 @@ main :: () {
 	file :=  file_open(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), for_writing=true, keep_existing_content=false);
 	logger.logFile = file;
 
-    context.logger = loggerFunc;
-    context.logger_data = *logger;
+	context.logger = loggerFunc;
+	context.logger_data = *logger;
 	context.assertion_failed = assertion_failed;
 
-    #if OS == .WINDOWS {
-        Windows :: #import "Windows";
-        // Windows is very bad at thread-switching by default unless you do this. Sad.
+	#if OS == .WINDOWS {
+		Windows :: #import "Windows";
+		// Windows is very bad at thread-switching by default unless you do this. Sad.
 		Windows.timeBeginPeriod(1);
 		platform_init_crash_handler();
-    }
+	}
 
 	success, args, isSet, filesToOpen := parse_arguments(Arguments);
 	if !success {
@@ -165,7 +165,7 @@ main :: () {
 	// tree_test();
 
 	// create window
-    window = create_window(windowWidth, windowHeight, "Photon");
+	window = create_window(windowWidth, windowHeight, "Photon");
 	Input.window_move_callback = update;
 	platform_set_border_color();
 	init_renderer(window);
@@ -179,8 +179,8 @@ main :: () {
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
 	if !init(*watcher, file_change_callback, watch_recursively = false) {
-        push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
-    }
+		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
+	}
 
 	focusedPanel.layoutRect.x = 0;
 	focusedPanel.layoutRect.y = 0;
@@ -199,20 +199,18 @@ main :: () {
 	platform_set_backup_timer(window, do_backup_callback);
 
 	deltaTime: float64 = 0.0;
-    want_screenshot := false;
-    while !pendingQuit {
+	want_screenshot := false;
+	while !pendingQuit {
 		frameStart := seconds_since_init();
 		update(deltaTime);
-
 		#if BUILD_TYPE == BuildType.DEBUG {
 			memory_visualizer_per_frame_update();
 		}
-
 		updateTime := seconds_since_init() - frameStart;
 
 		// not ideal, should vsync to something else if above 16ms
 		timeToSleep := max(16 - updateTime * 1000, 0);
-	    sleep_milliseconds(cast(s32) timeToSleep);
+		sleep_milliseconds(cast(s32) timeToSleep);
 
 		deltaTime = seconds_since_init() - frameStart;
 	}
@@ -227,14 +225,14 @@ update :: (deltaTime: float64) {
 	// collect results from async thread, and if we're still waiting, don't go to sleep
 	if process_completed_tasks(*asyncWorker) > 0 then requestRedraw = true;
 
-    Input.update_window_events();
+	Input.update_window_events();
 
-    for Input.get_window_resizes() {
-        if it.window == window {
-            should_reinit := (it.width != windowWidth) || (it.height != windowHeight);
+	for Input.get_window_resizes() {
+		if it.window == window {
+			should_reinit := (it.width != windowWidth) || (it.height != windowHeight);
 
-            windowWidth  = it.width;
-            windowHeight = it.height;
+			windowWidth  = it.width;
+			windowHeight = it.height;
 
 			resize_backbuffer();
 
@@ -242,11 +240,11 @@ update :: (deltaTime: float64) {
 			focusedPanel.layoutRect.y = 0;
 			focusedPanel.layoutRect.w = xx windowWidth;
 			focusedPanel.layoutRect.h = xx windowHeight;
-        }
-    }
+		}
+	}
 
-    for Input.events_this_frame {
-        if it.type == .QUIT then pendingQuit = true;
+	for Input.events_this_frame {
+		if it.type == .QUIT then pendingQuit = true;
 		array_add(*uiState.events, it);
 	}
 
@@ -287,7 +285,7 @@ update :: (deltaTime: float64) {
 	}
 
 	// @todo: may want to support 120hz or higher? 
-    reset_temporary_storage();
+	reset_temporary_storage();
 }
 
 build_ui :: () {
@@ -708,7 +706,7 @@ build_ui_panel :: (panel: *Panel) {
 			set_cursor_to_mouse_location :: (doc: *Document, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
 				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
 		
-			    x, y, success := get_mouse_pointer_position(window, false);
+				x, y, success := get_mouse_pointer_position(window, false);
 				mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
 				mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
 
@@ -742,7 +740,7 @@ build_ui_panel :: (panel: *Panel) {
 
 			if signal.holding {
 				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
-			    x, y, success := get_mouse_pointer_position(window, false);
+				x, y, success := get_mouse_pointer_position(window, false);
 				if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
 					_, range := panel_calculate_visible_lines(panel);
 					currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
@@ -1308,7 +1306,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 				end := max(panel.cursor.head, panel.cursor.anchor);
 				end = shift_offset_line_endings(panel.document, end + 1, .FORWARD);
 				draw_document_range(panel.document, start, end,
-				 					box.font,
+									box.font,
 									xx box.fontSize,
 									textAreaX,
 									textAreaY,
@@ -1664,32 +1662,32 @@ load_fonts :: () {
 
 // color stuff
 hex_to_color_vec4 :: (src_hex: string) -> Vector4 {
-    hex := src_hex;
-    if hex.count == 6 then hex = tprint("%FF", hex);
-    if hex.count != 8 return Vector4.{};
+	hex := src_hex;
+	if hex.count == 6 then hex = tprint("%FF", hex);
+	if hex.count != 8 return Vector4.{};
 
-    r := slice(hex, 0, 2);
-    g := slice(hex, 2, 2);
-    b := slice(hex, 4, 2);
-    a := slice(hex, 6, 2);
+	r := slice(hex, 0, 2);
+	g := slice(hex, 2, 2);
+	b := slice(hex, 4, 2);
+	a := slice(hex, 6, 2);
 
-    to_float :: (byte_str: string) -> float {
-        hex_digit_to_int :: (char: u8) -> int {
-            char = to_upper(char);
-            if #char "0" <= char && char <= #char "9" return char - #char "0";
-            if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
-            return -1;
-        }
+	to_float :: (byte_str: string) -> float {
+		hex_digit_to_int :: (char: u8) -> int {
+			char = to_upper(char);
+			if #char "0" <= char && char <= #char "9" return char - #char "0";
+			if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
+			return -1;
+		}
 
-        d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
-        if d1 < 0 || d0 < 0 return -1;
+		d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
+		if d1 < 0 || d0 < 0 return -1;
 
-        return (16 * d1 + d0) / 255;
-    }
+		return (16 * d1 + d0) / 255;
+	}
 
-    c := Vector4.{ to_float(r), to_float(g), to_float(b), to_float(a) };
+	c := Vector4.{ to_float(r), to_float(g), to_float(b), to_float(a) };
 
-    return c;
+	return c;
 }
 
 round :: (f: float) -> float {
@@ -1718,7 +1716,7 @@ fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highligh
 
 	// search for the full string first
 	{
-		i := find_index_from_left_nocase(stringToSearch, filter);
+		i := find_index_from_left_nocase_fast(stringToSearch, filter);
 		if i >= 0 {
 			// match!
 			score := (200 + cast(s32, filter.count)) * (MAX_CHARS - i);
@@ -1739,7 +1737,7 @@ fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highligh
 		substr.count = str - substr.data;
 
 		// search 
-		i := find_index_from_left_nocase(stringToSearch, substr, pos);
+		i := find_index_from_left_nocase_fast(stringToSearch, substr, pos);
 		if i < 0 { score = -1; break; }; 
 
 		// found a match!
@@ -1752,15 +1750,105 @@ fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highligh
 	return xx score, highlights;
 }
 
-find_index_from_left_nocase :: (s: string, substring: string, start_index := 0) -> s64 {
-    if !substring return -1;
+find_index_from_left_nocase_fast :: (s: string, substring: string, start_index := 0) -> s64 {
+	cursor := start_index;
 
-    for i: start_index..s.count-substring.count {
-        t := slice(s, i, substring.count);
-        if equal_nocase(t, substring) return i;
-    }
+	if substring.count == 0 then return -1;
 
-    return -1;
+	SIMD_WIDTH :: 16; // 16 bytes, 128 bits
+
+	furthestValid := s.count - substring.count;
+	byte1 := to_lower(substring[0]);
+	byte2 := to_lower(substring[substring.count-1]);
+	_caseBit := 0x20202020;
+	_aMinus1:= 0x40404040;
+	_z:= 0x5a5a5a5a;
+	
+
+	#if CPU == .X64 {
+		#asm {
+			// makes a register of all zeroes
+			pxor.x      zeroes:, zeroes;
+
+			// puts our needle into the lowest 32 bit slot of the "first" register
+			movd        first:, byte1;
+			// puts our needle into every slot
+			pshufb.x    first, zeroes;
+
+			// same again but for the last needle
+			movd        last:, byte2;
+			pshufb.x    last, zeroes;
+
+			movd        caseBit:, _caseBit;
+			pshufb.x    caseBit, zeroes;
+			movd        aMinus1:, _aMinus1;
+			pshufb.x    aMinus1, zeroes;
+			movd        z:, _z;
+			pshufb.x    z, zeroes;
+		}
+
+		while cursor + SIMD_WIDTH < furthestValid {
+			point0 := s.data + cursor;
+			point1 := s.data + cursor + substring.count - 1;
+
+			mask:    u32 = ---;
+			advance: u32;
+			#asm {
+				// loads the next 16 bytes into test registers
+				movdqu.x    test0:, [point0];
+				// make test0 lowercase
+				movdqu.x    tmp:, test0;
+				pcmpgtb.x   tmp, aMinus1; // should be a mask of test > a-1
+				movdqu.x    tmp2:,z;
+				pcmpgtb.x   tmp2, test0; // should be a mask of test <= z 
+				pand.x      tmp, tmp2; // mask of a <= test <= z
+				pand.x      tmp, caseBit; // masking the case to the write bytes
+				por.x       test0,tmp; // apply the lowercase
+
+				movdqu.x    test1:, [point1];
+				// make test1 lowercase
+				movdqu.x    tmp, test1;
+				pcmpgtb.x   tmp, aMinus1;
+				movdqu.x    tmp2, z;
+				pcmpgtb.x   tmp2, test1;
+				pand.x      tmp, tmp2;
+				pand.x      tmp, caseBit;
+				por.x       test1,tmp;
+
+				// actually does the test
+				pcmpeqb.x   test0, first;
+				pcmpeqb.x   test1, last;
+
+				// and the results together
+				pand.x test0, test1;
+
+				// takes the most significant bit of each byte and packs them into 16 bit mask
+				pmovmskb.x  mask, test0;
+
+				// bit scan forward to find the index of the first nonzero bit
+				bsf.d       advance, mask;
+			}
+
+			while mask != 0 {
+				candidate := cursor + advance;
+				if compare_nocase(.{substring.count, s.data + candidate}, substring) == 0 {
+					return candidate;
+				}
+				mask &= mask - 1; // clear lowest set bit
+			}
+
+			cursor += 16;
+			continue;
+		}
+	}
+
+	while cursor + substring.count < s.count {
+		t := slice(s, cursor, substring.count);
+		if equal_nocase(t, substring) return cursor;
+		cursor += 1;
+	}
+
+	return -1;
 }
 
 find_index_from_left_fast :: (s: string, substring: string, start_index := 0) -> s64 {
@@ -1774,67 +1862,67 @@ find_index_from_left_fast :: (s: string, substring: string, start_index := 0) ->
 	byte1 := substring[0];
 	byte2 := substring[substring.count-1];
 
-    #if CPU == .X64 {
+	#if CPU == .X64 {
 
-        #asm {
+		#asm {
 			// makes a register of all zeroes
-            pxor.x      zeroes:, zeroes;
+			pxor.x      zeroes:, zeroes;
 
 			// puts our needle into the lowest 32 bit slot of the "first" register
-            movd        first:, byte1;
+			movd        first:, byte1;
 			// puts our needle into every slot
-            pshufb.x    first, zeroes;
+			pshufb.x    first, zeroes;
 
 			// same again but for the last needle
-            movd        last:, byte2;
-            pshufb.x    last, zeroes;
-        }
+			movd        last:, byte2;
+			pshufb.x    last, zeroes;
+		}
 
-        while cursor + SIMD_WIDTH < furthestValid {
-            point0 := s.data + cursor;
-            point1 := s.data + cursor + substring.count - 1;
+		while cursor + SIMD_WIDTH < furthestValid {
+			point0 := s.data + cursor;
+			point1 := s.data + cursor + substring.count - 1;
 
-            mask:    u32 = ---;
-            advance: u32;
-            #asm {
+			mask:    u32 = ---;
+			advance: u32;
+			#asm {
 				// loads the next 16 bytes into test registers
-                movdqu.x    test0:, [point0];
-                movdqu.x    test1:, [point1];
+				movdqu.x    test0:, [point0];
+				movdqu.x    test1:, [point1];
 
 				// actually does the test
-                pcmpeqb.x   test0, first;
-                pcmpeqb.x   test1, last;
+				pcmpeqb.x   test0, first;
+				pcmpeqb.x   test1, last;
 
 				// and the results together
 				pand.x test0, test1;
 
 				// takes the most significant bit of each byte and packs them into 16 bit mask
-                pmovmskb.x  mask, test0;
+				pmovmskb.x  mask, test0;
 
 				// bit scan forward to find the index of the first nonzero bit
-                bsf.d       advance, mask;
-            }
-
-			while mask != 0 {
-			    candidate := cursor + advance;
-			    if memcmp(s.data + candidate, substring.data, substring.count) == 0 {
-			        return candidate;
-			    }
-			    mask &= mask - 1; // clear lowest set bit
+				bsf.d       advance, mask;
 			}
 
-            cursor += 16;
-            continue;
-        }
-    }
+			while mask != 0 {
+				candidate := cursor + advance;
+				if memcmp(s.data + candidate, substring.data, substring.count) == 0 {
+					return candidate;
+				}
+				mask &= mask - 1; // clear lowest set bit
+			}
 
-    while cursor + substring.count < s.count {
-        t := slice(s, cursor, substring.count);
-        if equal(t, substring) return cursor;
-        cursor += 1;
-    }
+			cursor += 16;
+			continue;
+		}
+	}
 
-    return -1;
+	while cursor + substring.count < s.count {
+		t := slice(s, cursor, substring.count);
+		if equal(t, substring) return cursor;
+		cursor += 1;
+	}
+
+	return -1;
 }
 
 // notifications
@@ -1856,42 +1944,42 @@ push_notification :: (message: string) {
 
 // unicode stuff
 convert_utf32_to_utf8 :: (ch: u32) -> Utf8_Char {
-    UNI_MAX_LEGAL_UTF32 :: 0x0010FFFF;
-    UNI_REPLACEMENT_CHAR :: 0x0000FFFD;
+	UNI_MAX_LEGAL_UTF32 :: 0x0010FFFF;
+	UNI_REPLACEMENT_CHAR :: 0x0000FFFD;
 
-    count := 0;
-    if ch < 0x80                        count = 1;
-    else if ch < 0x800                  count = 2;
-    else if ch < 0x10000                count = 3;
-    else if ch <= UNI_MAX_LEGAL_UTF32   count = 4;
-    else {
-        count = 3;
-        ch = UNI_REPLACEMENT_CHAR;
-    }
+	count := 0;
+	if ch < 0x80                        count = 1;
+	else if ch < 0x800                  count = 2;
+	else if ch < 0x10000                count = 3;
+	else if ch <= UNI_MAX_LEGAL_UTF32   count = 4;
+	else {
+		count = 3;
+		ch = UNI_REPLACEMENT_CHAR;
+	}
 
-    byteMask :: 0xBF;
-    byteMark :: 0x80;
+	byteMask :: 0xBF;
+	byteMark :: 0x80;
 
-    bytes: [4] u8 = ---;
+	bytes: [4] u8 = ---;
 
-    if count == {
-        case 4; bytes[3] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
-        case 3; bytes[2] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
-        case 2; bytes[1] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
-        case 1; bytes[0] = xx (ch | firstByteMark[count]);
-    }
+	if count == {
+		case 4; bytes[3] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
+		case 3; bytes[2] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
+		case 2; bytes[1] = xx (ch | byteMark) & byteMask; ch = ch >> 6; #through;
+		case 1; bytes[0] = xx (ch | firstByteMark[count]);
+	}
 
-    result: Utf8_Char = ---;
-    result.bytes = bytes;
-    result.count = xx count;
-    return result;
+	result: Utf8_Char = ---;
+	result.bytes = bytes;
+	result.count = xx count;
+	return result;
 }
 
 to_string :: (utf8_char: *Utf8_Char) -> string {
-    str: string = ---;
-    str.data  = *utf8_char.bytes[0];
-    str.count = utf8_char.count;
-    return str;
+	str: string = ---;
+	str.data  = *utf8_char.bytes[0];
+	str.count = utf8_char.count;
+	return str;
 }
 
 // simple input field
@@ -1918,8 +2006,8 @@ input_field_get_text :: (inputField: *InputField) -> string {
 }
 
 Utf8_Char :: struct {
-    bytes: [4] u8;
-    count: s32;
+	bytes: [4] u8;
+	count: s32;
 }
 
 // Languages
@@ -2003,7 +2091,7 @@ get_language :: (languageName: string) -> bool, *Language {
 
 	// Load the treesitter language structure
 	functionName := tprint("tree_sitter_%", languageName);
-    loadFunc := cast(LanguageFunc, GetProcAddress(grammarLib, temp_c_string(functionName)));
+	loadFunc := cast(LanguageFunc, GetProcAddress(grammarLib, temp_c_string(functionName)));
 	lang.treesitterLang = loadFunc();
 	
 	// Load queries
@@ -2255,11 +2343,11 @@ fetch_grammars :: () {
 
 build_grammars :: () {
 	// set up compile environment
-    vcPath, linkerPath := find_visual_studio_in_a_ridiculous_garbage_way();
-    compiler := join(linkerPath, "\\", "cl.exe");
-    windowsKit := find_windows_kit_root();
-    vcIncludePath := join(vcPath, "\\..\\..\\include");
-    windowsKitInclude := replace(windowsKit, "Lib", "Include");
+	vcPath, linkerPath := find_visual_studio_in_a_ridiculous_garbage_way();
+	compiler := join(linkerPath, "\\", "cl.exe");
+	windowsKit := find_windows_kit_root();
+	vcIncludePath := join(vcPath, "\\..\\..\\include");
+	windowsKitInclude := replace(windowsKit, "Lib", "Include");
 
 	// @todo: error if you can't find visual studio
 
@@ -2268,35 +2356,35 @@ build_grammars :: () {
 		log("Compiling %..", it.name);
 		directory := tprint("grammars/sources/%", it.name);
 
-	    args: [..] string;
-	    array_add(*args, compiler);
-	    defer array_free(args);
+		args: [..] string;
+		array_add(*args, compiler);
+		defer array_free(args);
 
 		array_add(*args, "src\\parser.c");
 		if file_exists(tprint("%\\src\\scanner.c", directory)) {
 			array_add(*args, "src\\scanner.c");
 		}
-        array_add(*args,
-            "/O2",                      // Maximize speed.
-            "/Oi",                      // Enable intrinsics.
-            // "/Zi",
-        );
+		array_add(*args,
+			"/O2",                      // Maximize speed.
+			"/Oi",                      // Enable intrinsics.
+			// "/Zi",
+		);
 
-        array_add(*args,
-            tprint("/I%", vcIncludePath),
-            tprint("/I%\\um", windowsKitInclude),
-            tprint("/I%\\ucrt", windowsKitInclude),
-            tprint("/I%\\shared", windowsKitInclude),
-        );
+		array_add(*args,
+			tprint("/I%", vcIncludePath),
+			tprint("/I%\\um", windowsKitInclude),
+			tprint("/I%\\ucrt", windowsKitInclude),
+			tprint("/I%\\shared", windowsKitInclude),
+		);
 		
 		array_add(*args, "/link");
 		array_add(*args, "/DLL");
 		array_add(*args, "/MACHINE:AMD64");
 		array_add(*args, tprint("/OUT:%.dll", it.name));
 		array_add(*args,
-            tprint("/libpath:%", vcPath),
-            tprint("/libpath:%\\um\\x64", windowsKit),
-            tprint("/libpath:%\\ucrt\\x64", windowsKit),
+			tprint("/libpath:%", vcPath),
+			tprint("/libpath:%\\um\\x64", windowsKit),
+			tprint("/libpath:%\\ucrt\\x64", windowsKit),
 		);
 		
 		result, output, error := run_command(..args, capture_and_return_output=true, working_directory=directory);
@@ -2322,8 +2410,8 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 	}
 
 	log_stack_trace :: (node: *Stack_Trace_Node, log_flags := Log_Flags.ERROR) {
-	    while node {
-	        if node.info {
+		while node {
+			if node.info {
 				if node.info.name {
 					log("%:%: %", node.info.location.fully_pathed_filename, node.line_number, node.info.name);
 				}
@@ -2331,19 +2419,19 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 					log("%:%: (anonymous procedure)", node.info.location.fully_pathed_filename, node.line_number);
 				}
 			}
-	        node = node.next;
-	    }
+			node = node.next;
+		}
 	}
-    if context.stack_trace {
-        log("Stack trace:");
-        log_stack_trace(context.stack_trace);
-    } else {
-        log("Exiting.");
-    }
+	if context.stack_trace {
+		log("Stack trace:");
+		log_stack_trace(context.stack_trace);
+	} else {
+		log("Exiting.");
+	}
 
-    __runtime_support_disable_stack_trace = true;
+	__runtime_support_disable_stack_trace = true;
 
-    return true;
+	return true;
 }
 
 

@@ -922,11 +922,11 @@ next_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, max(panel.cursor.head, panel.cursor.anchor), panel.currentSearchTerm);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(panel.cursor.head, panel.cursor.anchor), panel.currentSearchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = search(panel.document, 0, panel.currentSearchTerm);
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, panel.currentSearchTerm);
 	}
 
 	if panel.hasMatches {
@@ -945,7 +945,7 @@ previous_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, 0, panel.currentSearchTerm, stopAtFirstResult=false);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, panel.currentSearchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -977,7 +977,7 @@ document_search_on_edit :: (userData: *void, input: string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, max(panel.cursor.head, panel.cursor.anchor), input);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(panel.cursor.head, panel.cursor.anchor), input);
 
 	// is the result off the edge of the screen? if so scroll so it's centered
 	if panel.hasMatches {

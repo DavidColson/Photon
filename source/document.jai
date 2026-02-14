@@ -92,6 +92,12 @@ Document :: struct {
 		end: s64;
 	}
 
+	SearchType :: enum {
+		STANDARD;
+		NOCASE;
+		REGEX;
+	}
+
 	tree: *Node;
 	buffers: [2]Buffer;
 	lastInsert: BufferCursor;
@@ -750,7 +756,7 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	}
 }
 
-search :: (doc: *Document, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
+search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
 	startCoordinate := get_coordinate_from_offset(doc, fromOffset);
 
 	matched := false;
@@ -798,11 +804,25 @@ search :: (doc: *Document, fromOffset: s64, searchTerm: string, stopAtFirstResul
 		if it_index == startCoordinate.line+1 {
 			haystack.data += startCoordinate.col;
 			haystack.count -= startCoordinate.col;
-			i = find_index_from_left_fast(haystack, searchTerm);
+			if type == {
+				case .STANDARD; 
+					i = find_index_from_left_fast(haystack, searchTerm);
+				case .NOCASE;
+					i = find_index_from_left_nocase_fast(haystack, searchTerm);
+				case .REGEX;
+					assert(false, "Not implemented");
+			}
 			if i >= 0 then i += startCoordinate.col;
 		}
 		else {
-			i = find_index_from_left_fast(haystack, searchTerm);
+			if type == {
+				case .STANDARD; 
+					i = find_index_from_left_fast(haystack, searchTerm);
+				case .NOCASE;
+					i = find_index_from_left_nocase_fast(haystack, searchTerm);
+				case .REGEX;
+					assert(false, "Not implemented");
+			}
 		}
 
 		if i >= 0 {
