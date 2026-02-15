@@ -1,4 +1,10 @@
 
+// @todo: currently we use one memory pool for the whole project
+// but really, we need more
+// we need one for long lasting project info such as the folder lists, etc
+// and then we need another that lasts for the duration of the project loading
+// process, to store work, the file scan results and other temporary things
+
 Project :: struct {
 	memory: Flat_Pool;
 
@@ -6,10 +12,21 @@ Project :: struct {
 	ignore: [..]string;
 	allow: [..]string;
 
-	filesToOpen: [..]string;
+	// loading flow
+	ProjectLoadProgress :: enum {
+		WAITING_FOR_FILE_SCAN;
+		FILE_SCAN_IN_PROGRESS;
+		WAITING_FOR_FILE_LOADING;
+		FILE_LOADING_IN_PROGRESS;
+		COMPLETE;
+	}
+	loadProgress: ProjectLoadProgress;
+	fileScanResults: [..]string;
+	pendingFileLoads: s32;
+	threadGroup: Thread_Group;
 }
 
-project_allocator :: (project: *Project) -> Allocator {
+project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
 
@@ -24,11 +41,14 @@ project_parser :: (projectFileName: string) -> bool, Project {
 	handler: Text_File_Handler;
 	defer deinit(*handler);
 
+	// currently we create the project itself and set it up in here
+	// is this a good idea? Not sure lets see how it goes
 	project: Project;
-	project.folders.allocator = project_allocator(*project);
-	project.ignore.allocator = project_allocator(*project);
-	project.allow.allocator = project_allocator(*project);
-	project.filesToOpen.allocator = project_allocator(*project);
+	project.loadProgress = .WAITING_FOR_FILE_SCAN;
+	project.folders.allocator = project_allocator();
+	project.ignore.allocator = project_allocator();
+	project.allow.allocator = project_allocator();
+	project.fileScanResults.allocator = project_allocator();
 
 	currentSection := ProjectFileSections.NONE;
 
@@ -74,11 +94,11 @@ project_parser :: (projectFileName: string) -> bool, Project {
 					error(*handler, "Supplied folder is not a directory or cannot be found");
 					return false, .{};
 				}
-				array_add(*project.folders, line);
+				array_add(*project.folders, copy_string(line,,project_allocator()));
 			case .IGNORE;
-				array_add(*project.ignore, line);
+				array_add(*project.ignore, copy_string(line,,project_allocator()));
 			case .ALLOW;
-				array_add(*project.allow, line);
+				array_add(*project.allow, copy_string(line,,project_allocator()));
 		}
 	}
 
@@ -110,49 +130,126 @@ should_ignore_file :: (path: string) -> bool {
 		if known && type == .TEXT return false;
 	}
 	
-	// @todo: check if the file has zeroes in it
+	if check_file_for_zeroes(path) return true;
+
+	return false;
+}
+
+check_file_for_zeroes :: (path: string) -> bool {
+	file, success := file_open(path);
+	if !success return true;
+	defer file_close(*file);
+	
+	buffer: [4*1024]u8;
+	_, bytesRead := file_read(file, buffer.data, buffer.count);
+
+	if find_index_from_left(.{bytesRead, buffer.data}, 0) >= 0 {
+		return true;
+	}
 	return false;
 }
 
 project_begin_load :: () {
-	// kick off async task to produce a list of files to open
-	// this will use visit_files and give us back a list of files to open
-	// this should scan the desired folders, and apply ignore patterns as required
+	// note this task will read/edit the project without any protection
+	// it is assumed no other project processes happen while this occurs
 
-	maybe_add_file_to_project_list :: (info: *File_Visit_Info, project: *Project) {
-		// should we ignore a directory?
-		if info.is_directory {
-			if should_ignore_path(info.full_name) {
-				info.descend_into_directory = false;
+	collect_project_files_task :: (data: *void) {
+		maybe_add_file_to_project_list :: (info: *File_Visit_Info, udata: *Project) {
+			// should we ignore a directory?
+			if info.is_directory {
+				if should_ignore_path(info.full_name) {
+					info.descend_into_directory = false;
+				}
+				return;
 			}
-			return;
+
+			if should_ignore_file(info.full_name) then return;
+	
+			// log("found file short: % full: %", info.short_name, info.full_name);
+
+			// If we're keeping a file, copy it's full_name with our allocator and store
+			copyString := copy_string(info.full_name,, project_allocator());
+			array_add(*project.fileScanResults, copyString);
 		}
 
-		if should_ignore_file(info.full_name) then return;
-	
-		log("found file short: % full: % is_dir %", info.short_name, info.full_name, info.is_directory);
-
-		// If we're keeping a file, copy it's full_name with our allocator and store
-		array_add(*project.filesToOpen, copy_string(info.full_name,,project_allocator(project)));
+		for project.folders {
+			visit_files(it, recursive=true, *project, maybe_add_file_to_project_list, visit_directories=true);
+		}
 	}
 
-	for project.folders {
-		visit_files(it, recursive=true, *project, maybe_add_file_to_project_list, visit_directories=true);
+	collect_project_files_complete :: (data: *void) {
+		project.loadProgress = .WAITING_FOR_FILE_LOADING;
+	}
+
+	project.loadProgress = .FILE_SCAN_IN_PROGRESS;
+	push_task(*asyncWorker, null, collect_project_files_task, collect_project_files_complete);
+}
+
+project_update :: () {
+	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
+		init_project_thread_group();
+		start(*project.threadGroup);
+
+		for project.fileScanResults {
+			task := New(LoadProjectFileTask,,project_allocator());
+			task.filePath = it;
+			task.resultDocument = null;
+
+			project.pendingFileLoads += 1;
+			add_work(*project.threadGroup, task, tprint("Load task %", it));
+		}
+		project.loadProgress = .FILE_LOADING_IN_PROGRESS;
+	}
+
+	if project.loadProgress == .FILE_LOADING_IN_PROGRESS {
+
+		results := get_completed_work(*project.threadGroup);
+
+		for results {
+			// for each loaded file you will need to copy it's data into the
+			// real document in the open documents table
+			project.pendingFileLoads -= 1;
+		}
+
+		if project.pendingFileLoads == 0 {
+			project.loadProgress = .COMPLETE;
+			log("Project loading complete");
+		}
+
+		// track the progress of the project load
 	}
 }
 
-project_update :: (project: Project) {
-	// once we have results from scanning directories on the async thread,
-	// we should have an array of file paths we want to load
+#scope_file
 
-	// at this point we spin up the thread group on N threads
-	// iterate the list of filepaths
-	// add work for each file
+LoadProjectFileTask :: struct {
+	filePath: string;
+	resultDocument: *Document;
+}
 
-	// get completed work from the thread group
-	// for each loaded file you will need to copy it's data into the
-	// real document in the open documents table
-	// track the progress of the project load
+init_project_thread_group :: () {
+    numCpus := get_number_of_processors();
+
+    assert(numCpus >= 1);
+    if numCpus > 200  numCpus = 200;  // Clamp to a value that is reasonable as of 2021, in case we get weird data.
+
+    #if (OS == .WINDOWS) || (OS == .LINUX) {
+        // This routine reports hyperthreads, so, divide by two, because of Intel marketing.
+        numCpus /= 2;
+    }
+
+	// we want to leave a core for the main thread and one for the async thread
+    numThreads := max(numCpus - 2, 1);
+
+    init(*project.threadGroup, numThreads, project_file_load_thread_proc);
+    project.threadGroup.name    = "Project File Loading";
+    project.threadGroup.logging = false;
+}
+
+project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
+	task := cast(*LoadProjectFileTask, work);
+	log("Thread loading file %", task.filePath);
+	return .CONTINUE;
 }
 
 is_known_file_extension :: inline (extension: string) -> bool, KnownExtensionFileType {
@@ -171,7 +268,7 @@ knownExtensionsTable :: #run -> Table(string, KnownExtensionFileType) {
     textFiles :: string.[
         "jai", "c", "cpp", "h", "hpp", "cc", "cs", "d", "txt", "md", "ini", "csv", "go", "log",
         "bat", "sql", "py", "m", "html", "xml", "plist", "js", "jsx", "ts", "tsx", "json", "yml",
-        "yaml", "toml", "zig", "odin", "photon-project",
+        "yaml", "toml", "zig", "odin", "photon-project", "lua", "luau",
     ];
     for textFiles  table_add(*table, it, .TEXT);
 

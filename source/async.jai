@@ -147,4 +147,3 @@ async_thread_entry :: (thread: *Thread) -> s64 {
 	return 0;
 }
 
-#import "Thread";

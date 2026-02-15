@@ -165,12 +165,6 @@ main :: () {
 	if isSet.build_grammars then build_grammars();
 	if isSet.fetch_grammars || isSet.build_grammars then return;
 
-	// test projects
-	// success, project = project_parser("photon.photon-project");
-	// project_begin_load();
-
-	// now we need to actually load all the files in these folders
-
 	// create window
 	window = create_window(windowWidth, windowHeight, "Photon");
 	Input.window_move_callback = update;
@@ -181,7 +175,6 @@ main :: () {
 	init_ui();
 	rebuild_key_map();
 	init_async(*asyncWorker);
-
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
@@ -202,6 +195,19 @@ main :: () {
 			panel_set_active_document(*focusedPanel, doc);
 		}
 	}
+
+	// test projects
+	// Note, this should be done _after the document is loaded so that it doesn't block the
+	// parsing job of the opening document
+	// does the beg the question of what happens if you open a big file? Does project loading _wait_ until it's done?
+	// The other option is that project loading stays on it's own thread similar to focus?
+	// means we either need a second async worker, or a thread group?
+	// I guess you could literally have a second async worker dedicated to project stuff?
+	// Have to be careful though to keep them separate and touching different things
+	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
+	// and a "project async worker" which handles filesystem scanning and such things
+	// success, project = project_parser("photon.photon-project");
+	// project_begin_load();
 
 	platform_set_backup_timer(window, do_backup_callback);
 
@@ -255,6 +261,7 @@ update :: (deltaTime: float64) {
 		array_add(*uiState.events, it);
 	}
 
+	project_update();
 	process_changes(*watcher);
 
 	newDpiScale := platform_get_dpi_scale(window);
@@ -2465,6 +2472,7 @@ Input :: #import "Input";
 #import "uniform";
 #import "Bit_Operations";
 #import "Text_File_Handler";
+#import "Thread";
 
 #load "rect.jai";
 #load "command_picker.jai";
