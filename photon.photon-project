@@ -1,0 +1,21 @@
+[1]         # Version number; do not delete!
+
+[folders]
+# folders to include in the project
+C:/dev/Photon/
+C:/dev/jai
+
+[ignore]
+# files or directories to ignore
+# default should ignore known binary files
+run
+crashes
+backups
+old
+fonts
+grammars
+.git
+.build
+
+[allow]
+# Evaluated after the ignore list to add back in something
