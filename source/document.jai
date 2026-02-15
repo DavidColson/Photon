@@ -371,6 +371,7 @@ document_load_from_disk :: (doc: *Document) {
 		lineStarts := *doc.buffers[0].lineStarts;
 		lineStarts.allocator = other_allocator(doc);
 
+		// @todo: rewrite this with SIMD
 		array_add(lineStarts, 0);
 		lfCount := 0;
 		crCount := 0;
@@ -409,6 +410,7 @@ document_load_from_disk :: (doc: *Document) {
 			}
 		}
 		else if crCount > 0 {
+			// @todo: bit dangerous calling this from other threads
 			push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
 		}
 

@@ -137,6 +137,93 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	file_write(*logger.logFile, "\n");
 }
 
+// temporary
+Project :: struct {
+	folders: [..]string;
+	ignore: [..]string;
+	allow: [..]string;
+}
+
+ProjectFileSections :: enum {
+	NONE;
+	FOLDERS;
+	IGNORE;
+	ALLOW;
+}
+
+project_parser :: (projectFileName: string) -> bool, Project {
+	handler: Text_File_Handler;
+	defer deinit(*handler);
+
+	project: Project;
+
+	currentSection := ProjectFileSections.NONE;
+
+	start_file(*handler, "project", projectFileName);
+	if handler.failed return false, .{};
+
+	while true {
+		line, found := consume_next_line(*handler);
+		if !found break;
+
+		if begins_with(line, "[") {
+			if !ends_with(line, "]") {
+				error(*handler, "Sections must end with a ']' character");
+				return false, .{};
+			}
+
+			sectionName := slice(line, 1, line.count-2);
+			if sectionName == {
+				case "folders";
+					currentSection = .FOLDERS;
+				case "ignore";
+					currentSection = .IGNORE;
+				case "allow";
+					currentSection = .ALLOW;
+				case;
+					error(*handler, "Unknown section");
+					return false, .{};
+			}
+			continue;
+		}
+		else if currentSection == .NONE {
+			error(*handler, "No open section at this point in the file");
+			return false, .{};
+		}
+
+		if currentSection == {
+			case .FOLDERS;
+				if !is_absolute_path(line) {
+					error(*handler, "Supplied folder is not an absolute path");
+					return false, .{};
+				}
+				if !is_directory(line) {
+					error(*handler, "Supplied folder is not a directory or cannot be found");
+					return false, .{};
+				}
+				array_add(*project.folders, line);
+			case .IGNORE;
+				array_add(*project.ignore, line);
+			case .ALLOW;
+				array_add(*project.allow, line);
+		}
+	}
+
+	return true, project;
+}
+
+begin_load_project :: (project: Project) {
+	// What needs to happen here?
+	// we need to somehow "visit" every file in the given folders (minus the ignored paths)
+	// and then document load them all
+
+	// note that you can't document_load_from_disk as usual cause that'll clog the sequential async thread
+	// we need to call the task functions directly
+
+	// Related but you will want to do some deduplication on the file watcher add directories
+	// otherwise you're gonna have directories added for every file ever
+}
+
 main :: () {
 	startTime = current_time_monotonic();
 	file :=  file_open(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), for_writing=true, keep_existing_content=false);
@@ -162,7 +249,11 @@ main :: () {
 	if isSet.build_grammars then build_grammars();
 	if isSet.fetch_grammars || isSet.build_grammars then return;
 
-	// tree_test();
+	// test projects
+	project: Project;
+	success, project = project_parser("photon.photon-project");
+
+	// now we need to actually load all the files in these folders
 
 	// create window
 	window = create_window(windowWidth, windowHeight, "Photon");
@@ -2457,13 +2548,13 @@ Input :: #import "Input";
 #import "treesitter";
 #import "uniform";
 #import "Bit_Operations";
+#import "Text_File_Handler";
 
 #load "rect.jai";
 #load "command_picker.jai";
 #load "filesystem_navigator.jai";
 #load "file_finder.jai";
 #load "keymap.jai";
-// #load "document.jai";
 #load "commands.jai";
 #load "panel.jai";
 #load "ui.jai";
