@@ -444,6 +444,7 @@ document_load_from_disk :: (doc: *Document) {
 			memcpy(originalDocument, workingDocument, size_of(Document));
 
 			// initial undo node
+			// @todo: this won't work as it got memcpy'd above, so it'll free nothing and leak
 			array_reset(*originalDocument.undoStack);
 			array_reset(*originalDocument.redoStack);
 			originalDocument.nextUndoOffset = 0;
