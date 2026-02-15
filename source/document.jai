@@ -98,6 +98,14 @@ Document :: struct {
 		REGEX;
 	}
 
+	UndoEntry :: struct {
+		tree: *Node;
+		offset: s64;
+		longestLine: s32;
+		longestLineLength: s32;
+		saved: bool;
+	}
+
 	tree: *Node;
 	buffers: [2]Buffer;
 	lastInsert: BufferCursor;
@@ -105,10 +113,12 @@ Document :: struct {
 	path: string;
 	diskLastModtime: Apollo_Time;
 	locator: Bucket_Locator;
-	language: string;
 	longestLine: s32;
 	longestLineLength: s32;
 	isCopy: bool;
+
+	parserHasInitialized: bool;
+	language: string;
 	tsTree: *TSTree;
 
 	// managed by async thread, do not touch
@@ -122,40 +132,22 @@ Document :: struct {
 	asyncTsTree: *TSTree;
 
 	// Undo
-	// need to store an array of tree pointers basically
-	// which you can just replace the tree in the document with as you go back and forth in time
-
-	UndoEntry :: struct {
-		tree: *Node;
-		offset: s64;
-		longestLine: s32;
-		longestLineLength: s32;
-		saved: bool;
-	}
-	
 	undoStack: [..]UndoEntry;
 	redoStack: [..]UndoEntry;
 	nextUndoOffset: s64 = -1;
 
-	// [ ] - Make a new_undo_event function which will save the current tree to the stack
-	//		 This will be called before anyone makes an edit
-	// [ ] - Make an undo function which will push the current tree onto the redo stack,
-	//       and then replace it with a tree from the undo stack
-	// [ ] - Make a redo function which does the opposite
-	// [ ] - Inject undo events everwhere that is appropriate
-
-	// Note it will not be threadsafe to share these pools
-	// Between copies of the tree and allow any allocation
+	// Memory (except the undo stack for reasons?)
 	treeMemory: Flat_Pool;
 	bufferMemory: Flat_Pool;
 	otherMemory: Flat_Pool;
 }
 
-open_documents: Bucket_Array(Document, 128); // might want more when we load full projects in?
-open_document_table: Table(string, Bucket_Locator);
+openDocumentLock: Mutex;
+openDocuments: Bucket_Array(Document, 128); // might want more when we load full projects in?
+openDocumentTable: Table(string, Bucket_Locator);
 
 tree_test :: () {
-	doc := document_open("build_shorter.jai");
+	doc := document_get_or_open("build_shorter.jai");
 
 	pretty_print_tree(doc.tree);
 
@@ -250,11 +242,13 @@ tree_test :: () {
 
 // Document API
 
-document_open :: (path: string) -> *Document {
+document_get_or_open :: (path: string, async := true) -> *Document {
+	lock(*openDocumentLock);
+
 	// check if this file is already open
-	success, existinglocator := table_find_new(*open_document_table, path);
+	success, existinglocator := table_find_new(*openDocumentTable, path);
 	if success {
-		bucket := open_documents.all_buckets[existinglocator.bucket_index];
+		bucket := openDocuments.all_buckets[existinglocator.bucket_index];
 		assert(bucket.occupied[existinglocator.slot_index] == true);
 		return *bucket.data[existinglocator.slot_index];
 	}
@@ -265,7 +259,7 @@ document_open :: (path: string) -> *Document {
 		return null;
 	}
 
-	doc, locator := find_and_occupy_empty_slot(*open_documents);
+	doc, locator := find_and_occupy_empty_slot(*openDocuments);
 
 	if is_absolute_path(path) {
 		doc.path = copy_string(path);
@@ -275,49 +269,29 @@ document_open :: (path: string) -> *Document {
 	}
 	path_overwrite_separators(doc.path, #char "/");
 
-	// Setup document language and parsing
-	doc.language = path_extension(doc.path);
-	language: *Language;
-	success, language = get_language(doc.language);
-	if !success {
-		log("No language support for file '%' with language '%'", doc.path, doc.language);
-	}
-	else {
-		doc.asyncParser = ts_parser_new();
-		if !ts_parser_set_language(doc.asyncParser , language.treesitterLang) {
-			log("Language ABI mismatch: Language(%) is % and treesitter is %", doc.language, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(language.treesitterLang));
-		}
-
-		tsVerboseLogging := false;
-		if tsVerboseLogging {
-			treesitter_logger :: (payload: *void, log_type: TSLogType, buffer: *u8) #c_call {
-			    push_context {
-			        log("%", to_string(buffer));
-			    }
-			}
-			ts_parser_set_logger(doc.asyncParser , .{null, treesitter_logger});
-		}
-	}
-
 	doc.locator = locator;
-	table_add(*open_document_table, doc.path, doc.locator); 
+	table_add(*openDocumentTable, doc.path, doc.locator); 
 
-	document_load_from_disk(doc);
+	unlock(*openDocumentLock);
+
+	document_load_from_disk(doc, async);
 
 	// add to file watcher
-	parentPath := path_strip_filename(doc.path);
-	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	add_directories(*watcher, parentPath);
-	array_add_if_unique(*watchedFiles, doc.path);
+	// @todo: fixme once projects also add to the file watcher
+	// parentPath := path_strip_filename(doc.path);
+	// if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
+	// add_directories(*watcher, parentPath);
+	// array_add_if_unique(*watchedFiles, doc.path);
 
 	return doc;
 }
 
-document_load_from_disk :: (doc: *Document) {
+document_load_from_disk :: (doc: *Document, async := true) {
 	TaskData :: struct {
 		originalDocument: *Document;
 		workingDocument: *Document;
 		result: Result;
+		async: bool;
 		Result :: enum {
 			IN_PROGRESS;
 			SUCCESS;
@@ -326,12 +300,11 @@ document_load_from_disk :: (doc: *Document) {
 		}
 	}
 	load_from_disk_task :: (data: *void) {
-		// @todo: I'm mildly uncomfortable with the memory management happening here with file loading
-		// particularly because we must keep the original file in memory briefly while loading the new one
-		// Additionally the undo tree memory is not part of the pools so it can be hard to track
-		// at some point I would like to try consolidate the memory for each document so it's much easier to control
-		// and give me some confidence there are definitely no leaks
-	
+		// @todo: Need to clean up the memory use in here a little bit
+		// - [ ] Undo stack needs to be in a pool so it's not being forgotten about
+		// - [ ] Dynamic arrays will be thrashing the pools and wasting memory, so see if we cani
+		//       improve that situation somehow?  
+
 		taskData := cast(*TaskData, data);
 		doc := taskData.workingDocument;
 
@@ -428,6 +401,11 @@ document_load_from_disk :: (doc: *Document) {
 
 		doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
 
+		// setup initial undo point
+		doc.nextUndoOffset = 0;
+		commit_history(doc);
+		doc.undoStack[doc.undoStack.count-1].saved = true;
+
 		taskData.result = .SUCCESS;
 	}
 
@@ -441,18 +419,21 @@ document_load_from_disk :: (doc: *Document) {
 			fini(*originalDocument.bufferMemory);
 			fini(*originalDocument.otherMemory);
 
-			memcpy(originalDocument, workingDocument, size_of(Document));
-
-			// initial undo node
-			// @todo: this won't work as it got memcpy'd above, so it'll free nothing and leak
+			// free the old undo memory
 			array_reset(*originalDocument.undoStack);
 			array_reset(*originalDocument.redoStack);
-			originalDocument.nextUndoOffset = 0;
-			commit_history(originalDocument);
-			originalDocument.undoStack[originalDocument.undoStack.count-1].saved = true;
 
-			calculate_longest_line(originalDocument);
-			document_reparse_ts_tree(originalDocument);
+			// free the old ts trees
+			ts_tree_delete(originalDocument.tsTree);
+			ts_tree_delete(originalDocument.asyncTsTree);
+
+			// copy the working document to the real one
+			memcpy(originalDocument, workingDocument, size_of(Document));
+
+			// these two are async and so must be kicked off _after_ the real document
+			// has been updated, sadly can't do them inside the task itself
+			calculate_longest_line(originalDocument, async);
+			document_reparse_ts_tree(originalDocument, async);
 
 			push_notification("Document Opened");
 		}
@@ -466,16 +447,27 @@ document_load_from_disk :: (doc: *Document) {
 		free(taskData);
 	}
 
-	data := New(TaskData);
+	data := New(TaskData); // freed by load_from_disk_complete
+	data.async = async;
 	data.originalDocument = doc;
-	data.workingDocument = New(Document);
+	data.workingDocument = New(Document); // freed by load_from_disk_complete
+
+	// copy over the values that will _not_ get updated by load_from_disk and need to persist
 	data.workingDocument.path = doc.path;
+	data.workingDocument.diskLastModtime = doc.diskLastModtime;
 	data.workingDocument.asyncParser = doc.asyncParser;
+	data.workingDocument.parserHasInitialized = doc.parserHasInitialized ;
 	data.workingDocument.locator = doc.locator;
 	data.workingDocument.language = doc.language;
 
-	data.result = .IN_PROGRESS;
-	push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
+	if async {
+		data.result = .IN_PROGRESS;
+		push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
+	}
+	else {
+		load_from_disk_task(data);
+		load_from_disk_complete(data);
+	}
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {
@@ -523,9 +515,9 @@ document_save :: (doc: *Document, path: string, backup := false) {
 	save_task_complete :: (data: *void) {
 		using taskData := cast(*TaskData, data);
 		doc := taskData.document;
-		defer free(desiredPath);
-		defer document_copy_free(document);
 		defer free(taskData);
+		defer free(desiredPath);
+		defer document_copy_free(taskData.document);
 
 		if result == .FAILED_TO_MAKE_DIRECTORY {
 			push_notification("Failed to make directory for file save");
@@ -586,9 +578,11 @@ document_is_unsaved :: (doc: *Document) -> bool {
 }
 
 document_get_by_path :: (path: string) -> bool, *Document {
-	success, locator := table_find_new(*open_document_table, path);
+	lock(*openDocumentLock);
+	defer unlock(*openDocumentLock);
+	success, locator := table_find_new(*openDocumentTable, path);
 	if success {
-		bucket := open_documents.all_buckets[locator.bucket_index];
+		bucket := openDocuments.all_buckets[locator.bucket_index];
 		assert(bucket.occupied[locator.slot_index] == true);
 		result := *bucket.data[locator.slot_index];
 		return true, result;
@@ -1467,18 +1461,24 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 	}
 }
 
-document_reparse_ts_tree :: (doc: *Document) {
-	if doc.asyncParser == null return;
+document_reparse_ts_tree :: (doc: *Document, async := true) {
+	if doc.parserHasInitialized && doc.asyncParser == null return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
 	task.forceReparse = true;
-	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
+	if async {
+		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
+	}
+	else {
+		ts_parse_task(task);
+		ts_parse_task_complete(task);
+	}
 }
 
-document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64) {
-	if doc.asyncParser == null return;
+document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64, async := true) {
+	if doc.parserHasInitialized && doc.asyncParser == null return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
@@ -1487,7 +1487,13 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 	task.startOffset = startOffset;
 	task.oldEndOffset = oldEndOffset;
 	task.newEndOffset = newEndOffset;
-	push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
+	if async {
+		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
+	}
+	else {
+		ts_parse_task(task);
+		ts_parse_task_complete(task);
+	}
 }
 
 #scope_file
@@ -1502,6 +1508,35 @@ TSParseTaskData :: struct {
 ts_parse_task :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
+	// initial setup if not done already
+	if !doc.parserHasInitialized {
+
+		// @todo: need a more sophisticated mapping to handle header files
+		doc.language = path_extension(doc.path);
+		success, language := get_language(doc.language);
+		if !success {
+			log("No language support for file '%' with language '%'", doc.path, doc.language);
+		}
+		else {
+			doc.asyncParser = ts_parser_new();
+			if !ts_parser_set_language(doc.asyncParser , language.treesitterLang) {
+				log("Language ABI mismatch: Language(%) is % and treesitter is %", doc.language, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(language.treesitterLang));
+			}
+
+			tsVerboseLogging := false;
+			if tsVerboseLogging {
+				treesitter_logger :: (payload: *void, log_type: TSLogType, buffer: *u8) #c_call {
+				    push_context {
+				        log("%", to_string(buffer));
+				    }
+				}
+				ts_parser_set_logger(doc.asyncParser , .{null, treesitter_logger});
+			}
+		}
+		doc.parserHasInitialized = true;
+	}
+
+
 	if doc.asyncParser && doc.language {
 		if !forceReparse {
 			inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
@@ -1509,7 +1544,7 @@ ts_parse_task :: (data: *void) {
 			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 		else {
-			ts_parser_reset(docCopy.asyncParser);
+			ts_parser_reset(doc.asyncParser);
 			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, null, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 	}
@@ -1517,9 +1552,11 @@ ts_parse_task :: (data: *void) {
 ts_parse_task_complete :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
-	// swap the ts trees
-	ts_tree_delete(doc.tsTree);
-	doc.tsTree = ts_tree_copy(doc.asyncTsTree);
+	if doc.asyncTsTree {
+		// swap the ts trees
+		ts_tree_delete(doc.tsTree);
+		doc.tsTree = ts_tree_copy(doc.asyncTsTree);
+	}
 
 	document_copy_free(taskData.docCopy);
 	free(taskData);
@@ -1948,7 +1985,7 @@ fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
 
 // Line Length array management
 
-calculate_longest_line :: (doc: *Document) {
+calculate_longest_line :: (doc: *Document, async := true) {
 	TaskData :: struct {
 		document: *Document;
 		documentCopy: *Document;
@@ -1978,10 +2015,19 @@ calculate_longest_line :: (doc: *Document) {
 		free(taskData);
 	}
 
+	// @todo: there's a growing pattern here with async tasks
+	// potentially we can leverage metaprogramming to help?
+
 	taskData := New(TaskData);
 	taskData.document = doc;
 	taskData.documentCopy = document_copy(doc);
-	push_task(*asyncWorker, taskData, task, task_done);
+	if async {
+		push_task(*asyncWorker, taskData, task, task_done);
+	}
+	else {
+		task(taskData);
+		task_done(taskData);
+	}
 }
 
 // debug functions

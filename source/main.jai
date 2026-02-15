@@ -175,6 +175,7 @@ main :: () {
 	init_ui();
 	rebuild_key_map();
 	init_async(*asyncWorker);
+	init(*openDocumentLock);
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
@@ -189,7 +190,7 @@ main :: () {
 	focusedPanel.activeDialog = .NONE;
 
 	if filesToOpen.count > 0 {
-		doc := document_open(filesToOpen[0]);
+		doc := document_get_or_open(filesToOpen[0]);
 
 		if doc {
 			panel_set_active_document(*focusedPanel, doc);
@@ -206,7 +207,7 @@ main :: () {
 	// Have to be careful though to keep them separate and touching different things
 	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
 	// and a "project async worker" which handles filesystem scanning and such things
-	// success, project = project_parser("photon.photon-project");
+	success, project = project_parser("photon.photon-project");
 	// project_begin_load();
 
 	platform_set_backup_timer(window, do_backup_callback);
@@ -1168,13 +1169,14 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				{
 					push_parent(entryBox); defer pop_parent();
 
-					fileLabel := box(ui_key("%##fileListEntryLabel", path_filename(entry.doc.path)), .{
+
+					fileLabel := box(ui_key("%##fileListEntryLabel%-%", path_filename(entry.doc.path), entry.doc.locator.bucket_index, entry.doc.locator.slot_index), .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
-					pathLabel := box(ui_key("%##fileListPathLabel", entry.doc.path), .{
+					pathLabel := box(ui_key("%##fileListPathLabel%-%", entry.doc.path, entry.doc.locator.bucket_index, entry.doc.locator.slot_index), .{
 						flags=.DRAW_TEXT,
 						fontSize=em(0.7),
 						layout=.{ width=text_content(), height=text_content() },
@@ -1273,11 +1275,11 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	});
 }
 
-// @todo: probably want to move this somewhere else?
+// @todo: probably want to move this somewhere else? Potentially the panel file?
 custom_draw_code :: (box: *UIBox, udata: *void) {
 	panel:*Panel = cast(*Panel)udata;
 
-	if panel.document {
+	if panel.document && get_size(panel.document) > 0 {
 		metrics := get_font_metrics(box.font, xx box.fontSize);
 		documentLines := get_number_of_lines(panel.document);
 
@@ -1594,7 +1596,7 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 }
 
 do_backup_callback :: () {
-	for * open_documents {
+	for * openDocuments {
 		if document_is_unsaved(it) {
 			builder : String_Builder;
 			builder.allocator = temp;

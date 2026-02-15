@@ -17,7 +17,8 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	panel.activeDialog = .FILE_FINDER;
 	editorMode = .DIALOG;
 
-	for * doc: open_documents {
+	// @todo: I worry about the thread safety of this?
+	for * doc: openDocuments {
 		entry := array_add(*fileFinder.fileList);
 		entry.doc = doc;
 		entry.sortKey = 10;
@@ -33,7 +34,8 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);
 
-	for * doc: open_documents {
+	// @todo: I worry about the thread safety of this?
+	for * doc: openDocuments {
 		// @todo: at some point you probably want to search the whole path for matches
 		// need better UI to show the filepath
 		filePath := doc.path;

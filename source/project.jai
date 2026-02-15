@@ -193,7 +193,6 @@ project_update :: () {
 		for project.fileScanResults {
 			task := New(LoadProjectFileTask,,project_allocator());
 			task.filePath = it;
-			task.resultDocument = null;
 
 			project.pendingFileLoads += 1;
 			add_work(*project.threadGroup, task, tprint("Load task %", it));
@@ -224,7 +223,6 @@ project_update :: () {
 
 LoadProjectFileTask :: struct {
 	filePath: string;
-	resultDocument: *Document;
 }
 
 init_project_thread_group :: () {
@@ -248,7 +246,33 @@ init_project_thread_group :: () {
 
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
 	task := cast(*LoadProjectFileTask, work);
-	log("Thread loading file %", task.filePath);
+
+	// you have a filename, you can just load the file now
+
+	// there is a question about whether you defer the copy into place part of the load
+	// and do it on the main thread, thus ensuring there are no edits to the file while someone
+	// could be doing somethign with it, such as quickly opening it into a panel
+
+	// it would be vastly simpler to just do it all in the thread group procedure
+	// but then you somehow need to block the file being accessed or touched by anyone other than this procedure
+
+	// which would imply locking inside each file again, which we've been trying to avoid
+
+	// okay we already have a mechanism where we can do it in a different document pointer that can't be touched by anyone else
+	// and then we copy it over to the real document location on the main thread
+	// but this begs the question of then we need special functionality to handle the reparse on the thread group
+	// cause it has to operate on the non-real document now, and then be copied over later, which is not usually how it works
+
+
+	// so put simply, we need a straightforward way to prevent anyone accessing the document in the openDocument array slot
+	// before it's finished loading
+
+	// we could change panel_set_active_document to take a path or locator, and then block the document being set on any
+	// panel until the loading is complete?
+	// that's 
+
+	document_get_or_open(task.filePath, false);
+	
 	return .CONTINUE;
 }
 

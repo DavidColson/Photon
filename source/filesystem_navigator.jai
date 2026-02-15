@@ -98,7 +98,7 @@ filesystem_nav_action_item :: (using panel: *Panel, args: []string) {
 		}
 		// item is a file, open it
 		else {
-			doc := document_open(make_path_from_strings(state.currentPath,,temp));
+			doc := document_get_or_open(make_path_from_strings(state.currentPath,,temp));
 			panel_set_active_document(panel, doc);
 			editorMode = .NORMAL;
 			filesystem_nav_reset(panel);

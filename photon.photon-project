@@ -9,6 +9,7 @@ C:/dev/jai
 # files or directories to ignore
 # default should ignore known binary files
 run
+testbigfile
 crashes
 backups
 old
