@@ -2083,6 +2083,23 @@ LanguageFunc :: #type () -> *TSLanguage #c_call;
 languages: Table(string, Language);
 
 get_language :: (languageName: string) -> bool, *Language {
+	if languageName.count == 0 return false, null;
+
+	staticLangData: Language;
+	supportsLang := false;
+	for staticLanguageData {
+		if it.name==languageName {
+			staticLangData = it;
+			supportsLang = true;
+			break;
+		}
+	}
+
+	if supportsLang == false {
+		return false, null;
+	}
+
+	// @todo: mutex
 	lang, added := find_or_add(*languages, languageName);
 	if !added {
 		return true, lang;
@@ -2095,12 +2112,8 @@ get_language :: (languageName: string) -> bool, *Language {
 		return false, null;
 	}
 
-	for staticLanguageData {
-		if it.name==languageName {
-			lang.* = it;
-			break;
-		}
-	}
+	// copy data from static lang stuff
+	lang.* = staticLangData;
 
 	// @todo: windows specific code here, need to move to platform_windows
 	grammarLib := LoadLibraryA(temp_c_string(libPath));
@@ -2312,7 +2325,6 @@ get_language :: (languageName: string) -> bool, *Language {
 		}
 	}
 	
-	table_add(*languages, languageName, lang);
 	return true, lang;
 }
 

@@ -1515,7 +1515,8 @@ ts_parse_task :: (data: *void) {
 		doc.language = path_extension(doc.path);
 		success, language := get_language(doc.language);
 		if !success {
-			log("No language support for file '%' with language '%'", doc.path, doc.language);
+			// @todo: put in verbose logging
+			// log("No language support for file '%' with language '%'", doc.path, doc.language);
 		}
 		else {
 			doc.asyncParser = ts_parser_new();

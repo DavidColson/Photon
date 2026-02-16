@@ -292,7 +292,8 @@ knownExtensionsTable :: #run -> Table(string, KnownExtensionFileType) {
     textFiles :: string.[
         "jai", "c", "cpp", "h", "hpp", "cc", "cs", "d", "txt", "md", "ini", "csv", "go", "log",
         "bat", "sql", "py", "m", "html", "xml", "plist", "js", "jsx", "ts", "tsx", "json", "yml",
-        "yaml", "toml", "zig", "odin", "photon-project", "lua", "luau",
+        "yaml", "toml", "zig", "odin", "photon-project", "lua", "luau", "inl", "cmake", "prl",
+		"prl", "ps1", "qml", "vcxproj", "sln", "props", "cxx", "css", "decl"
     ];
     for textFiles  table_add(*table, it, .TEXT);
 
@@ -301,6 +302,7 @@ knownExtensionsTable :: #run -> Table(string, KnownExtensionFileType) {
         "jpg", "png", "gif", "jpeg", "ico", "tif", "tiff", "tga", "bmp", "webp", "mp3", "wav", "ogg",
         "wma", "blend", "blend1", "obj", "fbx", "dae", "3ds", "dat", "msh2", "mpg", "mpeg", "psd", "codex",
         "webm", "zip", "rar", "7z", "bin", "sys", "iso", "nib", "exp", "pyc", "rpyc", "DS_Store", "dmg",
+		"svg", "bnk", "woff2"
     ];
     for binaryFiles  table_add(*table, it, .BINARY);
 
