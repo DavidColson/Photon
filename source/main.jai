@@ -468,7 +468,10 @@ build_ui_loading_panel :: (panel: *Panel) {
 
 	spacer(.Y, fixed(em(5.0)));
 	
-	if asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33 {
+	shouldShowSpinner :=  asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33;
+	shouldShowSpinner = shouldShowSpinner || project.loadProgress != .COMPLETE;
+
+	if shouldShowSpinner {
 		loadingBox := box(ui_key_nil, .{
 			layout=.{ 
 				childLayoutAxis = .X,
@@ -2467,7 +2470,7 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 Input :: #import "Input";
 #import "Window_Creation";
 #import "Process";
-#import "Basic"()(MEMORY_DEBUGGER = true);
+#import "Basic"()(MEMORY_DEBUGGER = false);
 #import "Math";
 #import "System";
 #import "String";

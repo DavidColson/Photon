@@ -12,7 +12,15 @@ Project :: struct {
 	ignore: [..]string;
 	allow: [..]string;
 
-	// loading flow
+	File :: struct {
+		fullName: string;
+		content: string;
+		diskLastModtime: Apollo_Time;
+		lineEndingMode: Document.LineEndingMode;
+		lineStarts: [..]s64;
+	}
+	projectFiles: [..]File;
+
 	ProjectLoadProgress :: enum {
 		WAITING_FOR_FILE_SCAN;
 		FILE_SCAN_IN_PROGRESS;
@@ -21,10 +29,11 @@ Project :: struct {
 		COMPLETE;
 	}
 	loadProgress: ProjectLoadProgress;
-	fileScanResults: [..]string;
 	pendingFileLoads: s32;
 	threadGroup: Thread_Group;
 }
+
+testMutex: Mutex;
 
 project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
@@ -41,6 +50,8 @@ project_parser :: (projectFileName: string) -> bool, Project {
 	handler: Text_File_Handler;
 	defer deinit(*handler);
 
+	init(*testMutex);
+
 	// currently we create the project itself and set it up in here
 	// is this a good idea? Not sure lets see how it goes
 	project: Project;
@@ -48,7 +59,6 @@ project_parser :: (projectFileName: string) -> bool, Project {
 	project.folders.allocator = project_allocator();
 	project.ignore.allocator = project_allocator();
 	project.allow.allocator = project_allocator();
-	project.fileScanResults.allocator = project_allocator();
 
 	currentSection := ProjectFileSections.NONE;
 
@@ -107,12 +117,21 @@ project_parser :: (projectFileName: string) -> bool, Project {
 
 
 should_ignore_path :: (path: string) -> bool {
+	// we assume paths are all allowed
 	shouldBeIgnored := false;
+
+	// first we check if it's allowed
+	for project.allow {
+		result := find_index_from_left_fast(path, it);
+		if result > 0 then shouldBeIgnored = false;
+	}
+	
+	// then check if it's additionally been ignored
 	for project.ignore {
 		result := find_index_from_left_fast(path, it);
 		if result > 0 then shouldBeIgnored = true;
 	}
-	// @todo: respect the allow list
+
 	return shouldBeIgnored;
 }
 
@@ -129,10 +148,8 @@ should_ignore_file :: (path: string) -> bool {
 		if known && type == .BINARY return true;
 		if known && type == .TEXT return false;
 	}
-	
-	if check_file_for_zeroes(path) return true;
 
-	return false;
+	return true; // unknown files are ignored
 }
 
 check_file_for_zeroes :: (path: string) -> bool {
@@ -168,8 +185,8 @@ project_begin_load :: () {
 			// log("found file short: % full: %", info.short_name, info.full_name);
 
 			// If we're keeping a file, copy it's full_name with our allocator and store
-			copyString := copy_string(info.full_name,, project_allocator());
-			array_add(*project.fileScanResults, copyString);
+			file := Project.File.{ fullName = copy_string(info.full_name,, project_allocator()) };
+			array_add(*project.projectFiles, file);
 		}
 
 		for project.folders {
@@ -182,6 +199,7 @@ project_begin_load :: () {
 	}
 
 	project.loadProgress = .FILE_SCAN_IN_PROGRESS;
+	log("Begin project loading");
 	push_task(*asyncWorker, null, collect_project_files_task, collect_project_files_complete);
 }
 
@@ -190,13 +208,14 @@ project_update :: () {
 		init_project_thread_group();
 		start(*project.threadGroup);
 
-		for project.fileScanResults {
-			task := New(LoadProjectFileTask,,project_allocator());
-			task.filePath = it;
-
-			project.pendingFileLoads += 1;
-			add_work(*project.threadGroup, task, tprint("Load task %", it));
+		for * project.projectFiles {
+			if it.content.count == 0 {
+				project.pendingFileLoads += 1;
+				add_work(*project.threadGroup, it, tprint("Load task %", it.fullName));
+			}
 		}
+
+		log("Loading % files into the project", project.pendingFileLoads);
 		project.loadProgress = .FILE_LOADING_IN_PROGRESS;
 	}
 
@@ -215,15 +234,16 @@ project_update :: () {
 			log("Project loading complete");
 		}
 
-		// track the progress of the project load
+		// @todo: track the progress of the project load
 	}
+
+	if project.loadProgress != .COMPLETE {
+		requestRedraw = true;
+	}
+
 }
 
 #scope_file
-
-LoadProjectFileTask :: struct {
-	filePath: string;
-}
 
 init_project_thread_group :: () {
     numCpus := get_number_of_processors();
@@ -238,6 +258,7 @@ init_project_thread_group :: () {
 
 	// we want to leave a core for the main thread and one for the async thread
     numThreads := max(numCpus - 2, 1);
+	// numThreads = 1;
 
     init(*project.threadGroup, numThreads, project_file_load_thread_proc);
     project.threadGroup.name    = "Project File Loading";
@@ -245,33 +266,55 @@ init_project_thread_group :: () {
 }
 
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
-	task := cast(*LoadProjectFileTask, work);
+	file := cast(*Project.File, work);
+	
+	// @todo: handle failed case
+	f, result := file_open(file.fullName);
+	content, success := read_entire_file(f);
+	file_close(*f);
 
-	// you have a filename, you can just load the file now
+	modtime := file_modtime_and_size(file.fullName);
 
-	// there is a question about whether you defer the copy into place part of the load
-	// and do it on the main thread, thus ensuring there are no edits to the file while someone
-	// could be doing somethign with it, such as quickly opening it into a panel
+	file.diskLastModtime = modtime;
+	file.content = content;
 
-	// it would be vastly simpler to just do it all in the thread group procedure
-	// but then you somehow need to block the file being accessed or touched by anyone other than this procedure
-
-	// which would imply locking inside each file again, which we've been trying to avoid
-
-	// okay we already have a mechanism where we can do it in a different document pointer that can't be touched by anyone else
-	// and then we copy it over to the real document location on the main thread
-	// but this begs the question of then we need special functionality to handle the reparse on the thread group
-	// cause it has to operate on the non-real document now, and then be copied over later, which is not usually how it works
-
-
-	// so put simply, we need a straightforward way to prevent anyone accessing the document in the openDocument array slot
-	// before it's finished loading
-
-	// we could change panel_set_active_document to take a path or locator, and then block the document being set on any
-	// panel until the loading is complete?
-	// that's 
-
-	document_get_or_open(task.filePath, false);
+	// find line starts
+	array_add(*file.lineStarts, 0);
+	lfCount := 0;
+	crlfCount := 0;
+	i := 0;
+	while i < file.content.count {
+		j := find_index_from_left(file.content, #char "\n", i);
+		if j >= 0 {
+			if j > 0 && file.content[j-1] == #char "\r" {
+				crlfCount += 1;
+			}
+			else {
+				lfCount += 1;
+			}
+			array_add(*file.lineStarts, j+1);
+			i = j+1;
+		}
+		else {
+			i = file.content.count;
+		}
+	}
+	
+	// set line ending mode
+	if lfCount > 0 && crlfCount == 0 {
+		file.lineEndingMode = .LF;
+	}
+	else if lfCount == 0 && crlfCount > 0 {
+		file.lineEndingMode = .CRLF;
+	}
+	else if lfCount > 0 && crlfCount > 0 {
+		if lfCount > crlfCount {
+			file.lineEndingMode = .MIXED_MAJORITY_LF;
+		}
+		else {
+			file.lineEndingMode = .MIXED_MAJORITY_CRLF;
+		}
+	}
 	
 	return .CONTINUE;
 }
