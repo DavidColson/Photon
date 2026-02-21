@@ -141,7 +141,6 @@ loggerFunc :: (message: string, data: *void, info: Log_Info) {
 }
 
 main :: () {
-	startTime = current_time_monotonic();
 	file :=  file_open(tprint("%/photon.log", path_strip_filename(get_path_of_running_executable())), for_writing=true, keep_existing_content=false);
 	logger.logFile = file;
 
@@ -176,6 +175,7 @@ main :: () {
 	rebuild_key_map();
 	init_async(*asyncWorker);
 	init(*openDocumentLock);
+	init(*languagesMutex);
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
@@ -469,8 +469,6 @@ build_ui_loading_panel :: (panel: *Panel) {
 	spacer(.Y, fixed(em(5.0)));
 	
 	shouldShowSpinner :=  asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33;
-	shouldShowSpinner = shouldShowSpinner || project.loadProgress != .COMPLETE;
-
 	if shouldShowSpinner {
 		loadingBox := box(ui_key_nil, .{
 			layout=.{ 
@@ -576,7 +574,7 @@ build_ui_panel :: (panel: *Panel) {
 			layout=.{ width=text_content(), height=text_content() },
 		});
 
-		if asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33 {
+		if project.loadProgress != .COMPLETE || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
 			spacer(.X, fixed(em(2.0)));
 
 			spinner := box(ui_key_nil, .{
@@ -1173,20 +1171,14 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					push_parent(entryBox); defer pop_parent();
 
 
-					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.docLocator.bucket_index, entry.docLocator.slot_index);
-					if entry.loaded == false {
-						key = ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.projIndex, entry.projIndex);
-					}
+					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.locator.bucket_index, entry.locator.slot_index);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
-					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.docLocator.bucket_index, entry.docLocator.slot_index);
-					if entry.loaded == false {
-						key2 = ui_key("%##fileListPathLabel%-%", entry.filePath, entry.projIndex, entry.projIndex);
-					}
+					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.locator.bucket_index, entry.locator.slot_index);
 					pathLabel := box(key2, .{
 						flags=.DRAW_TEXT,
 						fontSize=em(0.7),
@@ -2092,6 +2084,7 @@ staticLanguageData :: Language.[
 
 LanguageFunc :: #type () -> *TSLanguage #c_call;
 languages: Table(string, Language);
+languagesMutex: Mutex;
 
 get_language :: (languageName: string) -> bool, *Language {
 	if languageName.count == 0 return false, null;
@@ -2110,11 +2103,12 @@ get_language :: (languageName: string) -> bool, *Language {
 		return false, null;
 	}
 
-	// @todo: mutex
+	lock(*languagesMutex);
 	lang, added := find_or_add(*languages, languageName);
 	if !added {
 		return true, lang;
 	}
+	unlock(*languagesMutex);
 
 	// @todo: In packaged builds this should be the base directory of the exe
 	exePath := path_strip_filename(get_path_of_running_executable());
