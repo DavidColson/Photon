@@ -344,47 +344,41 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		lineStarts := *doc.buffers[0].lineStarts;
 		lineStarts.allocator = other_allocator(doc);
 
-		// @todo: rewrite this with SIMD
 		array_add(lineStarts, 0);
 		lfCount := 0;
-		crCount := 0;
 		crlfCount := 0;
 		i := 0;
 		while i < doc.buffers[0].text.count {
-			byte := doc.buffers[0].text[i];
-			if byte == #char "\r" {
-				if i < doc.buffers[0].text.count-1 && doc.buffers[0].text[i+1] == #char "\n" {
+			j := find_index_from_left(.{doc.buffers[0].text.count, doc.buffers[0].text.data}, #char "\n", i);
+			if j >= 0 {
+				if j > 0 && doc.buffers[0].text[j-1] == #char "\r" {
 					crlfCount += 1;
-					array_add(lineStarts, xx (i+2));
-					i += 1; // skip \n
 				}
 				else {
-					crCount += 1;
+					lfCount += 1;
 				}
+				array_add(lineStarts, j+1);
+				i = j+1;
 			}
-			else if byte == #char "\n" {
-				lfCount += 1;
-				array_add(lineStarts, xx (i+1));
+			else {
+				i = doc.buffers[0].text.count;
 			}
-			i += 1;
 		}
-		if lfCount > 0 && crlfCount == 0 && crCount == 0 {
+	
+		// set line ending mode
+		if lfCount > 0 && crlfCount == 0 {
 			doc.lineEndings = .LF;
 		}
-		else if lfCount == 0 && crlfCount > 0 && crCount == 0 {
+		else if lfCount == 0 && crlfCount > 0 {
 			doc.lineEndings = .CRLF;
 		}
-		else if lfCount > 0 && crlfCount > 0 && crCount == 0 {
+		else if lfCount > 0 && crlfCount > 0 {
 			if lfCount > crlfCount {
 				doc.lineEndings = .MIXED_MAJORITY_LF;
 			}
 			else {
 				doc.lineEndings = .MIXED_MAJORITY_CRLF;
 			}
-		}
-		else if crCount > 0 {
-			// @todo: bit dangerous calling this from other threads
-			push_notification("File has CR line endings, undefined behaviour will occur, my apologies");
 		}
 
 		lineStarts2 := *doc.buffers[1].lineStarts;
