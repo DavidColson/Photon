@@ -246,12 +246,7 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	lock(*openDocumentLock);
 
 	// check if this file is already open
-	success, existinglocator := table_find_new(*openDocumentTable, path);
-	if success {
-		bucket := openDocuments.all_buckets[existinglocator.bucket_index];
-		assert(bucket.occupied[existinglocator.slot_index] == true);
-		return *bucket.data[existinglocator.slot_index];
-	}
+	success, existinglocator := document_get_by_path(path);
 
 	// check if the file even exists
 	if !file_exists(path) {
@@ -268,6 +263,9 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 		doc.path = copy_string(get_absolute_path(path));
 	}
 	path_overwrite_separators(doc.path, #char "/");
+	#if OS == .WINDOWS {
+		to_lower_in_place(doc.path);
+	}
 
 	doc.locator = locator;
 	table_add(*openDocumentTable, doc.path, doc.locator); 
@@ -513,6 +511,12 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 
 	calculate_longest_line(doc);
 	document_reparse_ts_tree(doc);
+
+	// @todo: if you ever support closing documents, you must reload it back into the project
+	// if required
+	free(file.content);
+	array_reset(*file.lineStarts);
+	bucket_array_remove(*project.projectFiles, file.locator);
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {
@@ -625,7 +629,8 @@ document_is_unsaved :: (doc: *Document) -> bool {
 document_get_by_path :: (path: string) -> bool, *Document {
 	lock(*openDocumentLock);
 	defer unlock(*openDocumentLock);
-	success, locator := table_find_new(*openDocumentTable, path);
+	pathToCheck := to_lower_copy(path,,temp);
+	success, locator := table_find_new(*openDocumentTable, pathToCheck);
 	if success {
 		bucket := openDocuments.all_buckets[locator.bucket_index];
 		assert(bucket.occupied[locator.slot_index] == true);

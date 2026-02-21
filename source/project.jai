@@ -15,11 +15,12 @@ Project :: struct {
 	File :: struct {
 		fullName: string;
 		content: string;
+		locator: Bucket_Locator;
 		diskLastModtime: Apollo_Time;
 		lineEndingMode: Document.LineEndingMode;
 		lineStarts: [..]s64;
 	}
-	projectFiles: [..]File;
+	projectFiles: Bucket_Array(File, 128);
 
 	ProjectLoadProgress :: enum {
 		WAITING_FOR_FILE_SCAN;
@@ -104,6 +105,8 @@ project_parser :: (projectFileName: string) -> bool, Project {
 					error(*handler, "Supplied folder is not a directory or cannot be found");
 					return false, .{};
 				}
+				line = trim_right(line, "/");
+				line = trim_right(line, "\\");
 				array_add(*project.folders, copy_string(line,,project_allocator()));
 			case .IGNORE;
 				array_add(*project.ignore, copy_string(line,,project_allocator()));
@@ -181,12 +184,17 @@ project_begin_load :: () {
 			}
 
 			if should_ignore_file(info.full_name) then return;
-	
+
+			// see if it's already loaded
+			success, _ := document_get_by_path(info.full_name);
+			if success then return;
+
 			// log("found file short: % full: %", info.short_name, info.full_name);
 
 			// If we're keeping a file, copy it's full_name with our allocator and store
 			file := Project.File.{ fullName = copy_string(info.full_name,, project_allocator()) };
-			array_add(*project.projectFiles, file);
+			locator, entry := bucket_array_add(*project.projectFiles, file);
+			entry.locator = locator;
 		}
 
 		for project.folders {

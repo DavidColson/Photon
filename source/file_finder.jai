@@ -4,8 +4,7 @@ FileFinder :: struct {
 	FileEntry :: struct {
 		filePath: string;
 		loaded : bool;
-		docLocator: Bucket_Locator;
-		projIndex: s64;
+		locator: Bucket_Locator;
 		sortKey: s64;
 		fuzzyMatches: []Highlight;
 	}
@@ -24,7 +23,8 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	for * doc: openDocuments {
 		entry := array_add(*fileFinder.fileList);
 		entry.filePath = doc.path;
-		entry.docLocator = doc.locator;
+		entry.loaded = true;
+		entry.locator = doc.locator;
 		entry.sortKey = 10;
 		fileFinder.numToDisplay += 1;
 	}
@@ -33,7 +33,8 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 		for * file: project.projectFiles {
 			entry := array_add(*fileFinder.fileList);
 			entry.filePath = file.fullName;
-			entry.projIndex = it_index;
+			entry.loaded = false;
+			entry.locator = file.locator;
 			entry.sortKey = 10;
 			fileFinder.numToDisplay += 1;
 		}
@@ -56,7 +57,7 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		entry := array_add(*finder.fileList);
 		entry.filePath = doc.path;
 		entry.loaded = true;
-		entry.docLocator = doc.locator;
+		entry.locator = doc.locator;
 		entry.sortKey = score;
 		entry.fuzzyMatches = fuzzyMatches;
 		if entry.sortKey > 0 {
@@ -71,7 +72,7 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 			entry := array_add(*finder.fileList);
 			entry.filePath = file.fullName;
 			entry.loaded = false;
-			entry.projIndex = it_index;
+			entry.locator = file.locator;
 			entry.sortKey = score;
 			entry.fuzzyMatches = fuzzyMatches;
 			if entry.sortKey > 0 {
@@ -109,13 +110,12 @@ file_finder_select_file :: (panel: *Panel) {
 	finder := *panel.fileFinder;
 	entry := finder.fileList[finder.selectedEntry];
 	if entry.loaded {
-		locator := entry.docLocator; 
-		doc := bucket_array_find_pointer(*openDocuments, locator);
+		doc := bucket_array_find_pointer(*openDocuments, entry.locator);
 		panel_set_active_document(panel, doc);
 	}
 	else {
 		doc := document_get_or_open(finder.fileList[finder.selectedEntry].filePath, noLoad = true);
-		projectFile := *project.projectFiles[finder.fileList[finder.selectedEntry].projIndex];
+		projectFile:= bucket_array_find_pointer(*project.projectFiles, entry.locator);
 		document_load_from_project(doc, projectFile);
 		panel_set_active_document(panel, doc);
 	}
