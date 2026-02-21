@@ -521,6 +521,8 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	free(file.content);
 	array_reset(*file.lineStarts);
 	bucket_array_remove(*project.projectFiles, file.locator);
+
+	push_notification("Document Loaded");
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {
