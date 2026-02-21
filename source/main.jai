@@ -1174,7 +1174,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 
 					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.docLocator.bucket_index, entry.docLocator.slot_index);
-					if entry.docLocator.bucket_index == 0 {
+					if entry.loaded == false {
 						key = ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.projIndex, entry.projIndex);
 					}
 					fileLabel := box(key, .{
@@ -1184,7 +1184,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
 					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.docLocator.bucket_index, entry.docLocator.slot_index);
-					if entry.docLocator.bucket_index == 0 {
+					if entry.loaded == false {
 						key2 = ui_key("%##fileListPathLabel%-%", entry.filePath, entry.projIndex, entry.projIndex);
 					}
 					pathLabel := box(key2, .{

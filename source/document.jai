@@ -242,7 +242,7 @@ tree_test :: () {
 
 // Document API
 
-document_get_or_open :: (path: string, async := true) -> *Document {
+document_get_or_open :: (path: string, noLoad := false, async := true) -> *Document {
 	lock(*openDocumentLock);
 
 	// check if this file is already open
@@ -274,14 +274,9 @@ document_get_or_open :: (path: string, async := true) -> *Document {
 
 	unlock(*openDocumentLock);
 
-	document_load_from_disk(doc, async);
-
-	// add to file watcher
-	// @todo: fixme once projects also add to the file watcher
-	// parentPath := path_strip_filename(doc.path);
-	// if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	// add_directories(*watcher, parentPath);
-	// array_add_if_unique(*watchedFiles, doc.path);
+	if !noLoad {
+		document_load_from_disk(doc, async);
+	}
 
 	return doc;
 }
@@ -408,6 +403,7 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		using taskData := cast(*TaskData, data);
 
 		if result == .SUCCESS {
+			// @todo: proper document free function
 			// the memory pools will be set to the ones from the workingDocument, so we're done with these
 			fini(*originalDocument.treeMemory);
 			fini(*originalDocument.bufferMemory);
@@ -462,6 +458,61 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		load_from_disk_task(data);
 		load_from_disk_complete(data);
 	}
+}
+
+document_load_from_project :: (doc: *Document, file: *Project.File) {
+	// @todo: proper document free function
+	fini(*doc.treeMemory);
+	fini(*doc.bufferMemory);
+	fini(*doc.otherMemory);
+
+	// free the old undo memory
+	array_reset(*doc.undoStack);
+	array_reset(*doc.redoStack);
+
+	// free the old ts trees
+	ts_tree_delete(doc.tsTree);
+	ts_tree_delete(doc.asyncTsTree);
+
+	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
+
+	fileSize := file.content.count;
+	if (fileSize > (256*1024*1024)) {
+		// this is a large file, so reserve space for the file plus 30% for additions
+		init(*doc.bufferMemory, cast(int)(fileSize * 1.3));
+		// @todo: better heuristic for guessing how much space you need for line endings and other data
+		init(*doc.otherMemory, 512 * 1024 * 1024);
+	}
+
+	text := copy_string(file.content,,buffer_allocator(doc));
+	doc.buffers[0].text.data = text.data;
+	doc.buffers[0].text.count = text.count;
+	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
+	doc.buffers[1].text.count = 0;
+
+	array_copy(*doc.buffers[0].lineStarts, file.lineStarts);
+
+	lineStarts2 := *doc.buffers[1].lineStarts;
+	lineStarts2.allocator = other_allocator(doc);
+	array_add(lineStarts2, 0);
+
+	// make root rb node
+	firstPiece: Document.Piece;
+	firstPiece.length = doc.buffers[0].text.count;
+	firstPiece.lineFeedCount = doc.buffers[0].lineStarts.count-1;
+	firstPiece.start = .{0,0};
+	firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
+	firstPiece.bufferIndex = 0;
+
+	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
+
+	// setup initial undo point
+	doc.nextUndoOffset = 0;
+	commit_history(doc);
+	doc.undoStack[doc.undoStack.count-1].saved = true;
+
+	calculate_longest_line(doc);
+	document_reparse_ts_tree(doc);
 }
 
 document_save :: (doc: *Document, path: string, backup := false) {

@@ -3,6 +3,7 @@ FileFinder :: struct {
 
 	FileEntry :: struct {
 		filePath: string;
+		loaded : bool;
 		docLocator: Bucket_Locator;
 		projIndex: s64;
 		sortKey: s64;
@@ -54,6 +55,7 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 		entry := array_add(*finder.fileList);
 		entry.filePath = doc.path;
+		entry.loaded = true;
 		entry.docLocator = doc.locator;
 		entry.sortKey = score;
 		entry.fuzzyMatches = fuzzyMatches;
@@ -68,6 +70,7 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 			score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 			entry := array_add(*finder.fileList);
 			entry.filePath = file.fullName;
+			entry.loaded = false;
 			entry.projIndex = it_index;
 			entry.sortKey = score;
 			entry.fuzzyMatches = fuzzyMatches;
@@ -104,9 +107,18 @@ file_finder_reset :: (panel: *Panel) {
 
 file_finder_select_file :: (panel: *Panel) {
 	finder := *panel.fileFinder;
-	locator := finder.fileList[finder.selectedEntry].docLocator; 
-	doc := bucket_array_find_pointer(*openDocuments, locator);
-	panel_set_active_document(panel, doc);
+	entry := finder.fileList[finder.selectedEntry];
+	if entry.loaded {
+		locator := entry.docLocator; 
+		doc := bucket_array_find_pointer(*openDocuments, locator);
+		panel_set_active_document(panel, doc);
+	}
+	else {
+		doc := document_get_or_open(finder.fileList[finder.selectedEntry].filePath, noLoad = true);
+		projectFile := *project.projectFiles[finder.fileList[finder.selectedEntry].projIndex];
+		document_load_from_project(doc, projectFile);
+		panel_set_active_document(panel, doc);
+	}
 	file_finder_reset(panel);
 	editorMode = .NORMAL;
 }
