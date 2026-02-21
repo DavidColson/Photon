@@ -263,12 +263,16 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 		doc.path = copy_string(get_absolute_path(path));
 	}
 	path_overwrite_separators(doc.path, #char "/");
-	#if OS == .WINDOWS {
-		to_lower_in_place(doc.path);
-	}
 
 	doc.locator = locator;
-	table_add(*openDocumentTable, doc.path, doc.locator); 
+	#if OS == .WINDOWS {
+		// @todo: free when removing a document
+		comparisonPath := to_lower_copy(doc.path);
+		table_add(*openDocumentTable, comparisonPath, doc.locator); 
+	}
+	else {
+		table_add(*openDocumentTable, doc.path, doc.locator); 
+	}
 
 	unlock(*openDocumentLock);
 
