@@ -240,6 +240,7 @@ project_update :: () {
 		if project.pendingFileLoads == 0 {
 			project.loadProgress = .COMPLETE;
 			log("Project loading complete");
+			push_notification("Project Loaded");
 		}
 
 		// @todo: track the progress of the project load
