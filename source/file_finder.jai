@@ -2,7 +2,9 @@ FileFinder :: struct {
 	memory : Flat_Pool;
 
 	FileEntry :: struct {
-		doc: *Document;
+		filePath: string;
+		docLocator: Bucket_Locator;
+		projIndex: s64;
 		sortKey: s64;
 		fuzzyMatches: []Highlight;
 	}
@@ -17,12 +19,23 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	panel.activeDialog = .FILE_FINDER;
 	editorMode = .DIALOG;
 
-	// @todo: I worry about the thread safety of this?
+	// Collect open documents
 	for * doc: openDocuments {
 		entry := array_add(*fileFinder.fileList);
-		entry.doc = doc;
+		entry.filePath = doc.path;
+		entry.docLocator = doc.locator;
 		entry.sortKey = 10;
 		fileFinder.numToDisplay += 1;
+	}
+
+	if project.loadProgress == .COMPLETE {
+		for * file: project.projectFiles {
+			entry := array_add(*fileFinder.fileList);
+			entry.filePath = file.fullName;
+			entry.projIndex = it_index;
+			entry.sortKey = 10;
+			fileFinder.numToDisplay += 1;
+		}
 	}
 
 	fileFinder.input.onEditCallback = file_finder_input_field_on_edit;
@@ -34,14 +47,14 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);
 
-	// @todo: I worry about the thread safety of this?
 	for * doc: openDocuments {
 		// @todo: at some point you probably want to search the whole path for matches
 		// need better UI to show the filepath
 		filePath := doc.path;
 		score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 		entry := array_add(*finder.fileList);
-		entry.doc = doc;
+		entry.filePath = doc.path;
+		entry.docLocator = doc.locator;
 		entry.sortKey = score;
 		entry.fuzzyMatches = fuzzyMatches;
 		if entry.sortKey > 0 {
@@ -49,10 +62,25 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		}
 	}
 
+	if project.loadProgress == .COMPLETE {
+		for * file: project.projectFiles {
+			filePath := file.fullName;
+			score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
+			entry := array_add(*finder.fileList);
+			entry.filePath = file.fullName;
+			entry.projIndex = it_index;
+			entry.sortKey = score;
+			entry.fuzzyMatches = fuzzyMatches;
+			if entry.sortKey > 0 {
+				finder.numToDisplay += 1;
+			}
+		}
+	}
+
 	compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
 		diff := e2.sortKey - e1.sortKey;
 		if diff != 0 return diff;
-		return memcmp(e1.doc.path.data, e2.doc.path.data, min(e1.doc.path.count, e2.doc.path.count));
+		return memcmp(e1.filePath.data, e2.filePath.data, min(e1.filePath.count, e2.filePath.count));
 	}
 	quick_sort(finder.fileList, compare_entries);
 
@@ -76,8 +104,9 @@ file_finder_reset :: (panel: *Panel) {
 
 file_finder_select_file :: (panel: *Panel) {
 	finder := *panel.fileFinder;
-	entry := finder.fileList[finder.selectedEntry].doc; 
-	panel_set_active_document(panel, entry);
+	locator := finder.fileList[finder.selectedEntry].docLocator; 
+	doc := bucket_array_find_pointer(*openDocuments, locator);
+	panel_set_active_document(panel, doc);
 	file_finder_reset(panel);
 	editorMode = .NORMAL;
 }

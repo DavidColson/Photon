@@ -1173,13 +1173,21 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					push_parent(entryBox); defer pop_parent();
 
 
-					fileLabel := box(ui_key("%##fileListEntryLabel%-%", path_filename(entry.doc.path), entry.doc.locator.bucket_index, entry.doc.locator.slot_index), .{
+					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.docLocator.bucket_index, entry.docLocator.slot_index);
+					if entry.docLocator.bucket_index == 0 {
+						key = ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.projIndex, entry.projIndex);
+					}
+					fileLabel := box(key, .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
-					pathLabel := box(ui_key("%##fileListPathLabel%-%", entry.doc.path, entry.doc.locator.bucket_index, entry.doc.locator.slot_index), .{
+					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.docLocator.bucket_index, entry.docLocator.slot_index);
+					if entry.docLocator.bucket_index == 0 {
+						key2 = ui_key("%##fileListPathLabel%-%", entry.filePath, entry.projIndex, entry.projIndex);
+					}
+					pathLabel := box(key2, .{
 						flags=.DRAW_TEXT,
 						fontSize=em(0.7),
 						layout=.{ width=text_content(), height=text_content() },
