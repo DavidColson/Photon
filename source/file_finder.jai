@@ -54,13 +54,13 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		// need better UI to show the filepath
 		filePath := doc.path;
 		score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
-		entry := array_add(*finder.fileList);
-		entry.filePath = doc.path;
-		entry.loaded = true;
-		entry.locator = doc.locator;
-		entry.sortKey = score;
-		entry.fuzzyMatches = fuzzyMatches;
-		if entry.sortKey > 0 {
+		if score > 0 {
+			entry := array_add(*finder.fileList);
+			entry.filePath = doc.path;
+			entry.loaded = true;
+			entry.locator = doc.locator;
+			entry.sortKey = score;
+			entry.fuzzyMatches = fuzzyMatches;
 			finder.numToDisplay += 1;
 		}
 	}
@@ -69,13 +69,13 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		for * file: project.projectFiles {
 			filePath := file.fullName;
 			score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
-			entry := array_add(*finder.fileList);
-			entry.filePath = file.fullName;
-			entry.loaded = false;
-			entry.locator = file.locator;
-			entry.sortKey = score;
-			entry.fuzzyMatches = fuzzyMatches;
-			if entry.sortKey > 0 {
+			if score > 0 {
+				entry := array_add(*finder.fileList);
+				entry.filePath = file.fullName;
+				entry.loaded = false;
+				entry.locator = file.locator;
+				entry.sortKey = score;
+				entry.fuzzyMatches = fuzzyMatches;
 				finder.numToDisplay += 1;
 			}
 		}
