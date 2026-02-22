@@ -12,6 +12,8 @@ Project :: struct {
 	ignore: [..]string;
 	allow: [..]string;
 
+	watcher: File_Watcher(void);
+
 	File :: struct {
 		fullName: string;
 		content: string;
@@ -21,6 +23,7 @@ Project :: struct {
 		lineStarts: [..]s64;
 	}
 	projectFiles: Bucket_Array(File, 128);
+	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
 
 	ProjectLoadProgress :: enum {
 		WAITING_FOR_FILE_SCAN;
@@ -173,6 +176,12 @@ project_begin_load :: () {
 	// note this task will read/edit the project without any protection
 	// it is assumed no other project processes happen while this occurs
 
+	if !init(*project.watcher, project_file_watch_callback, watch_recursively = true) {
+		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
+	}
+
+    add_directories(*project.watcher, ..project.folders);
+
 	collect_project_files_task :: (data: *void) {
 		maybe_add_file_to_project_list :: (info: *File_Visit_Info, udata: *Project) {
 			// should we ignore a directory?
@@ -195,6 +204,7 @@ project_begin_load :: () {
 			file := Project.File.{ fullName = copy_string(info.full_name,, project_allocator()) };
 			locator, entry := bucket_array_add(*project.projectFiles, file);
 			entry.locator = locator;
+			table_add(*project.projectFileTable, file.fullName, locator);
 		}
 
 		for project.folders {
@@ -250,9 +260,40 @@ project_update :: () {
 		requestRedraw = true;
 	}
 
+	// @todo: what happens if a file changes while we're still loading the project?
+	process_changes(*project.watcher);
+
+	// Project file watcher
+	// setup file watcher during project load, watch the project paths recursively
+	// if an event occurs, we somehow need to figure out if it's a file we have loaded in
+	// if it is, then you want to trigger a reload of said file, ideally in the background
+	// so trigger a thread group load of said file, and the thread group should free any memory
+	// previously used and then setup the new file
+	// you probably will want to put an atomic on the file or something to prevent someone loading it while it's being updated
 }
 
 #scope_file
+
+project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+	log("FileChange detected %", change.full_path);
+
+	// is this actually a file we care about in the project?
+	success, fileLocator := table_find(*project.projectFileTable, change.full_path);
+	if success {
+		file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
+
+		if change.events & .MODIFIED {
+			project.pendingFileLoads += 1;
+			add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
+		}
+		if change.events & .ADDED {
+			// make a new file and push a task
+		}
+		if change.events & .MOVED {
+			// @todo: alter the path in the file
+		}
+	}
+}
 
 init_project_thread_group :: () {
     numCpus := get_number_of_processors();
@@ -276,6 +317,12 @@ init_project_thread_group :: () {
 
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
 	file := cast(*Project.File, work);
+
+	// @todo: mutex/atomic or some kind of protection
+	if file.content.count {
+		free(file.content);
+		array_reset(*file.lineStarts);
+	}
 	
 	// @todo: handle failed case
 	f, result := file_open(file.fullName);
