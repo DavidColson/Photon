@@ -43,6 +43,11 @@ project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
 
+free_file :: (file: *Project.File) {
+	free(file.content);
+	array_reset(*file.lineStarts);
+}
+
 ProjectFileSections :: enum {
 	NONE;
 	FOLDERS;
@@ -275,22 +280,39 @@ project_update :: () {
 #scope_file
 
 project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
-	log("FileChange detected %", change.full_path);
+	log("FileChange detected % %", change.full_path, change.events);
+
+	// @todo: the file change may relate to an open document
+	// in that case forward the change event to the document callback function (when it's been made)
 
 	// is this actually a file we care about in the project?
-	success, fileLocator := table_find(*project.projectFileTable, change.full_path);
-	if success {
-		file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
-
+	if !should_ignore_file(change.full_path) {
 		if change.events & .MODIFIED {
+			success, fileLocator := table_find(*project.projectFileTable, change.full_path);
+			if success {
+				file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
+				project.pendingFileLoads += 1;
+				add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
+			}
+		}
+		if change.events & .ADDED || change.events & .MOVED_TO {
+			newFile := Project.File.{ fullName = copy_string(change.full_path,, project_allocator()) };
+			locator, entry := bucket_array_add(*project.projectFiles, newFile);
+			entry.locator = locator;
+			table_add(*project.projectFileTable, newFile.fullName, locator);
+
 			project.pendingFileLoads += 1;
-			add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
+			add_work(*project.threadGroup, entry, tprint("Load task %", entry.fullName));
 		}
-		if change.events & .ADDED {
-			// make a new file and push a task
-		}
-		if change.events & .MOVED {
-			// @todo: alter the path in the file
+		if change.events & .MOVED_FROM || change.events & .REMOVED {
+			success, fileLocator := table_find(*project.projectFileTable, change.full_path);
+			if success {
+				file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
+				free_file(file);
+				bucket_array_remove(*project.projectFiles, fileLocator);
+				table_remove(*project.projectFileTable, change.full_path);
+			}
+			
 		}
 	}
 }
@@ -319,10 +341,7 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 	file := cast(*Project.File, work);
 
 	// @todo: mutex/atomic or some kind of protection
-	if file.content.count {
-		free(file.content);
-		array_reset(*file.lineStarts);
-	}
+	free_file(file);
 	
 	// @todo: handle failed case
 	f, result := file_open(file.fullName);
