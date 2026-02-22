@@ -4,6 +4,7 @@
 #import "File_Utilities";
 Compiler :: #import "Compiler";
 #import "Windows_Resources";
+#import "Metaprogram_Plugins";
 
 #if OS == .WINDOWS {
     Windows_Resources :: #import "Windows_Resources";
@@ -40,25 +41,36 @@ Build :: ()
     			build_release = true;
     	}
     }
+
+    intercept_flags: Intercept_Flags;
+	res, pluginsToCreate, remaining := parse_plugin_arguments(args);
+	plugins : [..]*Metaprogram_Plugin;
+	init_plugins(pluginsToCreate, *plugins , w);
+    for plugins if it.before_intercept it.before_intercept(it, *intercept_flags);
     
     // There are 3 target types in this program :
     // 	- Debug : Not optimized and has debug info
     // 	- Optimized : Optimized and has debug info
     // 	- Release : Very optimized and doesn't have debug info
-	Compiler.compiler_begin_intercept(w);
+	Compiler.compiler_begin_intercept(w, intercept_flags);
 
     if build_release then BuildRelease(w);
     else if build_optimized then BuildOptimized(w);
     else BuildDebug(w);
     
+    for plugins      if it.add_source it.add_source(it);
     add_build_file("source/main.jai", w);
     
 	// wait for compilation to finish so we can edit the exe
 	while true {
 		message := Compiler.compiler_wait_for_message();
+        for plugins if it.message it.message(it, message);
 		if message.kind == .COMPLETE break;
 	}
 	Compiler.compiler_end_intercept(w);
+
+    for plugins if it.finish   it.finish  (it);
+    for plugins if it.shutdown it.shutdown(it);
 
 	// Edit the exe and do any other bits we need
 	#if OS == .WINDOWS {
@@ -109,11 +121,11 @@ BuildRelease :: (w: Workspace)
     target_options := get_build_options(w);
     target_options.backend = .LLVM;
     target_options.output_path = BUILD_RELEASE_DIR;
-    target_options.emit_debug_info=.NONE;
+    // target_options.emit_debug_info=.NONE;
     target_options.enable_bytecode_inliner = true;
     set_optimization(*target_options, Optimization_Type.VERY_OPTIMIZED);   
     set_build_options(target_options, w);
     add_build_string("BUILD_TYPE :: BuildType.RELEASE;", w);
 }
 
-#run Build();
+#run,stallable Build();
