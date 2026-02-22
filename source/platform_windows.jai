@@ -144,32 +144,38 @@ CurrentProcess := cast(*void) -1;  // GetCurrentProcess on Windows just returns 
 DbgHelp  :: #system_library "DbgHelp";
 
 CONTEXT :: struct {
-	total_size: [1232] u8 = ---;
+    using members: struct {
+        before_rax: [152] u8 = ---;
+        Rsp: u64;
+        Rbp: u64;
+        other: [10] u64;
 
-	#place total_size;
-	before_rax: [152] u8 = ---;
-	Rsp: u64;
-	Rbp: u64;
-	other: [10] u64;
-
-	Rip: u64;
+        Rip: u64;
+    }
+    
+    padding: [1232 - size_of(type_of(members))] u8 = ---;
 }
 
+#assert(size_of(CONTEXT) == 1232);
+
 ADDRESS64 :: struct {
-	Offset: u64;
-	Segment: u16;
-	Mode: s32;
+    Offset: u64;
+    Segment: u16;
+    Mode: s32;
 }
 
 STACKFRAME64 :: struct {
-	total_size: [264] u8;
-
-	#place total_size;
-	AddrPC:     ADDRESS64;
-	AddrReturn: ADDRESS64;
-	AddrFrame:  ADDRESS64;
-	AddrStack:  ADDRESS64;
+    using members: struct {
+        AddrPC:     ADDRESS64;
+        AddrReturn: ADDRESS64;
+        AddrFrame:  ADDRESS64;
+        AddrStack:  ADDRESS64;
+    }
+    
+    padding: [264 - size_of(type_of(members))] u8;
 }
+
+#assert(size_of(STACKFRAME64) == 264);
 
 EXCEPTION_RECORD :: struct {
 	ExceptionCode: u32;

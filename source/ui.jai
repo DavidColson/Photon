@@ -55,8 +55,7 @@ UILayoutData :: struct {
 	childAlignment: UIAlignment;
 	width: UISize;
 	height: UISize;
-#place width;
-    size: [2]UISize = ---;
+    #overlay (width) size: [2]UISize = ---;
 }
 
 // @todo: this needs to be much better
@@ -125,8 +124,7 @@ UIPalette :: struct {
 	text: Vector4;
 	textHighlight: Vector4;
 	border: Vector4;
-#place background;
-	colors: [6]Vector4 = ---;
+	#overlay (background) colors: [6]Vector4 = ---;
 }
 
 UIKey :: struct {
@@ -179,13 +177,13 @@ init_ui :: () {
 }
 
 find_box :: (key: UIKey) -> bool, *UIBox {
-	success, box:= table_find_new(*uiState.boxTable, key);
+	success, box:= table_find(*uiState.boxTable, key);
 	return success, box;
 }
 
 box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 	// attempt to get the box from persistent data using it's key
-	success, box := table_find_new(*uiState.boxTable, key);
+	success, box := table_find(*uiState.boxTable, key);
 
 	// if it can't be found it's new
 	if !success {
@@ -1169,26 +1167,26 @@ compute_positions :: (root: *UIBox, axis: UIAxis) {
 // Linked list functions
 
 linked_list_insert :: (head: **$T, tail: **T, insertAfter: *T, toInsert: *T) {
-	if <<head == null {
+	if head.* == null {
 		// empty linked list
-		<<head = toInsert;
-		<<tail = toInsert;
+		head.* = toInsert;
+		tail.* = toInsert;
 		toInsert.next = null;
 		toInsert.prev = null;
 	}
 	else if insertAfter == null {
 		// insert at front
-		toInsert.next = <<head;
-		(<<head).prev = toInsert;
-		<<head = toInsert;
+		toInsert.next = head.*;
+		(head.*).prev = toInsert;
+		head.* = toInsert;
 		toInsert.prev = null;
 	}
-	else if insertAfter == <<tail {
+	else if insertAfter == tail.* {
 		// insert at end
-		(<<tail).next = toInsert;
-		toInsert.prev = <<tail;
+		(tail.*).next = toInsert;
+		toInsert.prev = tail.*;
 		toInsert.next = null;
-		(<<tail) = toInsert;
+		(tail.*) = toInsert;
 	}
 	else {
 		// insert in middle
@@ -1206,13 +1204,13 @@ linked_list_remove :: (head: **$T, tail: **T, toRemove: *T) {
 		toRemove.prev.next = toRemove.next;
 	}
 	else {
-		<<head = toRemove.next; // toRemove was first
+		head.* = toRemove.next; // toRemove was first
 	}
 
 	if toRemove.next != null {
 		toRemove.next.prev = toRemove.prev;
 	}
 	else {
-		<<tail = toRemove.prev; // toRemove was last
+		tail.* = toRemove.prev; // toRemove was last
 	}
 }

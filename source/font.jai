@@ -393,7 +393,7 @@ find_or_make_glyph :: (font: *Font, size: int, utf32: u32) -> GlyphData {
 			assert(false);
 		}
 	}
-	return <<glyphData;
+	return glyphData.*;
 }
 
 can_rect_fit_in_atlas :: (atlas: *Atlas, atNode: s32, w: s32, h: s32) -> s32 {
@@ -512,7 +512,7 @@ try_add_glyph_to_atlas :: (atlas: *Atlas, face: FT_Face, glyphData: *GlyphData) 
 	for j : 0..rows-1 {
 		for i : 0..width-1 {
             dst_pixel := atlas.texture.data.data + ((bestY + j) * atlas.texture.width + (bestX + i));
-            <<dst_pixel = face.glyph.bitmap.buffer[(rows - 1 - j) * pitch + i];
+            dst_pixel.* = face.glyph.bitmap.buffer[(rows - 1 - j) * pitch + i];
 		}
 	}
 	atlas.texture.dirty = true;
@@ -533,4 +533,4 @@ FT_ROUND :: inline (x: int) -> int {
     return -(((-x) + 0x1f) >> 6);
 }
 
-#import "freetype-2.12.1";
+#import "freetype";

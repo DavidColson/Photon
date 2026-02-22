@@ -72,7 +72,7 @@ project_parser :: (projectFileName: string) -> bool, Project {
 
 		if begins_with(line, "[") {
 			if !ends_with(line, "]") {
-				error(*handler, "Sections must end with a ']' character");
+				error(handler, "Sections must end with a ']' character");
 				return false, .{};
 			}
 
@@ -85,24 +85,24 @@ project_parser :: (projectFileName: string) -> bool, Project {
 				case "allow";
 					currentSection = .ALLOW;
 				case;
-					error(*handler, "Unknown section");
+					error(handler, "Unknown section");
 					return false, .{};
 			}
 			continue;
 		}
 		else if currentSection == .NONE {
-			error(*handler, "No open section at this point in the file");
+			error(handler, "No open section at this point in the file");
 			return false, .{};
 		}
 
 		if currentSection == {
 			case .FOLDERS;
 				if !is_absolute_path(line) {
-					error(*handler, "Supplied folder is not an absolute path");
+					error(handler, "Supplied folder is not an absolute path");
 					return false, .{};
 				}
 				if !is_directory(line) {
-					error(*handler, "Supplied folder is not a directory or cannot be found");
+					error(handler, "Supplied folder is not a directory or cannot be found");
 					return false, .{};
 				}
 				line = trim_right(line, "/");
@@ -329,7 +329,7 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 }
 
 is_known_file_extension :: inline (extension: string) -> bool, KnownExtensionFileType {
-    ok, type := table_find_new(*knownExtensionsTable, extension);
+    ok, type := table_find(*knownExtensionsTable, extension);
     return ok, type;
 }
 

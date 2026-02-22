@@ -70,8 +70,7 @@ style : struct {
 	codeType := #run hex_to_color_vec4("E5C07B");
 	codeNamespace := #run hex_to_color_vec4("E5C07B");
 	codeComment := #run hex_to_color_vec4("5C6370");
-#place codeDefault;
-	codeColors: [HighlightType.COUNT]Vector4 = ---;
+	#overlay (codeDefault) codeColors: [HighlightType.COUNT]Vector4 = ---;
 };
 
 EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
@@ -208,7 +207,7 @@ main :: () {
 	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
 	// and a "project async worker" which handles filesystem scanning and such things
 	success, project = project_parser("photon.photon-project");
-	// project_begin_load();
+	project_begin_load();
 
 	platform_set_backup_timer(window, do_backup_callback);
 
@@ -227,6 +226,7 @@ main :: () {
 		sleep_milliseconds(cast(s32) timeToSleep);
 
 		deltaTime = seconds_since_init() - frameStart;
+		// log("delta %", deltaTime);
 	}
 	file_close(*logger.logFile);
 	// report_memory_leaks();
@@ -1378,7 +1378,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 				endByte := ts_node_end_byte(capture.node);
 				type := to_string(ts_node_grammar_type(capture.node));
 
-				success, highlightType := table_find_new(*language.captureToHighlight, capture.index);
+				success, highlightType := table_find(*language.captureToHighlight, capture.index);
 				if evaluate_query_predicates(language, tsMatch, panel.document) {
 					if highlights.count > 0 {
 						if highlights[highlights.count-1].start == startByte {

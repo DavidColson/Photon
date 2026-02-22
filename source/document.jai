@@ -32,8 +32,7 @@ Document :: struct {
 		using data: NodeData;
 		left: *Node;
 		right: *Node;
-		#place left;
-		child :[2]*Node = ---;
+		#overlay (left) child :[2]*Node = ---;
 	}
 
 	Color :: enum {
@@ -390,7 +389,7 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
 		firstPiece.bufferIndex = 0;
 
-		doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
+		doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
 		// setup initial undo point
 		doc.nextUndoOffset = 0;
@@ -506,7 +505,7 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	firstPiece.end = .{firstPiece.lineFeedCount, doc.buffers[0].text.count - doc.buffers[0].lineStarts[firstPiece.lineFeedCount]};
 	firstPiece.bufferIndex = 0;
 
-	doc.tree = make_rb_tree(*tree_allocator(doc), firstPiece);
+	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
 	// setup initial undo point
 	doc.nextUndoOffset = 0;
@@ -636,7 +635,7 @@ document_get_by_path :: (path: string) -> bool, *Document {
 	lock(*openDocumentLock);
 	defer unlock(*openDocumentLock);
 	pathToCheck := to_lower_copy(path,,temp);
-	success, locator := table_find_new(*openDocumentTable, pathToCheck);
+	success, locator := table_find(*openDocumentTable, pathToCheck);
 	if success {
 		bucket := openDocuments.all_buckets[locator.bucket_index];
 		assert(bucket.occupied[locator.slot_index] == true);

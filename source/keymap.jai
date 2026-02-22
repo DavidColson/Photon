@@ -271,11 +271,11 @@ rebuild_key_map :: ()  {
 					}
 					else if keys.count > 0 { // non-leaf node
 						assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence (for binding %)", mapping);
-						exists, entry := table_find_new(curNode.children, hashKey);
+						exists, entry := table_find(curNode.children, hashKey);
 						if !exists { 
 							newNode := New(KeyMapNode,,keyMap.allocator);
 							newNode.children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-							curNode = <<table_add(curNode.children, hashKey, newNode); 
+							curNode = (.*)table_add(curNode.children, hashKey, newNode); 
 						}
 						else {
 							assert(entry.cmd == null, "Start of this (%) key sequence already exists as a direct mapping", mapping);
@@ -417,7 +417,7 @@ input_handler :: (event: Input.Event) {
 	}
 
 	if nodePtr {
-		node := <<nodePtr;
+		node := nodePtr.*;
 		if node.cmd && keyMap.pendingArgs.count == node.nArgs {
 			// this is where we execute the actual command, subject to various
 			// flag modifiers
