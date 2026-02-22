@@ -28,6 +28,19 @@ platform_is_path_directory :: (path: string) -> bool {
 	return false;
 }
 
+platform_path_hash :: (path: string) -> u32 {
+	lower := to_lower_copy(path,,temp);
+	return get_hash(lower);
+}
+
+platform_path_equal :: (path1: string, path2: string) -> bool {
+	path1low := to_lower_copy(path1,,temp);
+	path2low := to_lower_copy(path2,,temp);
+	path_overwrite_separators(path1low, #char "/");
+	path_overwrite_separators(path2low, #char "/");
+	return equal(path1low, path2low);
+}
+
 platform_get_dpi_scale :: (window: Window_Type) -> float {
 	dpi := cast(float) GetDpiForWindow(window);
 	return dpi / 96.0;
@@ -84,10 +97,10 @@ platform_init_crash_handler :: () {
 }
 
 #run {
-    #if BUILD_TYPE == .RELEASE {
-        WR :: #import "Windows_Resources";
-        WR.disable_runtime_console();
-    }
+    // #if BUILD_TYPE == .RELEASE {
+    //     WR :: #import "Windows_Resources";
+    //     WR.disable_runtime_console();
+    // }
 }
 
 #scope_file 

@@ -143,7 +143,7 @@ Document :: struct {
 
 openDocumentLock: Mutex;
 openDocuments: Bucket_Array(Document, 128); // might want more when we load full projects in?
-openDocumentTable: Table(string, Bucket_Locator);
+openDocumentTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
 
 tree_test :: () {
 	doc := document_get_or_open("build_shorter.jai");
@@ -264,14 +264,7 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	path_overwrite_separators(doc.path, #char "/");
 
 	doc.locator = locator;
-	#if OS == .WINDOWS {
-		// @todo: free when removing a document
-		comparisonPath := to_lower_copy(doc.path);
-		table_add(*openDocumentTable, comparisonPath, doc.locator); 
-	}
-	else {
-		table_add(*openDocumentTable, doc.path, doc.locator); 
-	}
+	table_add(*openDocumentTable, doc.path, doc.locator); 
 
 	unlock(*openDocumentLock);
 
@@ -634,8 +627,7 @@ document_is_unsaved :: (doc: *Document) -> bool {
 document_get_by_path :: (path: string) -> bool, *Document {
 	lock(*openDocumentLock);
 	defer unlock(*openDocumentLock);
-	pathToCheck := to_lower_copy(path,,temp);
-	success, locator := table_find(*openDocumentTable, pathToCheck);
+	success, locator := table_find(*openDocumentTable, path);
 	if success {
 		bucket := openDocuments.all_buckets[locator.bucket_index];
 		assert(bucket.occupied[locator.slot_index] == true);
