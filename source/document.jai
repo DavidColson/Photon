@@ -512,6 +512,7 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	// if required
 	free(file.content);
 	array_reset(*file.lineStarts);
+	table_remove(*project.projectFileTable, file.fullName);
 	bucket_array_remove(*project.projectFiles, file.locator);
 
 	push_notification("Document Loaded");

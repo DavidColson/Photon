@@ -2105,10 +2105,10 @@ get_language :: (languageName: string) -> bool, *Language {
 
 	lock(*languagesMutex);
 	lang, added := find_or_add(*languages, languageName);
+	unlock(*languagesMutex);
 	if !added {
 		return true, lang;
 	}
-	unlock(*languagesMutex);
 
 	// @todo: In packaged builds this should be the base directory of the exe
 	exePath := path_strip_filename(get_path_of_running_executable());
