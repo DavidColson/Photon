@@ -295,15 +295,6 @@ project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Chan
 				add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
 			}
 		}
-		if change.events & .ADDED || change.events & .MOVED_TO {
-			newFile := Project.File.{ fullName = copy_string(change.full_path,, project_allocator()) };
-			locator, entry := bucket_array_add(*project.projectFiles, newFile);
-			entry.locator = locator;
-			table_add(*project.projectFileTable, newFile.fullName, locator);
-
-			project.pendingFileLoads += 1;
-			add_work(*project.threadGroup, entry, tprint("Load task %", entry.fullName));
-		}
 		if change.events & .MOVED_FROM || change.events & .REMOVED {
 			success, fileLocator := table_find(*project.projectFileTable, change.full_path);
 			if success {
@@ -313,6 +304,15 @@ project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Chan
 				table_remove(*project.projectFileTable, change.full_path);
 			}
 			
+		}
+		if change.events & .ADDED || change.events & .MOVED_TO {
+			newFile := Project.File.{ fullName = copy_string(change.full_path,, project_allocator()) };
+			locator, entry := bucket_array_add(*project.projectFiles, newFile);
+			entry.locator = locator;
+			table_add(*project.projectFileTable, newFile.fullName, locator);
+
+			project.pendingFileLoads += 1;
+			add_work(*project.threadGroup, entry, tprint("Load task %", entry.fullName));
 		}
 	}
 }
