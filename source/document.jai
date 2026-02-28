@@ -272,6 +272,11 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 		document_load_from_disk(doc, async);
 	}
 
+	// setup file watcher
+	parentPath := path_strip_filename(doc.path);
+	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
+	add_directories(*documentWatcher, parentPath);
+
 	return doc;
 }
 
@@ -318,6 +323,11 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		file: string;
 	    file, success = read_entire_file(f,,buffer_allocator(doc));
 		file_close(*f);
+
+		modtime, size, result := file_modtime_and_size(doc.path);
+		if result {
+			doc.diskLastModtime = modtime;
+		}
 
 		if !success {
 			taskData.result = .FAILED_TO_READ_FILE_DATA;
@@ -499,6 +509,8 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	firstPiece.bufferIndex = 0;
 
 	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
+
+	doc.diskLastModtime = file.diskLastModtime;
 
 	// setup initial undo point
 	doc.nextUndoOffset = 0;

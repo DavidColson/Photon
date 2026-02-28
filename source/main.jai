@@ -78,8 +78,7 @@ EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
 // globals
 editorMode := EditorMode.NORMAL;
 focusedPanel : Panel;
-watcher: File_Watcher(void);
-watchedFiles: [..]string;
+documentWatcher: File_Watcher(void);
 window: Window_Type;
 windowWidth  : s32 = 1920;
 windowHeight : s32 = 1080;
@@ -178,8 +177,8 @@ main :: () {
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
-	if !init(*watcher, file_change_callback, watch_recursively = false) {
-		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
+	if !init(*documentWatcher, document_watcher_callback, watch_recursively = false) {
+		push_notification("Could not initialize the document watcher. Files won't be reloaded. This is likely a bug.");
 	}
 
 	focusedPanel.layoutRect.x = 0;
@@ -263,7 +262,7 @@ update :: (deltaTime: float64) {
 	}
 
 	project_update();
-	process_changes(*watcher);
+	process_changes(*documentWatcher);
 
 	newDpiScale := platform_get_dpi_scale(window);
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
@@ -1614,11 +1613,10 @@ do_backup_callback :: () {
 	}
 }
 
-file_change_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
-	found := array_find(watchedFiles, change.full_path);
+document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+	found, doc := document_get_by_path(change.full_path);
 	if found {
-		success, doc := document_get_by_path(change.full_path);
-		if change.events & .MODIFIED {
+		if change.events & .MODIFIED || change.events & .MOVED_TO {
 			modtime, size, success := file_modtime_and_size(doc.path);
 			if modtime > doc.diskLastModtime {
 				// reload file
