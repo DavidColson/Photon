@@ -1147,6 +1147,8 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			if panel.projectSearcher.selectedEntryChanged then panel.projectSearcher.selectedEntryChanged = false;
 
 			for rangeStart..rangeEnd {
+				searchResult := panel.projectSearcher.results[it];
+
 				entryFlags:UIBoxFlags = 0;
 				if it == panel.fileFinder.selectedEntry {
 					entryFlags |= .DRAW_BACKGROUND;
@@ -1168,14 +1170,15 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// line number darker text
 					// draw filename first, then path darker (like Focus)
 					// draw a highlight on the matched search term in the line
+					// Overflowing filenames should get clipped by scissors
 
-					key := ui_key("%##searcherFileName%-%", "source/document.jai", 0, it);
+					key := ui_key("%##searcherFileName%", searchResult.filePath, it);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT,
 						layout=.{ width=fixed(searcherWidth*0.2), height=grow() },
 					});
 
-					key1 := ui_key("% ##searcherLineNum%-%", 212, 0, it);
+					key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum, it);
 					lineNumLabel := box(key1, .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=grow() },
@@ -1183,7 +1186,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						palette=.{ text=style.textSecondary, background=style.backgroundMid }
 					});
 
-					key2 := ui_key("%##searcherResult%-%", "run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);", 0, it);
+					key2 := ui_key("%##searcherResult%", searchResult.matchLine, it);
 					searchResultLabel := box(key2, .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=grow(), height=grow() },
