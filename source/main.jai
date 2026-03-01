@@ -10,6 +10,7 @@ DialogType :: enum u8 {
 	COMMAND_PICKER;
 	FILESYSTEM_NAVIGATOR;
 	FILE_FINDER;
+	PROJECT_SEARCH;
 	SEARCH;
 }
 
@@ -1102,7 +1103,125 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 		}
 	}
 
+	if panel.activeDialog == .PROJECT_SEARCH {
+		searcherContainer := box(ui_key_nil, .{
+			flags=.DRAW_BACKGROUND,
+			layout=.{ 
+				childLayoutAxis = .Y,
+				width=fixed(panel.layoutRect.w / 2),
+				height=fit(),
+				padding= padding_all(em(0.4)),
+			},
+			palette=.{ background=style.backgroundLight },
+			cornerRadius=corner_rad_all(em(0.5)),
+			fixedX=panel.layoutRect.x+(panel.layoutRect.w-(panel.layoutRect.w/2))/2,
+			fixedY=em(3.0)
+		});
+		{
+			push_parent(searcherContainer); defer pop_parent();
 
+			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+			inputBox := box(ui_key("projectSearcherInput"), .{
+				flags=.DRAW_BACKGROUND,
+				layout=.{
+					width=grow(),
+					height=fixed(fontMetrics.lineSpacing+em(0.8)),
+				},
+				cornerRadius=corner_rad_all(em(0.2)),
+				palette=.{ background=style.backgroundLighter },
+				textPadding=em(0.5)
+			});
+
+			inputBox.customDrawFunction = custom_draw_input_field;
+			inputBox.customDrawUdata = cast(*void, *panel.projectSearcher.input);
+
+			elementHeight := cast(float, fontMetrics.characterHeight*3);
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("searchResults"),
+								panel.layoutRect.h/2,
+								elementHeight,
+								panel.projectSearcher.numToDisplay,
+								panel.projectSearcher.selectedEntry,
+								panel.projectSearcher.selectedEntryChanged);
+
+			if panel.projectSearcher.selectedEntryChanged then panel.projectSearcher.selectedEntryChanged = false;
+
+			for rangeStart..rangeEnd {
+				entryFlags:UIBoxFlags = 0;
+				if it == panel.fileFinder.selectedEntry {
+					entryFlags |= .DRAW_BACKGROUND;
+				}
+
+				entryBox := box(ui_key("entry##%", it), .{
+					flags=entryFlags, layout=.{
+						width=grow(),
+						height=fixed(elementHeight),
+						padding=padding_all(em(0.2)),
+						childLayoutAxis=.X
+					},
+					palette=.{ background=style.backgroundLighter },
+				});
+				{
+					push_parent(entryBox); defer pop_parent();
+
+					// TODO:
+					// make window wider but with max half of panel height
+					// fixed space for filename (proportion of max)
+					// line number right aligned
+					// line number darker text
+					// code drawn with code font
+					// code drawn with same background as normal code
+					// draw filename first, then path darker (like Focus)
+
+					key := ui_key("%##searcherFileName%-%", "source/document.jai", 0, it);
+					fileLabel := box(key, .{
+						flags=.DRAW_TEXT,
+						layout=.{ width=text_content(), height=text_content() },
+					});
+
+					key1 := ui_key("%##searcherLineNum%-%", 212, 0, it);
+					lineNumLabel := box(key1, .{
+						flags=.DRAW_TEXT,
+						layout=.{ width=text_content(), height=text_content() },
+					});
+
+					key2 := ui_key("%##searcherResult%-%", "				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);", 0, it);
+					searchResultLabel := box(key2, .{
+						flags=.DRAW_TEXT,
+						layout=.{ width=text_content(), height=text_content() },
+					});
+				}
+			}
+
+			scroll_list_end(ui_key("projectSearchScroller")); 
+
+			hintsBox := box(ui_key("hintsBox"), .{
+				flags=.DRAW_SIDE_TOP,
+				layout=.{ 
+					childLayoutAxis = .X,
+					width=grow(),
+					height=fit(),
+				},
+				borderThickness=1.0
+			});
+			{
+				push_parent(hintsBox); defer pop_parent();
+
+				spacer(.X, grow());
+
+				textCol := uiState.defaultPalette.text;
+				textCol.w = 0.6;
+				box(ui_key("<up><down> to navigate <enter> to open results <escape> to dismiss"), .{
+					flags=.DRAW_TEXT,
+					layout=.{ width=text_content(), height=text_content() },
+					textAlignment=.CENTER,
+					textPadding=em(0.5),
+					palette=.{text = textCol}
+				});
+
+				spacer(.X, grow());
+			}
+		}
+	}
 	
 	if panel.activeDialog == .FILE_FINDER {
 		fileFinderContainer := box(ui_key_nil, .{
@@ -2504,6 +2623,7 @@ Input :: #import "Input";
 #load "async.jai";
 #load "document.jai";
 #load "project.jai";
+#load "project_search.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";

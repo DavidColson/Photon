@@ -134,6 +134,7 @@ normalModeCommands :: Command.[
 	.{ "Open Filesystem Navigator At Working Directory", .["<space>O"], 0, open_file_in_working_dir },
 	.{ "Open Command Picker", .[":"], .HIDDEN, command_picker_open },
 	.{ "Open File Finder", .["<space>f"], 0, file_finder_open },	
+	.{ "Open Project Search", .["<space>s"], 0, project_search_open },	
 
 	.{ "Enter Insert Mode Start Of Selection", .["i"], 0, enter_insert_mode_start },
 	.{ "Enter Insert Mode End Of Selection", .["a"], 0, enter_insert_mode_end },

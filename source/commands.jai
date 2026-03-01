@@ -1136,6 +1136,8 @@ dialog_select_next :: (using panel: *Panel, args: []string) {
 			filesystem_nav_select_next(panel, args);
 		case .FILE_FINDER;
 			file_finder_select_next(panel);
+		case .PROJECT_SEARCH;
+			project_search_select_next(panel);
 		case .SEARCH; return;
 	}
 }
@@ -1149,6 +1151,8 @@ dialog_select_previous :: (using panel: *Panel, args: []string) {
 			filesystem_nav_select_previous(panel, args);
 		case .FILE_FINDER;
 			file_finder_select_previous(panel);
+		case .PROJECT_SEARCH;
+			project_search_select_previous(panel);
 		case .SEARCH; return;
 	}
 }
@@ -1172,6 +1176,7 @@ dialog_backward_delete :: (using panel: *Panel, args: []string) {
 	inputField := *commandPicker.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
+		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
 		case .COMMAND_PICKER; inputField = *commandPicker.input;
 		case .SEARCH; inputField = *searchInput;
@@ -1189,6 +1194,7 @@ dialog_backward_delete :: (using panel: *Panel, args: []string) {
 		case .COMMAND_PICKER; #through;
 		case .SEARCH; #through;
 		case .FILE_FINDER;
+		case .PROJECT_SEARCH;
 			inputField.text.count -= 1;
 			inputField.cursor -= 1;
 			inputField.text.count = max(inputField.text.count, 0);
@@ -1204,6 +1210,7 @@ dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 	inputField := *commandPicker.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
+		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
 		case .COMMAND_PICKER; inputField = *commandPicker.input;
 		case .SEARCH; inputField = *searchInput;

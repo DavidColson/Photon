@@ -22,6 +22,7 @@ Panel :: struct {
 	commandPicker: CommandPicker;
 	filesystemNav: FilesystemNavigator;
 	fileFinder: FileFinder;
+	projectSearcher: ProjectSearch;
 
 	// search state (this is too a dialog, may want to group it up)
 	searchInput: InputField;
@@ -43,6 +44,7 @@ panel_set_active_document :: (panel: *Panel, doc: *Document) {
 panel_reset_dialogs :: (panel: *Panel) {
 	if panel.activeDialog == {
 		case .FILE_FINDER; file_finder_reset(panel);
+		case .PROJECT_SEARCH; project_search_reset(panel);
 		case .FILESYSTEM_NAVIGATOR; filesystem_nav_reset(panel);
 		case .COMMAND_PICKER; command_picker_reset(panel);
 		case .SEARCH; end_document_search(panel);
