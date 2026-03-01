@@ -82,6 +82,10 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 	if success {
 		metrics := get_font_metrics(box.font, xx box.fontSize);
 
+		// need to make sure bounds are up to date as file may have changed since last render
+		numDocumentLines := get_number_of_lines(panel.document);
+		box.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+
 		box.viewOffsetTarget.y = cast(float, -targetLine * metrics.lineSpacing);
 		box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 	}

@@ -1150,7 +1150,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				searchResult := panel.projectSearcher.results[it];
 
 				entryFlags:UIBoxFlags = 0;
-				if it == panel.fileFinder.selectedEntry {
+				if it == panel.projectSearcher.selectedEntry {
 					entryFlags |= .DRAW_BACKGROUND;
 				}
 
@@ -1178,7 +1178,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						layout=.{ width=fixed(searcherWidth*0.2), height=grow() },
 					});
 
-					key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum, it);
+					key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum+1, it);
 					lineNumLabel := box(key1, .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=grow() },
@@ -1186,7 +1186,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						palette=.{ text=style.textSecondary, background=style.backgroundMid }
 					});
 
-					key2 := ui_key("%##searcherResult%", searchResult.matchLine, it);
+					key2 := ui_key("%##searcherResult%", trim_left(searchResult.matchLine), it);
 					searchResultLabel := box(key2, .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=grow(), height=grow() },

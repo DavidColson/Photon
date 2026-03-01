@@ -1168,6 +1168,8 @@ dialog_action_item :: (using panel: *Panel, args: []string) {
 			file_finder_select_file(panel);
 		case .SEARCH;
 			confirm_document_search(panel, args);
+		case .PROJECT_SEARCH;
+			project_search_open_result(panel);
 	}
 }
 

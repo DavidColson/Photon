@@ -39,11 +39,15 @@ Project :: struct {
 	SearchResult :: struct {
 		matchLine: string;
 		lineNum: s64;
+		lineOffset: s64;
 		filePath: string;
+		fileLocator: Bucket_Locator;
 		matchRange: Document.Range;
 	}
 
 	SearchWork :: struct {
+		// @todo: you can use this bucket index for the document table too
+		// we need one more member to tell you if we're searching a document or file
 		bucketIndex: s64;
 		searchTerm: string;
 		results: [..]SearchResult;
@@ -417,7 +421,9 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 				searchResult: Project.SearchResult; 
 				searchResult.matchLine = .{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
 				searchResult.lineNum = mid;
+				searchResult.lineOffset = midStartOffset;
 				searchResult.filePath = file.fullName;
+				searchResult.fileLocator = .{ xx searchWork.bucketIndex, xx it_index };
 				searchResult.matchRange = .{result - midStartOffset, (result - midStartOffset) + searchWork.searchTerm.count};
 				array_add(*searchWork.results, searchResult);
 
