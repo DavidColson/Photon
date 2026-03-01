@@ -1104,17 +1104,18 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 	}
 
 	if panel.activeDialog == .PROJECT_SEARCH {
+		searcherWidth := panel.layoutRect.w * 0.8;
 		searcherContainer := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND,
 			layout=.{ 
 				childLayoutAxis = .Y,
-				width=fixed(panel.layoutRect.w / 2),
+				width=fixed(searcherWidth),
 				height=fit(),
 				padding= padding_all(em(0.4)),
 			},
 			palette=.{ background=style.backgroundLight },
 			cornerRadius=corner_rad_all(em(0.5)),
-			fixedX=panel.layoutRect.x+(panel.layoutRect.w-(panel.layoutRect.w/2))/2,
+			fixedX=panel.layoutRect.x+(panel.layoutRect.w-(searcherWidth))/2,
 			fixedY=em(3.0)
 		});
 		{
@@ -1135,7 +1136,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			inputBox.customDrawFunction = custom_draw_input_field;
 			inputBox.customDrawUdata = cast(*void, *panel.projectSearcher.input);
 
-			elementHeight := cast(float, fontMetrics.characterHeight*3);
+			elementHeight := cast(float, fontMetrics.lineSpacing * 1.5);
 			rangeStart, rangeEnd := scroll_list_begin(ui_key("searchResults"),
 								panel.layoutRect.h/2,
 								elementHeight,
@@ -1155,8 +1156,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					flags=entryFlags, layout=.{
 						width=grow(),
 						height=fixed(elementHeight),
-						padding=padding_all(em(0.2)),
-						childLayoutAxis=.X
+						childLayoutAxis=.X,
 					},
 					palette=.{ background=style.backgroundLighter },
 				});
@@ -1164,30 +1164,31 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					push_parent(entryBox); defer pop_parent();
 
 					// TODO:
-					// make window wider but with max half of panel height
-					// fixed space for filename (proportion of max)
-					// line number right aligned
+					// make window max half of panel height
 					// line number darker text
-					// code drawn with code font
-					// code drawn with same background as normal code
 					// draw filename first, then path darker (like Focus)
+					// draw a highlight on the matched search term in the line
 
 					key := ui_key("%##searcherFileName%-%", "source/document.jai", 0, it);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT,
-						layout=.{ width=text_content(), height=text_content() },
+						layout=.{ width=fixed(searcherWidth*0.2), height=grow() },
 					});
 
-					key1 := ui_key("%##searcherLineNum%-%", 212, 0, it);
+					key1 := ui_key("% ##searcherLineNum%-%", 212, 0, it);
 					lineNumLabel := box(key1, .{
-						flags=.DRAW_TEXT,
-						layout=.{ width=text_content(), height=text_content() },
+						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+						layout=.{ width=text_content(), height=grow() },
+						font=fontCode,
+						palette=.{ text=style.textSecondary, background=style.backgroundMid }
 					});
 
-					key2 := ui_key("%##searcherResult%-%", "				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);", 0, it);
+					key2 := ui_key("%##searcherResult%-%", "run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);", 0, it);
 					searchResultLabel := box(key2, .{
-						flags=.DRAW_TEXT,
-						layout=.{ width=text_content(), height=text_content() },
+						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+						layout=.{ width=grow(), height=grow() },
+						font=fontCode,
+						palette=.{ background=style.backgroundMid },
 					});
 				}
 			}

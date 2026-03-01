@@ -26,6 +26,20 @@ project_search_input_field_on_edit :: (userData: *void, input: string) {
 	searcher.numToDisplay = 4;
 	searcher.selectedEntry = 0;
 	searcher.selectedEntryChanged = false;
+
+	// what do we even need to do here then?
+	// Essentially loop through the whole project file list
+	// doing find_index_of using the search term from input
+	// for each result we need to binary search the list of line starts for the file
+	// to find the start and end byte
+	// and then create a string view that represents the matching line
+	// and an offset into that line
+	// store that string view, filename and offset into an array
+	// sorting??
+	// the array will then be used to draw the UI
+
+	// the thread group will be given a file, or list of files per work item
+	// and it will produce an array of results, already with line strings and offsets
 }
 
 project_search_reset :: (panel: *Panel) {
