@@ -360,7 +360,7 @@ init_thread_groups :: () {
 
 	// we want to leave a core for the main thread and one for the async thread
     numThreads := max(numCpus - 2, 1);
-	numThreads = 1;
+	// numThreads = 1;
 
     init(*project.threadGroup, numThreads, project_file_load_thread_proc);
     project.threadGroup.name    = "Project File Loading";
