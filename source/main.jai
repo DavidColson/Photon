@@ -1140,7 +1140,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			rangeStart, rangeEnd := scroll_list_begin(ui_key("searchResults"),
 								panel.layoutRect.h/2,
 								elementHeight,
-								panel.projectSearcher.numToDisplay,
+								panel.projectSearcher.results.count,
 								panel.projectSearcher.selectedEntry,
 								panel.projectSearcher.selectedEntryChanged);
 
@@ -1172,7 +1172,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// draw a highlight on the matched search term in the line
 					// Overflowing filenames should get clipped by scissors
 
-					key := ui_key("%##searcherFileName%", searchResult.filePath, it);
+					key := ui_key("%##searcherFileName%", path_filename(searchResult.filePath), it);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT,
 						layout=.{ width=fixed(searcherWidth*0.2), height=grow() },

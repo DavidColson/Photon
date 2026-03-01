@@ -34,7 +34,22 @@ Project :: struct {
 	}
 	loadProgress: ProjectLoadProgress;
 	pendingFileLoads: s32;
-	threadGroup: Thread_Group;
+	threadGroup: Thread_Group; // @todo: rename
+
+	SearchResult :: struct {
+		matchLine: string;
+		lineNum: s64;
+		filePath: string;
+		matchRange: Document.Range;
+	}
+
+	SearchWork :: struct {
+		bucketIndex: s64;
+		searchTerm: string;
+		results: [..]SearchResult;
+	}
+
+	searchThreads: Thread_Group;
 }
 
 testMutex: Mutex;
@@ -228,8 +243,9 @@ project_begin_load :: () {
 
 project_update :: () {
 	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
-		init_project_thread_group();
+		init_thread_groups();
 		start(*project.threadGroup);
+		start(*project.searchThreads);
 
 		for * project.projectFiles {
 			if it.content.count == 0 {
@@ -268,13 +284,25 @@ project_update :: () {
 	// @todo: what happens if a file changes while we're still loading the project?
 	process_changes(*project.watcher);
 
-	// Project file watcher
-	// setup file watcher during project load, watch the project paths recursively
-	// if an event occurs, we somehow need to figure out if it's a file we have loaded in
-	// if it is, then you want to trigger a reload of said file, ideally in the background
-	// so trigger a thread group load of said file, and the thread group should free any memory
-	// previously used and then setup the new file
-	// you probably will want to put an atomic on the file or something to prevent someone loading it while it's being updated
+	// Update the searcher thread if active
+	// @todo: currently we hold this thread group in the panel dialog? May be desirable to keep in the
+	// project itself?
+	searchWork := get_completed_work(*project.searchThreads);
+	currentSearchTerm := string.{ focusedPanel.projectSearcher.input.text.count, focusedPanel.projectSearcher.input.text.data };
+	for work: searchWork  {
+		searchWork := cast(*Project.SearchWork, work);
+
+		// check to see if the search term is the current one, if not, it's from
+		// an old query and we can just discard the results
+		if searchWork.searchTerm == currentSearchTerm && focusedPanel.projectSearcher.results.count < 5000 {
+			for searchWork.results {
+				array_add(*focusedPanel.projectSearcher.results, it);
+			}
+		}
+		array_reset(*searchWork.results);
+		free(searchWork.searchTerm);
+		free(searchWork);
+	}
 }
 
 #scope_file
@@ -319,7 +347,7 @@ project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Chan
 	}
 }
 
-init_project_thread_group :: () {
+init_thread_groups :: () {
     numCpus := get_number_of_processors();
 
     assert(numCpus >= 1);
@@ -332,11 +360,75 @@ init_project_thread_group :: () {
 
 	// we want to leave a core for the main thread and one for the async thread
     numThreads := max(numCpus - 2, 1);
-	// numThreads = 1;
+	numThreads = 1;
 
     init(*project.threadGroup, numThreads, project_file_load_thread_proc);
     project.threadGroup.name    = "Project File Loading";
     project.threadGroup.logging = false;
+
+    init(*project.searchThreads, numThreads, project_search_thread_proc);
+    project.searchThreads.name    = "Project Searcher";
+    project.searchThreads.logging = false;
+}
+
+project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
+	searchWork:= cast(*Project.SearchWork, work);
+	array_reset(*searchWork.results);
+	
+	for project.projectFiles.all_buckets[searchWork.bucketIndex].data {
+		if !project.projectFiles.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
+	    file := *it;
+
+		// @todo: currently 500 results per file is the max?? is that sensible?
+		searchCursor := 0;
+		while searchCursor < file.content.count && searchWork.results.count < 500 {
+			result := find_index_from_left_nocase_fast(file.content, searchWork.searchTerm, searchCursor);
+			if result > 0 {
+				// found match
+				// for each result we need to binary search the list of line starts for the file
+				low := 0; // line 0
+				high := file.lineStarts.count-1; // max line
+				mid := 0;
+				midStartOffset := 0;
+				midEndOffset := 0;
+				while low <= high {
+					mid = low + ((high - low) / 2);
+					midStartOffset = file.lineStarts[mid];
+
+					if mid == high
+						break;
+
+					midEndOffset = file.lineStarts[mid+1];
+
+					// target is before the mid line
+					if result < midStartOffset {
+						high = mid - 1;
+					}
+					// result is at or above the end of mid line
+					else if result >= midEndOffset {
+						low = mid + 1;
+					}
+					else {
+						break;
+					}
+				}
+
+				// once complete, mid is now set to the line in which the match was found on
+				searchResult: Project.SearchResult; 
+				searchResult.matchLine = .{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
+				searchResult.lineNum = mid;
+				searchResult.filePath = file.fullName;
+				searchResult.matchRange = .{result - midStartOffset, (result - midStartOffset) + searchWork.searchTerm.count};
+				array_add(*searchWork.results, searchResult);
+
+				searchCursor = result + searchWork.searchTerm.count;
+			}
+			else {
+				searchCursor = file.content.count; // end the search
+			}
+		}
+	}
+	return .CONTINUE;
 }
 
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
