@@ -833,7 +833,7 @@ search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTer
 	
 	iter := make_line_iterator(doc, startCoordinate.line);
 	currentNode := iter.node;
-	for iter {
+	for outer: iter {
 		// first lets get our string to search
 		haystack: string;
 		haystackStartOffset: s64;
@@ -848,8 +848,8 @@ search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTer
 			endOffset := buffer_cursor_to_offset(buffer, .{iter.node.piece.end.line, 0});
 
 			haystack = string.{endOffset - startOffset, buffer.text.data + startOffset};
-			haystackStartOffset = it.startByteOffset;
-			haystackEndOffset = it.startByteOffset + haystack.count;
+			haystackStartOffset = outer.startByteOffset;
+			haystackEndOffset = outer.startByteOffset + haystack.count;
 
 			// log("block:\n");
 			// log("%", haystack);
@@ -860,45 +860,51 @@ search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTer
 
 		}
 		else {
-			haystack = it.text;
-			haystackStartOffset = it.startByteOffset;
-			haystackEndOffset = it.endByteOffset;
+			haystack = outer.text;
+			haystackStartOffset = outer.startByteOffset;
+			haystackEndOffset = outer.endByteOffset;
 		
 			// log("block:\n");
 			// log("%", it.text);
 		}
 		currentNode = iter.node;
 
-		i := -1;
-		if it_index == startCoordinate.line+1 {
-			haystack.data += startCoordinate.col;
-			haystack.count -= startCoordinate.col;
-			if type == {
-				case .STANDARD; 
-					i = find_index_from_left_fast(haystack, searchTerm);
-				case .NOCASE;
-					i = find_index_from_left_nocase_fast(haystack, searchTerm);
-				case .REGEX;
-					assert(false, "Not implemented");
+		i := 0;
+		while i < haystack.count {
+			if it_index == startCoordinate.line+1 {
+				haystack.data += startCoordinate.col;
+				haystack.count -= startCoordinate.col;
+				if type == {
+					case .STANDARD; 
+						i = find_index_from_left_fast(haystack, searchTerm, i);
+					case .NOCASE;
+						i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
+					case .REGEX;
+						assert(false, "Not implemented");
+				}
+				if i >= 0 then i += startCoordinate.col;
 			}
-			if i >= 0 then i += startCoordinate.col;
-		}
-		else {
-			if type == {
-				case .STANDARD; 
-					i = find_index_from_left_fast(haystack, searchTerm);
-				case .NOCASE;
-					i = find_index_from_left_nocase_fast(haystack, searchTerm);
-				case .REGEX;
-					assert(false, "Not implemented");
+			else {
+				if type == {
+					case .STANDARD; 
+						i = find_index_from_left_fast(haystack, searchTerm, i);
+					case .NOCASE;
+						i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
+					case .REGEX;
+						assert(false, "Not implemented");
+				}
 			}
-		}
 
-		if i >= 0 {
-			// found a match, report it
-			matched = true;
-			array_add(*results, Document.Range.{haystackStartOffset+i, haystackStartOffset+i+searchTerm.count});
-			if stopAtFirstResult then break;
+			if i >= 0 {
+				// found a match, report it
+				matched = true;
+				array_add(*results, Document.Range.{haystackStartOffset+i, haystackStartOffset+i+searchTerm.count});
+				i += searchTerm.count;
+				if stopAtFirstResult then break outer;
+			}
+			else {
+				i = haystack.count; // finished (nothing found)
+ 			}
 		}
 	}
 	return matched, results;

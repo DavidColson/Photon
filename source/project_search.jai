@@ -56,7 +56,6 @@ project_search_reset :: (panel: *Panel) {
 
 	array_reset(*searcher.results);
 
-	log("Freeing % results from search", searcher.resultsRequiringFree.count);
 	for searcher.resultsRequiringFree {
 		free(it.matchLine);
 	}

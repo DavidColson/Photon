@@ -391,8 +391,6 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 
 			hasMatches, results := search(doc, .NOCASE, 0, searchWork.searchTerm, false);
 
-			log("Found % results in document", results.count);
-
 			for result: results {
 				coordinate := get_coordinate_from_offset(doc, result.start);
 				line := get_line_content(doc, coordinate.line);
