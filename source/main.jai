@@ -2395,7 +2395,12 @@ LanguageFunc :: #type () -> *TSLanguage #c_call;
 languages: Table(string, Language);
 languagesMutex: Mutex;
 
-get_language :: (languageName: string) -> bool, *Language {
+get_language :: (_languageName: string) -> bool, *Language {
+	languageName := _languageName;
+	if equal(languageName, "h") {
+		languageName = "cpp";
+	} 
+
 	if languageName.count == 0 return false, null;
 
 	staticLangData: Language;
