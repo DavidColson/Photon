@@ -1217,6 +1217,8 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						font=fontCode,
 						palette=.{ background=style.backgroundMid },
 					});
+					searchResultLabel.customDrawFunction = custom_draw_search_result;
+					searchResultLabel.customDrawUdata = cast(*void, *panel.projectSearcher.results[it]);
 				}
 			}
 
@@ -1422,6 +1424,51 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 		color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary,
 		shader = .RECTS
 	});
+}
+
+custom_draw_search_result :: (box: *UIBox, udata: *void) {
+	searchResult:*Project.SearchResult = cast(*Project.SearchResult)udata;
+
+	// draw background
+	submit_instance(.{
+		dstRect = box.rect,
+		color = box.palette.background,
+		cornerRadii = box.cornerRadius,
+	});
+
+	// todo
+	// Draw a selection highlight if selected
+	// syntax highlight the line
+	
+	line := trim_left(searchResult.matchLine);
+
+	removedByTrim := searchResult.matchLine.count - line.count;
+	
+	box.textRun = generate_text_run(string.{line.count, line.data}, xx box.fontSize, box.font,,temp);
+	metrics := get_font_metrics(box.font, xx box.fontSize);
+	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
+	xPos := box.rect.x;
+
+	xPos += box.textPadding;
+	xPos = floor(xPos);
+
+	// calculate coordinate of match range
+	matchStartX := generate_text_run(string.{searchResult.matchRange.start - removedByTrim, line.data}, xx box.fontSize, box.font,,temp).width;
+	matchEndX := generate_text_run(string.{searchResult.matchRange.end - removedByTrim, line.data}, xx box.fontSize, box.font,,temp).width;
+
+	highlightHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
+	submit_instance(.{
+		dstRect = .{
+			xPos + matchStartX,
+			yPos-metrics.typicalDescender-highlightHeight,
+			matchEndX - matchStartX,
+			highlightHeight
+		},
+		color = style.backgroundLight,
+		cornerRadii = box.cornerRadius,
+	});
+
+	draw_text_run(box.textRun, xPos, yPos, box.palette.text);
 }
 
 // @todo: probably want to move this somewhere else? Potentially the panel file?
