@@ -1195,7 +1195,7 @@ dialog_backward_delete :: (using panel: *Panel, args: []string) {
 			#through;
 		case .COMMAND_PICKER; #through;
 		case .SEARCH; #through;
-		case .FILE_FINDER;
+		case .FILE_FINDER; #through;
 		case .PROJECT_SEARCH;
 			inputField.text.count -= 1;
 			inputField.cursor -= 1;
