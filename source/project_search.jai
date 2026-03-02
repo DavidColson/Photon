@@ -3,6 +3,7 @@ ProjectSearch :: struct {
 	memory : Flat_Pool;
 
 	results: [..]Project.SearchResult;
+	resultsRequiringFree: [..]Project.SearchResult;
 	selectedEntry:s32;
 	selectedEntryChanged:bool;
 	input: InputField;
@@ -31,9 +32,18 @@ project_search_input_field_on_edit :: (userData: *void, input: string) {
 
 	for project.projectFiles.all_buckets {
 		workItem := New(Project.SearchWork);
+		workItem.loaded = false;
 		workItem.bucketIndex  = it_index;
 		workItem.searchTerm = copy_string(input);
-		add_work(*project.searchThreads, workItem, tprint("Search task %", workItem.bucketIndex));
+		add_work(*project.searchThreads, workItem, tprint("Search task project files %", workItem.bucketIndex));
+	}
+
+	for openDocuments.all_buckets {
+		workItem := New(Project.SearchWork);
+		workItem.loaded = true;
+		workItem.bucketIndex  = it_index;
+		workItem.searchTerm = copy_string(input);
+		add_work(*project.searchThreads, workItem, tprint("Search task documents %", workItem.bucketIndex));
 	}
 
 	searcher.selectedEntry = 0;
@@ -45,6 +55,13 @@ project_search_reset :: (panel: *Panel) {
 	searcher.selectedEntry = 0;
 
 	array_reset(*searcher.results);
+
+	log("Freeing % results from search", searcher.resultsRequiringFree.count);
+	for searcher.resultsRequiringFree {
+		free(it.matchLine);
+	}
+	array_reset(*searcher.resultsRequiringFree);
+	
 	#if BUILD_TYPE == BuildType.DEBUG {
 		reset(*searcher.memory, overwrite_memory=true);
 	} else {
@@ -59,11 +76,17 @@ project_search_open_result :: (using panel: *Panel) {
 	
 	result := searcher.results[searcher.selectedEntry];
 	
-	// open project file
-	doc := document_get_or_open(result.filePath, noLoad = true);
-	projectFile := bucket_array_find_pointer(*project.projectFiles, result.fileLocator);
-	document_load_from_project(doc, projectFile);
-	panel_set_active_document(panel, doc);
+	if result.loaded {
+		doc := document_get_or_open(result.filePath);
+		panel_set_active_document(panel, doc);
+	}
+	else {
+		// open project file
+		doc := document_get_or_open(result.filePath, noLoad = true);
+		projectFile := bucket_array_find_pointer(*project.projectFiles, result.fileLocator);
+		document_load_from_project(doc, projectFile);
+		panel_set_active_document(panel, doc);
+	}
 
 	panel.cursor.head = result.lineOffset + result.matchRange.end;
 	panel.cursor.anchor = result.lineOffset + result.matchRange.start;

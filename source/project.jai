@@ -43,11 +43,11 @@ Project :: struct {
 		filePath: string;
 		fileLocator: Bucket_Locator;
 		matchRange: Document.Range;
+		loaded: bool;
 	}
 
 	SearchWork :: struct {
-		// @todo: you can use this bucket index for the document table too
-		// we need one more member to tell you if we're searching a document or file
+		loaded: bool;
 		bucketIndex: s64;
 		searchTerm: string;
 		results: [..]SearchResult;
@@ -289,8 +289,6 @@ project_update :: () {
 	process_changes(*project.watcher);
 
 	// Update the searcher thread if active
-	// @todo: currently we hold this thread group in the panel dialog? May be desirable to keep in the
-	// project itself?
 	searchWork := get_completed_work(*project.searchThreads);
 	currentSearchTerm := string.{ focusedPanel.projectSearcher.input.text.count, focusedPanel.projectSearcher.input.text.data };
 	for work: searchWork  {
@@ -301,6 +299,9 @@ project_update :: () {
 		if searchWork.searchTerm == currentSearchTerm && focusedPanel.projectSearcher.results.count < 5000 {
 			for searchWork.results {
 				array_add(*focusedPanel.projectSearcher.results, it);
+				if it.loaded {
+					array_add(*focusedPanel.projectSearcher.resultsRequiringFree, it);
+				}
 			}
 		}
 		array_reset(*searchWork.results);
@@ -379,58 +380,92 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 	searchWork:= cast(*Project.SearchWork, work);
 	array_reset(*searchWork.results);
 	
-	for project.projectFiles.all_buckets[searchWork.bucketIndex].data {
-		if !project.projectFiles.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
-	    file := *it;
+	if searchWork.loaded {
+		// this is where we search currently open documents
+		
+		for openDocuments.all_buckets[searchWork.bucketIndex].data {
+			if !openDocuments.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
 
-		// @todo: currently 500 results per file is the max?? is that sensible?
-		searchCursor := 0;
-		while searchCursor < file.content.count && searchWork.results.count < 500 {
-			result := find_index_from_left_nocase_fast(file.content, searchWork.searchTerm, searchCursor);
-			if result > 0 {
-				// found match
-				// for each result we need to binary search the list of line starts for the file
-				low := 0; // line 0
-				high := file.lineStarts.count-1; // max line
-				mid := 0;
-				midStartOffset := 0;
-				midEndOffset := 0;
-				while low <= high {
-					mid = low + ((high - low) / 2);
-					midStartOffset = file.lineStarts[mid];
+			// @todo: this should be a document copy, not the real deal
+		    doc := *it;
 
-					if mid == high
-						break;
+			hasMatches, results := search(doc, .NOCASE, 0, searchWork.searchTerm, false);
 
-					midEndOffset = file.lineStarts[mid+1];
+			log("Found % results in document", results.count);
 
-					// target is before the mid line
-					if result < midStartOffset {
-						high = mid - 1;
-					}
-					// result is at or above the end of mid line
-					else if result >= midEndOffset {
-						low = mid + 1;
-					}
-					else {
-						break;
-					}
-				}
+			for result: results {
+				coordinate := get_coordinate_from_offset(doc, result.start);
+				line := get_line_content(doc, coordinate.line);
 
-				// once complete, mid is now set to the line in which the match was found on
 				searchResult: Project.SearchResult; 
-				searchResult.matchLine = .{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
-				searchResult.lineNum = mid;
-				searchResult.lineOffset = midStartOffset;
-				searchResult.filePath = file.fullName;
+				searchResult.matchLine = line.text;
+				searchResult.lineNum = coordinate.line;
+				searchResult.lineOffset = line.startByteOffset;
+				searchResult.filePath = doc.path;
 				searchResult.fileLocator = .{ xx searchWork.bucketIndex, xx it_index };
-				searchResult.matchRange = .{result - midStartOffset, (result - midStartOffset) + searchWork.searchTerm.count};
+				searchResult.matchRange = .{result.start - line.startByteOffset, (result.start - line.startByteOffset) + searchWork.searchTerm.count};
+				searchResult.loaded = true;
 				array_add(*searchWork.results, searchResult);
-
-				searchCursor = result + searchWork.searchTerm.count;
 			}
-			else {
-				searchCursor = file.content.count; // end the search
+		}
+	}
+	else {
+		// this is where we search unloaded project files
+
+		for project.projectFiles.all_buckets[searchWork.bucketIndex].data {
+			if !project.projectFiles.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
+		    file := *it;
+
+			// @todo: currently 500 results per file is the max?? is that sensible?
+			searchCursor := 0;
+			while searchCursor < file.content.count && searchWork.results.count < 500 {
+				result := find_index_from_left_nocase_fast(file.content, searchWork.searchTerm, searchCursor);
+				if result > 0 {
+					// found match
+					// for each result we need to binary search the list of line starts for the file
+					low := 0; // line 0
+					high := file.lineStarts.count-1; // max line
+					mid := 0;
+					midStartOffset := 0;
+					midEndOffset := 0;
+					while low <= high {
+						mid = low + ((high - low) / 2);
+						midStartOffset = file.lineStarts[mid];
+
+						if mid == high
+							break;
+
+						midEndOffset = file.lineStarts[mid+1];
+
+						// target is before the mid line
+						if result < midStartOffset {
+							high = mid - 1;
+						}
+						// result is at or above the end of mid line
+						else if result >= midEndOffset {
+							low = mid + 1;
+						}
+						else {
+							break;
+						}
+					}
+
+					// once complete, mid is now set to the line in which the match was found on
+					searchResult: Project.SearchResult; 
+					searchResult.matchLine = .{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
+					searchResult.lineNum = mid;
+					searchResult.lineOffset = midStartOffset;
+					searchResult.filePath = file.fullName;
+					searchResult.fileLocator = .{ xx searchWork.bucketIndex, xx it_index };
+					searchResult.matchRange = .{result - midStartOffset, (result - midStartOffset) + searchWork.searchTerm.count};
+					searchResult.loaded = false;
+					array_add(*searchWork.results, searchResult);
+
+					searchCursor = result + searchWork.searchTerm.count;
+				}
+				else {
+					searchCursor = file.content.count; // end the search
+				}
 			}
 		}
 	}

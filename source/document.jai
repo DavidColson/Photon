@@ -245,7 +245,10 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	lock(*openDocumentLock);
 
 	// check if this file is already open
-	success, existinglocator := document_get_by_path(path);
+	success, existingDocument := document_get_by_path(path);
+	if success {
+		return existingDocument;
+	}
 
 	// check if the file even exists
 	if !file_exists(path) {
