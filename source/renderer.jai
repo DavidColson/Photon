@@ -17,7 +17,8 @@ RendererState :: struct {
 	numGroups: s32;
 
 	setScissor:bool;
-	scissor: Rect;
+	scissorStack: [16]Rect;
+	scissorTop: s32;
 
 	testBitmap: Bitmap;
 }
@@ -75,7 +76,8 @@ init_renderer :: (_window: Window_Type) {
 
 	glViewport(0, 0, xx windowWidth, xx windowHeight);
 
-	clear_scissor();
+	scissorTop = -1;
+	push_scissors(.{0, 0, xx windowWidth, xx windowHeight});
 	numInstances = 0;
 	numGroups = 0;
 
@@ -213,21 +215,28 @@ render_frame :: () {
 	numGroups = 0;
 }
 
-set_scissor :: (rect: Rect) {
+push_scissors :: (rect: Rect) {
 	using renderState;
 	setScissor = true;
-	scissor = rect;
+
+	assert(scissorTop < scissorStack.count && scissorTop >= -1);
+	scissorTop += 1;
+	scissorStack[scissorTop] = rect;
 }
 
-clear_scissor :: () {
+pop_scissors :: () {
 	using renderState;
 	setScissor = true;
-	scissor = .{0, 0, xx windowWidth, xx windowHeight};
+	assert(scissorTop > -1);
+	scissorTop -= 1;
 }
 
 submit_instance :: (instance: Instance) {
 	using renderState;
 	if numInstances == 0 {
+		shouldDraw, scissor := calculate_active_scissor();
+		if shouldDraw == false return;
+
 		// start a new group
 		shaderHandle := standardProgram;
 		if instance.shader == .TEXT then shaderHandle = textProgram;
@@ -239,6 +248,9 @@ submit_instance :: (instance: Instance) {
 		setScissor ||
 		instance.texture != instances[numInstances-1].texture ||
 		instance.shader != instances[numInstances-1].shader) {
+
+		shouldDraw, scissor := calculate_active_scissor();
+		if shouldDraw == false return;
 
 		// end previous group
 		groups[numGroups-1].instanceEnd = numInstances;
@@ -254,8 +266,10 @@ submit_instance :: (instance: Instance) {
 }
 
 resize_backbuffer :: () {
+	using renderState;
 	glViewport(0, 0, xx windowWidth, xx windowHeight);
-	clear_scissor();
+	scissorTop = -1;
+	push_scissors(.{0, 0, xx windowWidth, xx windowHeight});
 }
 
 make_bitmap_from_file :: (path: string) -> Bitmap {
@@ -305,6 +319,24 @@ load_bitmap_to_gpu :: (bitmap: *Bitmap) {
 #import "stb_image";
 
 #scope_file
+
+calculate_active_scissor :: () -> bool, Rect {
+	using renderState;
+	// you need to start at the top, intersect with the one behind
+	// and then take the result and do that again with the one behind
+	// until you reach 1
+	
+	scissorIndex := scissorTop;
+	currentScissor := scissorStack[scissorIndex];
+	while scissorIndex > 1 {
+		overlap, scissor := intersection(scissorStack[scissorIndex], scissorStack[scissorIndex - 1]);
+		if !overlap return false, .{};
+
+		currentScissor = scissor;
+		scissorIndex -= 1;
+	}
+	return true, currentScissor;
+}
 
 get_shader_program :: (vertShader: string, fragShader: string, defines: []string) -> GLuint {
     LOG_BUFFER_SIZE :: 512;

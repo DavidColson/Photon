@@ -8,6 +8,25 @@ Rect :: struct {
     #overlay (w) size: Vector2;
 }
 
+intersection :: (rectA: Rect, rectB: Rect) -> bool, Rect {
+    r: Rect;
+
+    left := max(rectA.x, rectB.y);
+    right := min(rectA.x + rectA.w, rectB.x + rectB.w);
+    top := max(rectA.y, rectB.y);
+    bottom := min(rectA.y + rectA.h, rectB.y + rectB.h);
+
+    if right <= left || bottom <= top {
+        return false, r;
+    }
+
+    r.x = left;
+    r.y = top;
+    r.w = right - left;
+    r.h = bottom - top;
+    return true, r;
+}
+
 contains_point :: (rect: Rect, x: float, y: float) -> bool {
 	if (rect.x < x && x < rect.x+rect.w) && (rect.y < y && y < rect.y+rect.h) {
 		return true;

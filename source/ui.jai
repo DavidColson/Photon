@@ -854,7 +854,7 @@ render_ui_recursive :: (box: *UIBox) {
 	}
 
 	if box.flags & .CLIP_CONTENTS {
-		set_scissor(box.rect);
+		push_scissors(box.rect);
 	}
 
 	if box.flags & .DRAW_TEXT {
@@ -909,7 +909,7 @@ render_ui_recursive :: (box: *UIBox) {
 	}
 
 	if box.flags & .CLIP_CONTENTS {
-		clear_scissor();
+		pop_scissors();
 	}
 
 	if box.flags & .DRAW_BORDER {

@@ -1172,11 +1172,26 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// draw a highlight on the matched search term in the line
 					// Overflowing filenames should get clipped by scissors
 
-					key := ui_key("%##searcherFileName%", path_filename(searchResult.filePath), it);
-					fileLabel := box(key, .{
-						flags=.DRAW_TEXT,
-						layout=.{ width=fixed(searcherWidth*0.2), height=grow() },
+					fileNameBox := box(ui_key("##filenameBox%", it), .{
+						flags=.CLIP_CONTENTS,
+						layout=.{ width=fixed(searcherWidth*0.2), height=grow(), childLayoutAxis=.X, childAlignment=.CENTER },
 					});
+					{
+						push_parent(fileNameBox); defer pop_parent();
+
+						key := ui_key("%##searcherFileName%", path_filename(searchResult.filePath), it);
+						fileLabel := box(key, .{
+							flags=.DRAW_TEXT,
+							layout=.{ width=text_content(), height=text_content() },
+						});
+						textCol := uiState.defaultPalette.text;
+						textCol.w = 0.6;
+						filePathLabel := box(ui_key("%##searcherFilePath%", searchResult.filePath, it), .{
+							flags=.DRAW_TEXT,
+							layout=.{ width=text_content(), height=text_content() },
+							palette=.{ text=textCol }
+						});
+					}
 
 					key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum+1, it);
 					lineNumLabel := box(key1, .{
