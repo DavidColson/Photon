@@ -430,8 +430,15 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 						mid = low + ((high - low) / 2);
 						midStartOffset = file.lineStarts[mid];
 
-						if mid == high
+						if mid == high {
+							if mid+1 < file.lineStarts.count {
+								midEndOffset = file.lineStarts[mid+1];
+							}
+							else {
+								midEndOffset = file.content.count;
+							}
 							break;
+						}
 
 						midEndOffset = file.lineStarts[mid+1];
 
