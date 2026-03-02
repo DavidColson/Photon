@@ -1456,19 +1456,87 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 	matchStartX := generate_text_run(string.{searchResult.matchRange.start - removedByTrim, line.data}, xx box.fontSize, box.font,,temp).width;
 	matchEndX := generate_text_run(string.{searchResult.matchRange.end - removedByTrim, line.data}, xx box.fontSize, box.font,,temp).width;
 
-	highlightHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
 	submit_instance(.{
 		dstRect = .{
 			xPos + matchStartX,
-			yPos-metrics.typicalDescender-highlightHeight,
+			yPos-metrics.typicalDescender-metrics.lineSpacing,
 			matchEndX - matchStartX,
-			highlightHeight
+			xx metrics.lineSpacing
 		},
 		color = style.backgroundLight,
 		cornerRadii = box.cornerRadius,
 	});
 
-	draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+
+	// draw the text run with syntax highlights!!
+
+	fileExt := path_extension(searchResult.filePath);
+	success, language := get_language(fileExt);
+	if success {
+		// make a parser and parse the line of code
+		parser := ts_parser_new();
+		defer ts_parser_delete(parser);
+		ts_parser_set_language(parser, language.treesitterLang);
+
+		tree := ts_parser_parse_string(parser, null, line.data, xx line.count);
+		defer ts_tree_delete(tree);
+
+		queryCursor := ts_query_cursor_new(); // @todo: delete?
+		treeNode := ts_tree_root_node(tree);
+		ts_query_cursor_exec(queryCursor, language.highlightsQuery, treeNode);
+
+		// @TODO: reuse this code with the usual code drawing stuff
+		highlights: [..]Highlight;
+		highlights.allocator = temp;
+
+		// collect all the highlights for the region of code we must render
+		while true {
+			tsMatch: TSQueryMatch;
+			captureId: u32;
+			result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
+			if result == false then break;
+			capture := tsMatch.captures[captureId];
+
+			startByte := ts_node_start_byte(capture.node);
+			endByte := ts_node_end_byte(capture.node);
+			type := to_string(ts_node_grammar_type(capture.node));
+
+			success, highlightType := table_find(*language.captureToHighlight, capture.index);
+			if evaluate_query_predicates(language, tsMatch, line) {
+				if highlights.count > 0 {
+					if highlights[highlights.count-1].start == startByte {
+						// override the previous range if there's a newer (better) one
+						highlights[highlights.count-1] = .{startByte, endByte, highlightType};
+						continue;
+					}
+				}
+				array_add(*highlights, .{startByte, endByte, highlightType});
+			}
+		}
+
+		currentHighlightIndex := 0;
+		for box.textRun.instances {
+			byteOffset:u32 = xx box.textRun.byteOffsets[it_index];
+
+			if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
+				currentHighlightIndex += 1;
+			}
+
+			color := style.codeDefault;
+			if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].start && byteOffset < highlights[currentHighlightIndex].end {
+				color = style.codeColors[highlights[currentHighlightIndex].type];
+			}
+
+			instance := it;
+			instance.dstRect.x = round(xPos + instance.dstRect.x);
+			instance.dstRect.y = round(yPos + instance.dstRect.y);
+			instance.color = color;
+			submit_instance(instance);
+		}
+	}
+	else {
+		draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+	}
 }
 
 // @todo: probably want to move this somewhere else? Potentially the panel file?
@@ -1732,6 +1800,55 @@ evaluate_query_predicates :: (lang: *Language, tsMatch: TSQueryMatch, document: 
 			case .EQ_CAPTURE;
 				captureText1 := get_capture_content(tsMatch, document, predicate.captureIndex1);
 				captureText2 := get_capture_content(tsMatch, document, predicate.captureIndex2);
+				if captureText1 != captureText2 then return false ^ predicate.not;
+			case;
+				return true;
+		}
+	}
+
+	// all predicates passed
+	return true;
+}
+
+evaluate_query_predicates :: (lang: *Language, tsMatch: TSQueryMatch, text: string) -> bool {
+	// @todo: very much duplicated with the above can we refactor??
+
+	predicateList := table_find_pointer(*lang.predicates, tsMatch.pattern_index);
+	if predicateList == null then return true;
+
+	get_capture_content :: (tsMatch: TSQueryMatch, text: string, captureIndex: u32) -> string {
+		capture: TSQueryCapture;
+		for 0..tsMatch.capture_count-1 {
+			if tsMatch.captures[it].index == captureIndex {
+				capture = tsMatch.captures[it];
+				break;
+			}
+		}
+		startByte := ts_node_start_byte(capture.node);
+		endByte := ts_node_end_byte(capture.node);
+
+		return slice(text, startByte, endByte-startByte);
+	}
+
+	for predicate: predicateList.* {
+		if predicate.type == {
+			case .MATCH;
+				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
+				matched, captures := match(captureText, predicate.regex,,temp);
+				if !matched return false ^ predicate.not;
+			case .ANY_OF;
+				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
+				matched := false;
+				for predicate.strings {
+					if captureText == it then matched = true;
+				}
+				if !matched return false ^ predicate.not;
+			case .EQ_TEXT;
+				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
+				if captureText != predicate.basicStr then return false ^ predicate.not;
+			case .EQ_CAPTURE;
+				captureText1 := get_capture_content(tsMatch, text, predicate.captureIndex1);
+				captureText2 := get_capture_content(tsMatch, text, predicate.captureIndex2);
 				if captureText1 != captureText2 then return false ^ predicate.not;
 			case;
 				return true;
