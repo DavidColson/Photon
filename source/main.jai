@@ -1168,9 +1168,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// TODO:
 					// make window max half of panel height
 					// line number darker text
-					// draw filename first, then path darker (like Focus)
 					// draw a highlight on the matched search term in the line
-					// Overflowing filenames should get clipped by scissors
 
 					fileNameBox := box(ui_key("##filenameBox%", it), .{
 						flags=.CLIP_CONTENTS,
@@ -1179,17 +1177,28 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					{
 						push_parent(fileNameBox); defer pop_parent();
 
-						key := ui_key("%##searcherFileName%", path_filename(searchResult.filePath), it);
+						fileName := path_filename(searchResult.filePath);
+						key := ui_key("%##searcherFileName%", fileName, it);
 						fileLabel := box(key, .{
 							flags=.DRAW_TEXT,
 							layout=.{ width=text_content(), height=text_content() },
 						});
+
+						filePath := searchResult.filePath;
+						for project.folders {
+							if begins_with_nocase(filePath, it) {
+								filePath = slice(filePath, it.count, filePath.count-it.count);
+								filePath = slice(filePath, 0, filePath.count - fileName.count);
+							}
+						}
+
 						textCol := uiState.defaultPalette.text;
 						textCol.w = 0.6;
-						filePathLabel := box(ui_key("%##searcherFilePath%", searchResult.filePath, it), .{
+						filePathLabel := box(ui_key("%##searcherFilePath%", filePath, it), .{
 							flags=.DRAW_TEXT,
 							layout=.{ width=text_content(), height=text_content() },
-							palette=.{ text=textCol }
+							palette=.{ text=textCol },
+							fontSize=em(0.8)
 						});
 					}
 
