@@ -1,10 +1,3 @@
-BuildType :: enum u8
-{
-	DEBUG;
-	OPTIMIZED;
-	RELEASE;
-}
-
 DialogType :: enum u8 {
 	NONE;
 	COMMAND_PICKER;
@@ -2424,9 +2417,14 @@ get_language :: (_languageName: string) -> bool, *Language {
 		return true, lang;
 	}
 
-	// @todo: In packaged builds this should be the base directory of the exe
-	exePath := path_strip_filename(get_path_of_running_executable());
-	libPath := tprint("%../../grammars/%.dll", exePath, languageName);
+	#if BUILD_TYPE == .SHIPPING {
+		exePath := path_strip_filename(get_path_of_running_executable());
+		libPath := tprint("%grammars/%.dll", exePath, languageName);
+	}
+	else {
+		exePath := path_strip_filename(get_path_of_running_executable());
+		libPath := tprint("%../../grammars/%.dll", exePath, languageName);
+	}
 	if !file_exists(libPath) {
 		return false, null;
 	}
@@ -2443,7 +2441,12 @@ get_language :: (_languageName: string) -> bool, *Language {
 	lang.treesitterLang = loadFunc();
 	
 	// Load queries
-	highlightsQueryPath := tprint("%../../queries/%/highlights.scm", exePath, languageName);
+	#if BUILD_TYPE == .SHIPPING {
+		highlightsQueryPath := tprint("%queries/%/highlights.scm", exePath, languageName);
+	}
+	else {
+		highlightsQueryPath := tprint("%../../queries/%/highlights.scm", exePath, languageName);
+	}
 	file, success := read_entire_file(highlightsQueryPath,,temp);
 	if success {
 		errorLocation: u32;
