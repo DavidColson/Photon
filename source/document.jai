@@ -673,7 +673,7 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 
 	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
 
-	// insert text at offset in document
+	// insert text at offset in document
 
 	node, remainder, nodeStartOffset, line := node_at_offset(doc, doc.tree, atOffset);
 	insertCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
@@ -1549,6 +1549,9 @@ document_reparse_ts_tree :: (doc: *Document, async := true) {
 document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64, async := true) {
 	if doc.parserHasInitialized && doc.asyncParser == null return;
 
+	inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
+	ts_tree_edit(doc.asyncTsTree, *inputEdit);
+
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
@@ -1609,8 +1612,6 @@ ts_parse_task :: (data: *void) {
 
 	if doc.asyncParser && doc.language {
 		if !forceReparse {
-			inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
-			ts_tree_edit(doc.asyncTsTree, *inputEdit);
 			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 		else {
