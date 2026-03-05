@@ -313,6 +313,8 @@ project_update :: () {
 #scope_file
 
 project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+	if project.loadProgress != .COMPLETE then return;
+
 	log("FileChange detected % %", change.full_path, change.events);
 
 	// @todo: the file change may relate to an open document
