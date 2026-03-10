@@ -6,7 +6,7 @@ RendererState :: struct {
 	vao: GLuint;
 	standardProgram: GLuint;
 	textProgram: GLuint;
-	resolutionUniformLocation: GLint;
+	resolutionUniformLocation: [2]GLint;
 	whiteDefaultTex: GLuint;
 
     instances: [..] Instance;
@@ -85,6 +85,9 @@ init_renderer :: (_window: Window_Type) {
 	{
 		standardProgram = get_shader_program(VERTEX_SHADER, FRAGMENT_SHADER, .[]);
 		textProgram = get_shader_program(VERTEX_SHADER, FRAGMENT_SHADER_TEXT, .[]);
+
+		resolutionUniformLocation[Shader.RECTS] = glGetUniformLocation(standardProgram, "resolution");
+		resolutionUniformLocation[Shader.TEXT] = glGetUniformLocation(textProgram, "resolution");
 	}
 	// setup the VAO
 	{
@@ -175,37 +178,37 @@ render_frame :: () {
 	glBufferData(GL_ARRAY_BUFFER, size_of(Instance) * numInstances, instances.data, GL_STREAM_DRAW);
 
 	for 0..numGroups-1 {
-		instance := *groups[it];
-		glUseProgram(instance.shader);
+		group := *groups[it];
+		glUseProgram(group.shader);
 
 		scissor := groups[it].scissorRect;
 
 		glScissor(xx scissor.x, xx (windowHeight - (scissor.h+scissor.y)), xx scissor.w, xx scissor.h);
 
 		// per component blending for subpixel text rendering
-		if instance.shader == textProgram {
+		if group.shader == textProgram {
 			glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);  
+			glUniform2f(resolutionUniformLocation[Shader.TEXT], xx windowWidth, xx windowHeight);
 		}
 		else {
 			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
+			glUniform2f(resolutionUniformLocation[Shader.RECTS], xx windowWidth, xx windowHeight);
 		}
 
-		resolutionUniformLocation = glGetUniformLocation(standardProgram, "resolution");
-		glUniform2f(resolutionUniformLocation, xx windowWidth, xx windowHeight);
 
-		if instance.texture == null {
+		if group.texture == null {
 			glBindTexture(GL_TEXTURE_2D, whiteDefaultTex);
 		}
 		else {
-			if instance.texture.dirty {
-				load_bitmap_to_gpu(instance.texture);
-				instance.texture.dirty = false;
+			if group.texture.dirty {
+				load_bitmap_to_gpu(group.texture);
+				group.texture.dirty = false;
 			}
-			glBindTexture(GL_TEXTURE_2D, instance.texture.texHandle);
+			glBindTexture(GL_TEXTURE_2D, group.texture.texHandle);
 		}
 
-		count := instance.instanceEnd - instance.instanceStart;
-		glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, xx count, xx instance.instanceStart);
+		count := group.instanceEnd - group.instanceStart;
+		glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, xx count, xx group.instanceStart);
 	}
 
 	platform_swap_buffers(window);
