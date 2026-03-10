@@ -60,6 +60,7 @@ platform_set_backup_timer :: (window: Window_Type, callback: BackupTimerCallback
 platform_swap_buffers :: (window: Window_Type) {
 	dc := GetDC(window);
 	SwapBuffers(dc);
+	ReleaseDC(window, dc);
 }
 
 platform_set_border_color :: () {
