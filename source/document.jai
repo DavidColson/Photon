@@ -514,6 +514,7 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
 	doc.diskLastModtime = file.diskLastModtime;
+	doc.lineEndings = file.lineEndingMode;
 
 	// setup initial undo point
 	doc.nextUndoOffset = 0;
