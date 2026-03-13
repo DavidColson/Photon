@@ -600,44 +600,14 @@ yank_selection :: (using panel: *Panel, args: []string) {
 }
 
 paste_after_selection :: (using panel: *Panel, args: []string) {
-	// read from register (either default or selected)
 	textToPaste := read_register(registers.selectedRegister);
-
-	// insert into document
-	insertLocation := max(cursor.head, cursor.anchor);
-
-	// do we need this if we guarantee the cursor won't lie on an \r?
-	// Todo: remove
-	if get_char_at(document, insertLocation) == #char "\r" {
-		insertLocation += 2;
-	}
-	else {
-		insertLocation += 1;
-	}
-	
-	insert(document, insertLocation, textToPaste, true);
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
-	commit_history(document);
-
-	cursor.anchor = insertLocation;
-	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
-
+	cursor = paste(document, textToPaste, cursor, false);
 	panel_scroll_to_cursor(panel);
 }
 
 paste_before_selection :: (using panel: *Panel, args: []string) {
-	// read from register (either default or selected)
 	textToPaste := read_register(registers.selectedRegister);
-
-	// insert into document
-	insertLocation := max(cursor.head, cursor.anchor);
-	insert(document, insertLocation, textToPaste, true);
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
-	commit_history(document);
-
-	cursor.anchor = insertLocation;
-	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
-
+	cursor = paste(document, textToPaste, cursor, true);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -682,6 +652,44 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
 
 	panel_scroll_to_cursor(panel);
+}
+
+paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore: bool) -> Cursor {
+	linewise := false;
+	for textToPaste {
+		if it == #char "\n" then linewise = true;
+	}
+
+	insertLocation := 0;
+	if linewise && !pasteBefore {
+		coordinate := get_coordinate_from_offset(document, cursor.head);
+		_, insertLocation = get_line_range(document, coordinate.line, true);
+
+		insert(document, insertLocation, textToPaste, true);
+	}
+	else if linewise && pasteBefore {
+		coordinate := get_coordinate_from_offset(document, cursor.head);
+		// todo: paste on the first line
+		_, insertLocation = get_line_range(document, coordinate.line-1, true);
+		insert(document, insertLocation, textToPaste, true);
+	}
+	else if !linewise && !pasteBefore {
+		insertLocation = max(cursor.head, cursor.anchor) + 1;
+		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
+		insert(document, insertLocation, textToPaste, true);
+	}
+	else if !linewise && pasteBefore {
+		insertLocation = min(cursor.head, cursor.anchor);
+		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
+		insert(document, insertLocation, textToPaste, true);
+	}
+
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
+	commit_history(document);
+	newCursor := cursor;
+	newCursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
+	newCursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
+	return newCursor;
 }
 
 new_line_below :: (using panel: *Panel, args: []string) {
