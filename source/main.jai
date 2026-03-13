@@ -1844,7 +1844,7 @@ evaluate_query_predicates :: (lang: *Language, tsMatch: TSQueryMatch, text: stri
 				captureText2 := get_capture_content(tsMatch, text, predicate.captureIndex2);
 				if captureText1 != captureText2 then return false ^ predicate.not;
 			case;
-				return true;
+			return true;
 		}
 	}
 
@@ -1873,6 +1873,13 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 		if 0 > lineIndex || lineIndex >= linesOnScreen.count then continue;
 
 		line := linesOnScreen[it - startVisibleLine];
+
+		// hide CRLF endings
+		if line.text[line.text.count-2] == #char "\r" {
+			line.text.count -= 1;
+			line.endByteOffset -= 1;
+		}
+		
 		lineWidth := generate_text_run(line.text, fontSize, font,,temp).width;
 
 		isFirstLine:= it == rangeStart.line;

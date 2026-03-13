@@ -145,14 +145,7 @@ goto_document_start :: (using panel: *Panel, args: []string) {
 
 goto_document_end :: (using panel: *Panel, args: []string) {
 	cursor.head = get_size(document)-1;
-
-	if get_char_at(document, cursor.head-1) == #char "\n" {
-		cursor.head -= 1;
-	}
-	if get_char_at(document, cursor.head-1) == #char "\r" {
-		cursor.head -= 1;
-	}
-
+	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	cursor.anchor = cursor.head;
 
 	// scroll the window if the cursor will now become out of view
@@ -163,14 +156,7 @@ goto_document_end :: (using panel: *Panel, args: []string) {
 
 goto_line_end :: (using panel: *Panel, args: []string) { 
 	coordinate := get_coordinate_from_offset(document, cursor.head);
-	cursor.head = get_line_start(document, coordinate.line + 1);
-
-	if get_char_at(document, cursor.head-1) == #char "\n" {
-		cursor.head -= 1;
-	}
-	if get_char_at(document, cursor.head-1) == #char "\r" {
-		cursor.head -= 1;
-	}
+	_, cursor.head = get_line_range(document, coordinate.line);
 	cursor.anchor = cursor.head;
 
 	// recalculate virtual column
@@ -495,6 +481,7 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 select_whole_document :: (using panel: *Panel, args: []string) {
 	cursor.anchor = 0;
 	cursor.head = get_size(document)-1;
+	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -572,11 +559,15 @@ select_register :: (using panel: *Panel, args: []string) {
 
 delete_selection :: (using panel: *Panel, args: []string) {
 	if cursor.head < cursor.anchor {
-		delete(document, cursor.head, cursor.anchor-cursor.head + 1);
+		startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
+		endOffset := shift_offset_line_endings(document, cursor.anchor + 1, .FORWARD);
+		delete(document, startOffset, endOffset-startOffset);
 		cursor.anchor = cursor.head;
 	}
 	else {
-		delete(document, cursor.anchor, cursor.head-cursor.anchor + 1);
+		startOffset := shift_offset_line_endings(document, cursor.anchor, .REVERSE);
+		endOffset := shift_offset_line_endings(document, cursor.head + 1, .FORWARD);
+		delete(document, startOffset, endOffset-startOffset);
 		cursor.head = cursor.anchor;
 	}
 
@@ -599,7 +590,7 @@ yank_selection :: (using panel: *Panel, args: []string) {
 	iterator := make_iterator(document, rangeStart);
 	for :raw_bytes iterator {
 		array_add(*text, it,,temp);
-		if iterator.offset >= rangeEnd then break;
+		if it != #char "\r" && iterator.offset >= rangeEnd then break;
 	}
 	textStr := string.{text.count, text.data};
 	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
@@ -614,6 +605,9 @@ paste_after_selection :: (using panel: *Panel, args: []string) {
 
 	// insert into document
 	insertLocation := max(cursor.head, cursor.anchor);
+
+	// do we need this if we guarantee the cursor won't lie on an \r?
+	// Todo: remove
 	if get_char_at(document, insertLocation) == #char "\r" {
 		insertLocation += 2;
 	}
@@ -1036,14 +1030,17 @@ insert_tab_character :: (using panel: *Panel, args: []string) {
 insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 	distanceToAnchor := cursor.anchor - cursor.head;
 
-	delete(document, cursor.head-1, 1);
-	cursor.head -= 1;
+	startOffset := shift_offset_line_endings(document, cursor.head - 1, .REVERSE);
+	endOffset := shift_offset_line_endings(document, cursor.head, .FORWARD);
+	change := endOffset-startOffset;
+	delete(document, startOffset, change);
+	cursor.head -= change;
 	// @todo: update virtual column correctly
 
 	// update the anchor
 	if distanceToAnchor > 0 {
 		// anchor is ahead, we want to move it same as the head
-		cursor.anchor -= 1;
+		cursor.anchor -= change;
 	}
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
@@ -1055,13 +1052,16 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
 	distanceToAnchor := cursor.anchor - cursor.head;
 
-	delete(document, cursor.head, 1);
+	startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
+	endOffset := shift_offset_line_endings(document, cursor.head + 1, .FORWARD);
+	change := endOffset-startOffset;
+	delete(document, startOffset, change);
 	// @todo: update virtual column correctly
 
 	// update the anchor
 	if distanceToAnchor > 0 {
 		// anchor is ahead, we want to move it same as the head
-		cursor.anchor -= 1;
+		cursor.anchor -= change;
 	}
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;

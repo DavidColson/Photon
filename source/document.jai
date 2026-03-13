@@ -727,8 +727,21 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 }
 
 delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
-	// delete length bytes in the document at offset
+	#if BUILD_TYPE == BuildType.DEBUG {
+		// Check to make sure we won't split a crlf
+
+		// that involves ensuring that
+		// the start of the range is not an LF
+		// and the end of the range is not a CR
+		if atOffset > 0 {
+			startChar := get_char_at(doc, atOffset);
+			endChar := get_char_at(doc, atOffset+length-1);
+			assert(!(startChar == #char "\n" || endChar == #char "\r"));
+		}
+	}
 	assert(!doc.isCopy, "You must not edit copies!!!");
+
+	// delete length bytes in the document at offset
 
 	// undo updates
 	if doc.nextUndoOffset < 0 {
