@@ -642,7 +642,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 	}
 	save_task_complete :: (data: *void) {
 		using taskData := cast(*TaskData, data);
-		doc := taskData.document;
+		doc := document_get(taskData.document.handle);
 		defer free(taskData);
 		defer free(desiredPath);
 		defer document_copy_free(taskData.document);
