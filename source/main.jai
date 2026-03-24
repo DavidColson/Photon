@@ -183,10 +183,7 @@ main :: () {
 
 	if filesToOpen.count > 0 {
 		doc := document_get_or_open(filesToOpen[0]);
-
-		if doc {
-			panel_set_active_document(*focusedPanel, doc);
-		}
+		panel_set_active_document(*focusedPanel, doc);
 	}
 
 	// test projects
@@ -257,6 +254,9 @@ update :: (deltaTime: float64) {
 
 	project_update();
 	process_changes(*documentWatcher);
+
+	// update the document incase it changed during the async tasks
+	focusedPanel.document = document_get(focusedPanel.docHandle);
 
 	newDpiScale := platform_get_dpi_scale(window);
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
@@ -358,12 +358,13 @@ build_ui :: () {
 	}
 	
 	// Draw the panel
-	if focusedPanel.document {
-		if focusedPanel.document.tree {
-			build_ui_panel(*focusedPanel);
+	slot := bucket_array_find_pointer(*openDocuments, focusedPanel.docHandle);
+	if slot {
+		if slot.state == .INVALID {
+			build_ui_loading_panel(*focusedPanel);
 		}
 		else {
-			build_ui_loading_panel(*focusedPanel);
+			build_ui_panel(*focusedPanel);
 		}
 	}
 	else {
@@ -1312,14 +1313,14 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					push_parent(entryBox); defer pop_parent();
 
 
-					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.locator.bucket_index, entry.locator.slot_index);
+					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.handle.bucket_index, entry.handle.slot_index);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
-					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.locator.bucket_index, entry.locator.slot_index);
+					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.handle.bucket_index, entry.handle.slot_index);
 					pathLabel := box(key2, .{
 						flags=.DRAW_TEXT,
 						fontSize=em(0.7),
@@ -1910,29 +1911,37 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 
 do_backup_callback :: () {
 	for * openDocuments {
-		if document_is_unsaved(it) {
+		doc: *Document;
+		if it.state == {
+			case .INVALID; continue;
+			case .A_VALID; doc = *it.docA;
+			case .B_VALID; doc = *it.docB;
+			case; continue;
+		}
+		if document_is_unsaved(doc) {
 			builder : String_Builder;
 			builder.allocator = temp;
 			init_string_builder(*builder);
 
 			append(*builder, path_strip_filename(get_path_of_running_executable()));
 			append(*builder, "\\backups\\");
-			append(*builder, path_filename(it.path));
+			append(*builder, path_filename(doc.path));
 
-			document_save(it, builder_to_string(*builder,,temp), true);
+			document_save(doc, builder_to_string(*builder,,temp), true);
 		}
 	}
 }
 
 document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
-	found, doc := document_get_by_path(change.full_path);
+	found, handle := document_get_by_path(change.full_path);
 	if found {
+		doc := document_get(handle);
 		if change.events & .MODIFIED || change.events & .MOVED_TO {
 			modtime, size, success := file_modtime_and_size(doc.path);
 			if modtime > doc.diskLastModtime {
 				// reload file
 				if !document_is_unsaved(doc) {
-					document_load_from_disk(doc);
+					document_load_from_disk(doc.handle);
 				}
 				else {
 					// @todo: when we have nicer UI this should give a popup or something more explicit
@@ -2796,7 +2805,7 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 Input :: #import "Input";
 #import "Window_Creation";
 #import "Process";
-#import "Basic"()(MEMORY_DEBUGGER = false);
+#import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Math";
 #import "System";
 #import "String";

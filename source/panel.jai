@@ -10,7 +10,11 @@ Cursor :: struct {
 }
 
 Panel :: struct {
+	docHandle: DocumentHandle;
+	// this will be updated every frame using the handle
+	// Never copy and store this pointer, it can change underneath you
 	document: *Document;
+
 	layoutRect: Rect;
 	optionsMenuOpen: bool;
 
@@ -33,8 +37,9 @@ Panel :: struct {
 	results: [..]Document.Range;
 }
 
-panel_set_active_document :: (panel: *Panel, doc: *Document) {
-	panel.document = doc;
+panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
+	panel.docHandle = doc;
+	panel.document = document_get(doc);
 	panel.cursor = .{};
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;

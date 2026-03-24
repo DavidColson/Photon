@@ -384,12 +384,24 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 	
 	if searchWork.loaded {
 		// this is where we search currently open documents
-		
+
+		// @todo: This actually iterates the real documents, which is pretty naughty tbh
+		// Ideally these would all be document copies made at the point of searching on the main thread
+		// something to sort out later
 		for openDocuments.all_buckets[searchWork.bucketIndex].data {
 			if !openDocuments.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
 
-			// @todo: this should be a document copy, not the real deal
-		    doc := *it;
+			doc: *Document;
+			if it.state == {
+				case .INVALID;
+					continue;
+				case .A_VALID;
+					doc = *it.docA;
+				case .B_VALID;
+					doc = *it.docB;
+				case;
+					continue;
+			}
 
 			hasMatches, results := search(doc, .NOCASE, 0, searchWork.searchTerm, false);
 

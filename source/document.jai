@@ -111,7 +111,7 @@ Document :: struct {
 	lineEndings: LineEndingMode;
 	path: string;
 	diskLastModtime: Apollo_Time;
-	locator: Bucket_Locator;
+	handle: DocumentHandle;
 	longestLine: s32;
 	longestLineLength: s32;
 	isCopy: bool;
@@ -141,12 +141,33 @@ Document :: struct {
 	otherMemory: Flat_Pool;
 }
 
+DocumentSlot :: struct {
+	State :: enum {
+		INVALID;
+		A_VALID;
+		B_VALID;
+	}
+	docA: Document;
+	docB: Document;
+
+	// currently this is not an atomic, but maybe it should be
+	// we will update this in async callbacks on the main thread
+	// so it's fine for now
+	state: State;
+}
+
+DocumentHandle :: Bucket_Locator;
+
 openDocumentLock: Mutex;
-openDocuments: Bucket_Array(Document, 128); // might want more when we load full projects in?
-openDocumentTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
+openDocuments: Bucket_Array(DocumentSlot, 128);
+openDocumentTable: Table(string, DocumentHandle, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
+
+// @todo: make read only or something??
+nilDocument: Document;
 
 tree_test :: () {
-	doc := document_get_or_open("build_shorter.jai");
+	docHandle := document_get_or_open("build_shorter.jai");
+	doc := document_get(docHandle);
 
 	pretty_print_tree(doc.tree);
 
@@ -241,7 +262,17 @@ tree_test :: () {
 
 // Document API
 
-document_get_or_open :: (path: string, noLoad := false, async := true) -> *Document {
+document_get :: (handle: DocumentHandle) -> *Document {
+	slot := bucket_array_find_pointer(*openDocuments, handle);
+	if slot == null return *nilDocument;
+
+	if slot.state == .INVALID return *nilDocument;
+	if slot.state == .A_VALID return *slot.docA;
+	if slot.state == .B_VALID return *slot.docB;
+	return *nilDocument;
+}
+
+document_get_or_open :: (path: string, noLoad := false, async := true) -> DocumentHandle {
 	lock(*openDocumentLock);
 
 	// check if this file is already open
@@ -253,10 +284,11 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	// check if the file even exists
 	if !file_exists(path) {
 		push_notification("File Does Not Exist");
-		return null;
+		return .{};
 	}
 
-	doc, locator := find_and_occupy_empty_slot(*openDocuments);
+	slot, handle := find_and_occupy_empty_slot(*openDocuments);
+	doc := *slot.docA;
 
 	if is_absolute_path(path) {
 		doc.path = copy_string(path);
@@ -266,13 +298,13 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	}
 	path_overwrite_separators(doc.path, #char "/");
 
-	doc.locator = locator;
-	table_add(*openDocumentTable, doc.path, doc.locator); 
+	doc.handle = handle;
+	table_add(*openDocumentTable, doc.path, doc.handle); 
 
 	unlock(*openDocumentLock);
 
 	if !noLoad {
-		document_load_from_disk(doc, async);
+		document_load_from_disk(doc.handle, async);
 	}
 
 	// setup file watcher
@@ -280,12 +312,12 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> *Docum
 	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
 	add_directories(*documentWatcher, parentPath);
 
-	return doc;
+	return doc.handle;
 }
 
-document_load_from_disk :: (doc: *Document, async := true) {
+document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	TaskData :: struct {
-		originalDocument: *Document;
+		handle: DocumentHandle;
 		workingDocument: *Document;
 		result: Result;
 		async: bool;
@@ -297,11 +329,6 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		}
 	}
 	load_from_disk_task :: (data: *void) {
-		// @todo: Need to clean up the memory use in here a little bit
-		// - [ ] Undo stack needs to be in a pool so it's not being forgotten about
-		// - [ ] Dynamic arrays will be thrashing the pools and wasting memory, so see if we cani
-		//       improve that situation somehow?  
-
 		taskData := cast(*TaskData, data);
 		doc := taskData.workingDocument;
 
@@ -410,27 +437,31 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		using taskData := cast(*TaskData, data);
 
 		if result == .SUCCESS {
-			// @todo: proper document free function
-			// the memory pools will be set to the ones from the workingDocument, so we're done with these
-			fini(*originalDocument.treeMemory);
-			fini(*originalDocument.bufferMemory);
-			fini(*originalDocument.otherMemory);
+			// once we're done we simply set the new document as valid
+			// and free the old one
+			slot := bucket_array_find_pointer(*openDocuments, taskData.handle);
+			if slot.state == {
+				case .INVALID;
+					slot.state = .A_VALID;
+					document_reset(*slot.docB);
+				case .A_VALID;
+					slot.state = .B_VALID;
+					document_reset(*slot.docA);
+				case .B_VALID;
+					slot.state = .A_VALID;
+					document_reset(*slot.docB);
+				case;
+					slot.state = .A_VALID;
+					document_reset(*slot.docB);
+			}
 
-			// free the old undo memory
-			array_reset(*originalDocument.undoStack);
-			array_reset(*originalDocument.redoStack);
-
-			// free the old ts trees
-			ts_tree_delete(originalDocument.tsTree);
-			ts_tree_delete(originalDocument.asyncTsTree);
-
-			// copy the working document to the real one
-			memcpy(originalDocument, workingDocument, size_of(Document));
-
-			// these two are async and so must be kicked off _after_ the real document
-			// has been updated, sadly can't do them inside the task itself
-			calculate_longest_line(originalDocument, async);
-			document_reparse_ts_tree(originalDocument, async);
+			// @todo: if reloading a file with an existing ts tree it is lost in this process
+			// you can move it, though the ranges will be off and it can render a bit wrong
+			// for now I'm not handling this but at some point it will be good to actually
+			// retain the parsing state across a file reload
+		
+			calculate_longest_line(document_get(taskData.handle), async);
+			document_reparse_ts_tree(document_get(taskData.handle), async);
 
 			push_notification("Document Opened");
 		}
@@ -440,25 +471,39 @@ document_load_from_disk :: (doc: *Document, async := true) {
 		else if result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
 			push_notification("File open failed");			
 		}
-		free(taskData.workingDocument);
+
 		free(taskData);
 	}
 
 	data := New(TaskData); // freed by load_from_disk_complete
+	data.handle = docHandle;
 	data.async = async;
-	data.originalDocument = doc;
-	data.workingDocument = New(Document); // freed by load_from_disk_complete
+	slot := bucket_array_find_pointer(*openDocuments, docHandle);
+	// we'll load into the document that's _not_ valid currently
+	oldSlot: *Document;
+	newSlot: *Document;
+	if slot.state == {
+		case .INVALID;
+			oldSlot = *slot.docA;
+			newSlot = *slot.docA;
+		case .A_VALID;
+			oldSlot = *slot.docA;
+			newSlot = *slot.docB;
+		case .B_VALID;
+			oldSlot = *slot.docB;
+			newSlot = *slot.docA;
+		case;
+			oldSlot = *slot.docA;
+			newSlot = *slot.docA;
+	}
 
-	// copy over the values that will _not_ get updated by load_from_disk and need to persist
-	data.workingDocument.path = doc.path;
-	data.workingDocument.diskLastModtime = doc.diskLastModtime;
-	data.workingDocument.asyncParser = doc.asyncParser;
-	data.workingDocument.parserHasInitialized = doc.parserHasInitialized ;
-	data.workingDocument.locator = doc.locator;
-	data.workingDocument.language = doc.language;
+	data.workingDocument = newSlot;
+	data.workingDocument.path = copy_string(oldSlot.path);
+	data.workingDocument.diskLastModtime = oldSlot.diskLastModtime;
+	data.workingDocument.handle= docHandle;
 
+	data.result = .IN_PROGRESS;
 	if async {
-		data.result = .IN_PROGRESS;
 		push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
 	}
 	else {
@@ -467,19 +512,22 @@ document_load_from_disk :: (doc: *Document, async := true) {
 	}
 }
 
-document_load_from_project :: (doc: *Document, file: *Project.File) {
-	// @todo: proper document free function
-	fini(*doc.treeMemory);
-	fini(*doc.bufferMemory);
-	fini(*doc.otherMemory);
-
-	// free the old undo memory
-	array_reset(*doc.undoStack);
-	array_reset(*doc.redoStack);
-
-	// free the old ts trees
-	ts_tree_delete(doc.tsTree);
-	ts_tree_delete(doc.asyncTsTree);
+document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
+	slot := bucket_array_find_pointer(*openDocuments, docHandle);
+	doc: *Document;
+	if slot.state == {
+		case .INVALID;
+			doc = *slot.docA;
+		case .A_VALID;
+			doc = *slot.docB;
+		case .B_VALID;
+			doc = *slot.docA;
+		case;
+			doc = *slot.docA;
+	}
+	
+	doc.path = copy_string(file.fullName);
+	doc.handle = docHandle;
 
 	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
 
@@ -521,9 +569,25 @@ document_load_from_project :: (doc: *Document, file: *Project.File) {
 	commit_history(doc);
 	doc.undoStack[doc.undoStack.count-1].saved = true;
 
+	if slot.state == {
+		case .INVALID;
+			slot.state = .A_VALID;
+			document_reset(*slot.docB);
+		case .A_VALID;
+			slot.state = .B_VALID;
+			document_reset(*slot.docA);
+		case .B_VALID;
+			slot.state = .A_VALID;
+			document_reset(*slot.docB);
+		case;
+			slot.state = .A_VALID;
+			document_reset(*slot.docB);
+	}
+
 	calculate_longest_line(doc);
 	document_reparse_ts_tree(doc);
 
+	// unload the file from the project
 	// @todo: if you ever support closing documents, you must reload it back into the project
 	// if required
 	free(file.content);
@@ -641,17 +705,11 @@ document_is_unsaved :: (doc: *Document) -> bool {
 	return false;
 }
 
-document_get_by_path :: (path: string) -> bool, *Document {
+document_get_by_path :: (path: string) -> bool, DocumentHandle {
 	lock(*openDocumentLock);
 	defer unlock(*openDocumentLock);
 	success, locator := table_find(*openDocumentTable, path);
-	if success {
-		bucket := openDocuments.all_buckets[locator.bucket_index];
-		assert(bucket.occupied[locator.slot_index] == true);
-		result := *bucket.data[locator.slot_index];
-		return true, result;
-	}
-	return false, null;
+	return success, locator;
 }
 
 insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
@@ -1704,11 +1762,27 @@ node_at_offset :: (doc: *Document, node: *Document.Node, offset: s64) -> node: *
 	return null, 0, 0, 0;
 }
 
-// Piece Tree helpers
+#scope_file
 
-// commented out because search is using internal stuff
-// intention is that core search function gets moved to this file
-// #scope_file
+document_reset :: (using doc: *Document) {
+	if doc == null return;
+	if doc.bufferMemory.memory_base == null then return;
+
+	free(path);
+
+	reset(*doc.treeMemory);
+	reset(*doc.bufferMemory);
+	reset(*doc.otherMemory);
+
+	array_reset(*doc.undoStack);
+	array_reset(*doc.redoStack);
+
+	ts_tree_delete(tsTree);
+	ts_tree_delete(asyncTsTree);
+	ts_parser_delete(asyncParser);
+
+	doc.* = .{};
+}
 
 make_piece :: (pieceTree: *Document, t: string) -> Document.Piece {
 	// firstly copy the text into the add buffer
