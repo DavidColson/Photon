@@ -521,6 +521,8 @@ enter_insert_mode_end :: (using panel: *Panel, args: []string) {
 		cursor.head = cursor.anchor;
 		cursor.anchor = temp;
 	}
+	cursor.head = min(cursor.head + 1, get_size(document)-1);
+	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	panel_scroll_to_cursor(panel);
