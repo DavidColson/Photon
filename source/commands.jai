@@ -1043,6 +1043,8 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 	startOffset := shift_offset_line_endings(document, cursor.head - 1, .REVERSE);
 	endOffset := shift_offset_line_endings(document, cursor.head, .FORWARD);
 	change := endOffset-startOffset;
+	if startOffset < 0 return; 
+
 	delete(document, startOffset, change);
 	cursor.head -= change;
 	// @todo: update virtual column correctly
