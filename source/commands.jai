@@ -1312,7 +1312,8 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 	if targetEndings == .LF {
 		for :raw_bytes iterator {
 			if it == #char "\r" && get_char_at(document, iterator.offset+1) == #char "\n" {
-				delete(document, iterator.offset, 1, true);
+				delete(document, iterator.offset, 2, true);
+				insert(document, iterator.offset, "\n", true);
 				iterator.offset -= 1;
 				end -= 1;
 			}
