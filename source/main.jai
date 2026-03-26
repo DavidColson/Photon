@@ -358,13 +358,20 @@ build_ui :: () {
 	}
 	
 	// Draw the panel
-	slot := bucket_array_find_pointer(*openDocuments, focusedPanel.docHandle);
-	if slot {
-		if slot.state == .INVALID {
-			build_ui_loading_panel(*focusedPanel);
+	// @todo: wrap this up somehow so zero handles resolve to null
+	// this is ugly as heck
+	if openDocuments.count != 0 {
+		slot := bucket_array_find_pointer(*openDocuments, focusedPanel.docHandle);
+		if slot {
+			if slot.state == .INVALID {
+				build_ui_loading_panel(*focusedPanel);
+			}
+			else {
+				build_ui_panel(*focusedPanel);
+			}
 		}
 		else {
-			build_ui_panel(*focusedPanel);
+			build_ui_empty_panel(*focusedPanel);
 		}
 	}
 	else {

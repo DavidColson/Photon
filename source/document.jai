@@ -263,6 +263,8 @@ tree_test :: () {
 // Document API
 
 document_get :: (handle: DocumentHandle) -> *Document {
+	// @TODO: really we need the zero handle to guaranteed resolve to null
+	if openDocuments.count == 0 then return *nilDocument;
 	slot := bucket_array_find_pointer(*openDocuments, handle);
 	if slot == null return *nilDocument;
 
