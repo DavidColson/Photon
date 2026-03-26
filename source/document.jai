@@ -734,7 +734,8 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 
 	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
 
-	// insert text at offset in document
+
+	// insert text at offset in document
 
 	node, remainder, nodeStartOffset, line := node_at_offset(doc, doc.tree, atOffset);
 	insertCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
