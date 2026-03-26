@@ -3,11 +3,14 @@
 [folders]
 # folders to include in the project
 C:/dev/Photon/
-C:/dev/jai
+# C:/dev/jai
+# C:/Dev/BoxmanBegins/Engine/Source
+# C:/Dev/BoxmanBegins/Game/Source
 
 [ignore]
 # files or directories to ignore
 # default should ignore known binary files
+.log # need to sort this out
 run
 testbigfile
 crashes
@@ -17,6 +20,7 @@ fonts
 grammars
 .git
 .build
+.json
 
 [allow]
 # Evaluated after the ignore list to add back in something

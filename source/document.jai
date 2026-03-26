@@ -1622,7 +1622,7 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 	if doc.parserHasInitialized && doc.asyncParser == null return;
 
 	inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
-	ts_tree_edit(doc.asyncTsTree, *inputEdit);
+	ts_tree_edit(doc.tsTree, *inputEdit);
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
@@ -1684,6 +1684,8 @@ ts_parse_task :: (data: *void) {
 
 	if doc.asyncParser && doc.language {
 		if !forceReparse {
+			inputEdit := TSInputEdit.{start_byte=xx taskData.startOffset, old_end_byte=xx taskData.oldEndOffset, new_end_byte=xx taskData.newEndOffset};
+			ts_tree_edit(doc.asyncTsTree, *inputEdit);
 			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 		}
 		else {
