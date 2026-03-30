@@ -1773,7 +1773,7 @@ evaluate_query_predicates :: (lang: *Language, tsMatch: TSQueryMatch, document: 
 
 		// need to find the text corresponding to this node
 		captureText := alloc_string(endByte-startByte,,temp);
-		iter := make_iterator(document, startByte);
+		iter := make_iterator(document, startByte,,temp);
 		for iter {
 			if it_index >= captureText.count break;
 			captureText[it_index] = it;

@@ -69,6 +69,7 @@ Document :: struct {
 		direction: IterateDirection;
 		lineBuffer: [..]u8;
 		lineContent: LineContent;
+		allocator: Allocator;
 	}
 
 	Iterator :: struct {
@@ -79,6 +80,7 @@ Document :: struct {
 		firstChar: *u8;
 		lastChar: *u8;
 		direction: IterateDirection;
+		allocator: Allocator;
 	}
 
 	IterateDirection :: enum {
@@ -185,13 +187,13 @@ tree_test :: () {
 
 	// iterator
 	
-	iterator := make_iterator(doc, 0);
+	iterator := make_iterator(doc, 0,,temp);
 	for iterator {
 		print("%", string.{1, *it});
 	}
 
 	// reverse iteration
-	iterator = make_reverse_iterator(doc, 109);
+	iterator = make_reverse_iterator(doc, 109,,temp);
 	for iterator {
 		if it_index == 10 break;
 		print("%", string.{1, *it});
@@ -199,7 +201,7 @@ tree_test :: () {
 	print("\n");
 
 	// for comparison, the same region forward
-	iterator = make_iterator(doc, 100);
+	iterator = make_iterator(doc, 100,,temp);
 	for iterator {
 		if it_index == 10 break;
 		print("%", string.{1, *it});
@@ -207,7 +209,7 @@ tree_test :: () {
 	print("\n");
 
 	count := 0;
-	iterator = make_iterator(doc, 0);
+	iterator = make_iterator(doc, 0,,temp);
 	while iterator.node != null {
 		log("Index: %, nodeLen %", count, iterator.node.piece.length);
 		next_node(*iterator);
@@ -246,12 +248,10 @@ tree_test :: () {
 	delete(doc, 130, 19);
 	end_edit(doc);
 
-
-	
 	
 	pretty_print_tree(doc.tree);
 
-	iterator = make_iterator(doc, 0);
+	iterator = make_iterator(doc, 0,,temp);
 	for iterator {
 		print("%", string.{1, *it});
 	}
@@ -632,7 +632,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 
 		fileHandle, success := file_open(desiredPath, true, false);
 		if success {
-			iterator := make_iterator(doc, 0);
+			iterator := make_iterator(doc, 0,,temp);
 			while iterator.node != null {
 				bufferIndex := iterator.node.piece.bufferIndex;
 				startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], iterator.node.piece.start);
@@ -730,7 +730,7 @@ begin_edit :: (doc: *Document) {
 end_edit :: (doc: *Document) {
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
-	// document_update_ts_tree(doc);
+	document_update_ts_tree(doc);
 }
 
 insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
@@ -1091,7 +1091,7 @@ get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> 
 	// allocates memory for returned string!!
 
 	offset := get_line_start(doc, line);
-	iterator := make_iterator(doc, offset);
+	iterator := make_iterator(doc, offset,,temp);
 	builder: String_Builder;
 	builder.allocator = temp;
 	prev: u8;
@@ -1116,7 +1116,7 @@ get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> 
 get_content :: (doc: *Document, offset: s64, count: s64) -> string {
 	// allocates memory for returned string!!
 
-	iterator := make_iterator(doc, offset);
+	iterator := make_iterator(doc, offset,,temp);
 	builder: String_Builder;
 	builder.allocator = temp;
 
@@ -1228,7 +1228,7 @@ make_iterator :: (doc: *Document, startOffset: s64 = 0) -> Document.Iterator {
 	// and saving the node, as we have done with node_at
 	iter: Document.Iterator;
 	iter.doc = doc;
-	iter.stack.allocator = context.allocator; // is this leaking??
+	iter.stack.allocator = context.allocator;
 	iter.direction = .FORWARD;
 
 	jump_to(*iter, startOffset);
@@ -1240,7 +1240,7 @@ make_reverse_iterator :: (document: *Document, startOffset: s64 = 0) -> Document
 	// and saving the node, as we have done with node_at
 	iter: Document.Iterator;
 	iter.doc = document;
-	iter.stack.allocator = context.allocator; // is this leaking??
+	iter.stack.allocator = context.allocator;
 	iter.direction = .REVERSE;
 
 	jump_to(*iter, startOffset);
@@ -1250,13 +1250,26 @@ make_reverse_iterator :: (document: *Document, startOffset: s64 = 0) -> Document
 make_line_iterator :: (document: *Document, startLine: s64 = 0, endLine: s64 = -1) -> Document.LineIterator {
 	iter: Document.LineIterator;
 	iter.doc = document;
-	iter.stack.allocator = context.allocator; // is this leaking??
-	iter.direction = .FORWARD;
+	iter.stack.allocator = context.allocator;
 	iter.lineBuffer.allocator = context.allocator;
+	iter.direction = .FORWARD;
 	iter.endLine = ifx endLine > 0 then endLine else get_number_of_lines(document);
 
 	jump_to_line(*iter, startLine);
 	return iter;
+}
+
+delete_iterator :: (iterator: *Document.Iterator) {
+	iterator.node = null;
+	iterator.firstChar = null;
+	iterator.lastChar = null;
+	array_reset(*iterator.stack);
+}
+
+delete_iterator :: (iterator: *Document.LineIterator) {
+	iterator.node = null;
+	array_reset(*iterator.stack);
+	array_reset(*iterator.lineBuffer);
 }
 
 next_node :: (iterator: *Document.Iterator) {
