@@ -496,6 +496,12 @@ collapse_selection :: (using panel: *Panel, args: []string) {
 enter_normal_mode :: (panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 
+	// @todo: how do we commit history with begin/end edit functions??
+	// need some special handling for that I guess
+	// You will want to begin the undo when you enter insert mode
+	// but each type should be a begin/end pair such that we update the syntax tree
+	// every keypress
+
 	// confirm undo action if we left insert mode with edits
 	if editorMode == .INSERT && panel.document.nextUndoOffset > 0 {
 		commit_history(panel.document);
@@ -559,19 +565,27 @@ select_register :: (using panel: *Panel, args: []string) {
 	registers.selectedRegister = args[0][0];
 }
 
-delete_selection :: (using panel: *Panel, args: []string) {
-	if cursor.head < cursor.anchor {
-		startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
-		endOffset := shift_offset_line_endings(document, cursor.anchor + 1, .FORWARD);
-		delete(document, startOffset, endOffset-startOffset);
-		cursor.anchor = cursor.head;
+delete_cursor_range :: (doc: *Document, start: s64, end: s64) -> s64 {
+	if start < end {
+		startOffset := shift_offset_line_endings(doc, start, .REVERSE);
+		endOffset := shift_offset_line_endings(doc, end + 1, .FORWARD);
+		delete(doc, startOffset, endOffset-startOffset);
+		return start;
 	}
 	else {
-		startOffset := shift_offset_line_endings(document, cursor.anchor, .REVERSE);
-		endOffset := shift_offset_line_endings(document, cursor.head + 1, .FORWARD);
-		delete(document, startOffset, endOffset-startOffset);
-		cursor.head = cursor.anchor;
+		startOffset := shift_offset_line_endings(doc, end, .REVERSE);
+		endOffset := shift_offset_line_endings(doc, start + 1, .FORWARD);
+		delete(doc, startOffset, endOffset-startOffset);
+		return end;
 	}
+}
+
+delete_selection :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
+	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
+	cursor.anchor = cursor.head;
 
 	// @todo: put the deletion into a register
 	panel_scroll_to_cursor(panel);
@@ -614,11 +628,15 @@ paste_before_selection :: (using panel: *Panel, args: []string) {
 }
 
 replace_selection :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	head := cursor.head;
 	anchor := cursor.anchor;
 	rangeLength := abs(cursor.head - cursor.anchor);
 
-	delete_selection(panel, args);
+	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
+	cursor.anchor = cursor.head;
 
 	builder : String_Builder;
 	builder.allocator = temp;
@@ -636,11 +654,15 @@ replace_selection :: (using panel: *Panel, args: []string) {
 }
 
 replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	head := cursor.head;
 	anchor := cursor.anchor;
 	rangeLength := abs(cursor.head - cursor.anchor);
 
-	delete_selection(panel, args);
+	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
+	cursor.anchor = cursor.head;
 
 	textToPaste := read_register(registers.selectedRegister);
 
@@ -657,6 +679,9 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 }
 
 paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore: bool) -> Cursor {
+	begin_edit(document);
+	defer end_edit(document);
+
 	linewise := false;
 	for textToPaste {
 		if it == #char "\n" then linewise = true;
@@ -685,7 +710,7 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
 		insert(document, insertLocation, textToPaste, true);
 	}
-
+	
 	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
 	commit_history(document);
 	newCursor := cursor;
@@ -719,6 +744,9 @@ new_line_above :: (using panel: *Panel, args: []string) {
 commentString :: "// ";
 
 toggle_comment :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	headCoord := get_coordinate_from_offset(document, cursor.head);
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 
@@ -777,6 +805,9 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 }
 
 indent_line :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	headCoord := get_coordinate_from_offset(document, cursor.head);
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 
@@ -802,6 +833,8 @@ indent_line :: (using panel: *Panel, args: []string) {
 }
 
 unindent_line :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
 
 	// delete the start char for every line, assuming it is a tab of course
 
@@ -997,6 +1030,10 @@ document_search_on_edit :: (userData: *void, input: string) {
 // -----------------------------
 
 insert_mode_insert_string :: (input: string) {
+	// @todo: prevent each keypress from making an undo point
+	begin_edit(focusedPanel.document);
+	defer end_edit(focusedPanel.document);
+
 	// do the insert
 	distanceToAnchor := focusedPanel.cursor.anchor - focusedPanel.cursor.head;
 	insert(focusedPanel.document, focusedPanel.cursor.head, input, editorMode == .INSERT);
@@ -1038,6 +1075,9 @@ insert_tab_character :: (using panel: *Panel, args: []string) {
 }
 
 insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head - 1, .REVERSE);
@@ -1062,6 +1102,9 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 }
 
 insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
@@ -1307,6 +1350,11 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 	// probably can make it faster, but it's fine for now
 	// you could take the strategy of going line by line, rather than char by char
 	
+	if suppressHistory == false {
+		begin_edit(document);
+		defer end_edit(document);
+	}
+
 	iterator := make_iterator(document, range.start);
 	end := range.end;
 	if targetEndings == .LF {
@@ -1335,6 +1383,7 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 		document.lineEndings = .CRLF;
 	}
 	if suppressHistory == false then commit_history(document);
+
 	return end - range.end;
 }
 

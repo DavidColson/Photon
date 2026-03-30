@@ -114,6 +114,7 @@ Document :: struct {
 	handle: DocumentHandle;
 	longestLine: s32;
 	longestLineLength: s32;
+	editOpen: bool;
 	isCopy: bool;
 
 	parserHasInitialized: bool;
@@ -171,16 +172,20 @@ tree_test :: () {
 
 	pretty_print_tree(doc.tree);
 
+	begin_edit(doc);
 	insert(doc, 100, "hello world");
 	insert(doc, 105, " my");
+	end_edit(doc);
 	pretty_print_tree(doc.tree);
 
 	// trivial copies
 	copy := document_copy(doc);
 	log("size from view before edit: %", get_size(copy));
 
+	begin_edit(doc);
 	insert(doc, 110, "test ");
 	insert(doc, 200, "again more");
+	end_edit(doc);
 
 	pretty_print_tree(doc.tree);
 
@@ -247,7 +252,9 @@ tree_test :: () {
 	log("at 100, 10 chars: %", get_content(doc, 100, 10));
 
 	// deletions
+	begin_edit(doc);
 	delete(doc, 130, 19);
+	end_edit(doc);
 
 
 	
@@ -714,7 +721,22 @@ document_get_by_path :: (path: string) -> bool, DocumentHandle {
 	return success, locator;
 }
 
+begin_edit :: (doc: *Document) {
+	assert(doc.editOpen == false, "Cannot begin edit on this document, another edit is in progress");
+	doc.editOpen = true;
+	// push tree onto undo stack
+}
+
+end_edit :: (doc: *Document) {
+	assert(doc.editOpen, "Cannot end edit, one was not started");
+	doc.editOpen = false;
+	// kick parse update
+}
+
 insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
+	assert(doc.editOpen, "Cannot do insert without starting an edit");
+	assert(!doc.isCopy, "You must not edit copies!!!");
+
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 		if atOffset > 0 {
@@ -722,7 +744,6 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 			assert(character != #char "\r");
 		}
 	}
-	assert(!doc.isCopy, "You must not edit copies!!!");
 
 	// undo updates
 	if doc.nextUndoOffset < 0 {
@@ -788,6 +809,8 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 }
 
 delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
+	assert(doc.editOpen, "Cannot do deletion without starting an edit");
+	assert(!doc.isCopy, "You must not edit copies!!!");
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 
@@ -800,7 +823,6 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 			assert(!(startChar == #char "\n" || endChar == #char "\r"));
 		}
 	}
-	assert(!doc.isCopy, "You must not edit copies!!!");
 
 	// delete length bytes in the document at offset
 
