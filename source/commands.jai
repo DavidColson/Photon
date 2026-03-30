@@ -1352,7 +1352,6 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 	
 	if suppressHistory == false {
 		begin_edit(document);
-		defer end_edit(document);
 	}
 
 	iterator := make_iterator(document, range.start);
@@ -1383,6 +1382,10 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 		document.lineEndings = .CRLF;
 	}
 	if suppressHistory == false then commit_history(document);
+
+	if suppressHistory == false {
+		end_edit(document);
+	}
 
 	return end - range.end;
 }

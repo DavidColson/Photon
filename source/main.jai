@@ -1612,8 +1612,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 		}
 
 		// Draw code
-		success, language := get_language(panel.document.language);
-		if success && panel.document.tsTree && language.highlightsQuery {
+		if panel.document.language && panel.document.tsTree && panel.document.language.highlightsQuery {
 			queryCursor := ts_query_cursor_new();
 			rangeStartByte := linesOnScreen[0].startByteOffset;
 			rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
@@ -1623,7 +1622,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			treeNode := ts_tree_root_node(panel.document.tsTree);
 			treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
 
-			ts_query_cursor_exec(queryCursor, language.highlightsQuery, treeNode);
+			ts_query_cursor_exec(queryCursor, panel.document.language.highlightsQuery, treeNode);
 
 			highlights: [..]Highlight;
 			highlights.allocator = temp;
@@ -1640,8 +1639,8 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 				endByte := ts_node_end_byte(capture.node);
 				type := to_string(ts_node_grammar_type(capture.node));
 
-				success, highlightType := table_find(*language.captureToHighlight, capture.index);
-				if evaluate_query_predicates(language, tsMatch, panel.document) {
+				success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
+				if evaluate_query_predicates(panel.document.language, tsMatch, panel.document) {
 					if highlights.count > 0 {
 						if highlights[highlights.count-1].start == startByte {
 							// override the previous range if there's a newer (better) one

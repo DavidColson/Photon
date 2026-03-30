@@ -117,19 +117,9 @@ Document :: struct {
 	editOpen: bool;
 	isCopy: bool;
 
-	parserHasInitialized: bool;
-	language: string;
+	languageName: string;
+	language: *Language;
 	tsTree: *TSTree;
-
-	// managed by async thread, do not touch
-	// unfortunately due to incremental parsing, we must retain the parser
-	// and tree state between each successive reparse
-	// so if there are many edits within a frame, we need to use the most up
-	// to date parser and ts tree for every parse task on the async thread
-	// at the end of each async job we'll copy asyncTsTree to the actual tsTree
-	// for use on the main thread
-	asyncParser: *TSParser;
-	asyncTsTree: *TSTree;
 
 	// Undo
 	undoStack: [..]UndoEntry;
@@ -340,6 +330,10 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	load_from_disk_task :: (data: *void) {
 		taskData := cast(*TaskData, data);
 		doc := taskData.workingDocument;
+		// @todo: need a more sophisticated mapping to handle header files
+		doc.languageName = path_extension(doc.path);
+		_, lang := get_language(doc.languageName);
+		doc.language = lang;
 
 		doc.bufferMemory.alignment = 1; // important!! make this hard to miss
 
@@ -510,7 +504,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	data.workingDocument.path = copy_string(oldSlot.path);
 	data.workingDocument.diskLastModtime = oldSlot.diskLastModtime;
 	data.workingDocument.handle= docHandle;
-
+	
 	data.result = .IN_PROGRESS;
 	if async {
 		push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
@@ -536,6 +530,12 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	}
 	
 	doc.path = copy_string(file.fullName);
+
+	// @todo: need a more sophisticated mapping to handle header files
+	doc.languageName = path_extension(doc.path);
+	_, lang := get_language(doc.languageName);
+	doc.language = lang;
+
 	doc.handle = docHandle;
 
 	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
@@ -730,7 +730,7 @@ begin_edit :: (doc: *Document) {
 end_edit :: (doc: *Document) {
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
-	// kick parse update
+	// document_update_ts_tree(doc);
 }
 
 insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
@@ -753,7 +753,8 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 		defer commit_history(doc);
 	}
 
-	defer document_update_ts_tree(doc, atOffset, atOffset, atOffset+text.count);
+	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
+	ts_tree_edit(doc.tsTree, *inputEdit);
 
 
 	// insert text at offset in document
@@ -834,7 +835,8 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 		defer commit_history(doc);
 	}
 
-	defer document_update_ts_tree(doc, atOffset, atOffset+length, atOffset);
+	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
+	ts_tree_edit(doc.tsTree, *inputEdit);
 
 	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
 	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
@@ -1628,7 +1630,7 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 }
 
 document_reparse_ts_tree :: (doc: *Document, async := true) {
-	if doc.parserHasInitialized && doc.asyncParser == null return;
+	if doc.language == null then return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
@@ -1643,19 +1645,13 @@ document_reparse_ts_tree :: (doc: *Document, async := true) {
 	}
 }
 
-document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64, newEndOffset: s64, async := true) {
-	if doc.parserHasInitialized && doc.asyncParser == null return;
-
-	inputEdit := TSInputEdit.{start_byte=xx startOffset, old_end_byte=xx oldEndOffset, new_end_byte=xx newEndOffset};
-	ts_tree_edit(doc.tsTree, *inputEdit);
+document_update_ts_tree :: (doc: *Document, async := true) {
+	if doc.language == null then return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(doc);
 	task.forceReparse = false;
-	task.startOffset = startOffset;
-	task.oldEndOffset = oldEndOffset;
-	task.newEndOffset = newEndOffset;
 	if async {
 		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 	}
@@ -1669,64 +1665,43 @@ document_update_ts_tree :: (doc: *Document, startOffset: s64, oldEndOffset: s64,
 TSParseTaskData :: struct {
 	doc: *Document;
 	docCopy: *Document;
+	tree: *TSTree;
 	forceReparse: bool;
-	startOffset: s64;
-	oldEndOffset: s64;
-	newEndOffset: s64;
 }
 ts_parse_task :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
-	// initial setup if not done already
-	if !doc.parserHasInitialized {
+	parser := ts_parser_new();
+	defer ts_parser_delete(parser);
 
-		// @todo: need a more sophisticated mapping to handle header files
-		doc.language = path_extension(doc.path);
-		success, language := get_language(doc.language);
-		if !success {
-			// @todo: put in verbose logging
-			// log("No language support for file '%' with language '%'", doc.path, doc.language);
-		}
-		else {
-			doc.asyncParser = ts_parser_new();
-			if !ts_parser_set_language(doc.asyncParser , language.treesitterLang) {
-				log("Language ABI mismatch: Language(%) is % and treesitter is %", doc.language, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(language.treesitterLang));
-			}
-
-			tsVerboseLogging := false;
-			if tsVerboseLogging {
-				treesitter_logger :: (payload: *void, log_type: TSLogType, buffer: *u8) #c_call {
-				    push_context {
-				        log("%", to_string(buffer));
-				    }
-				}
-				ts_parser_set_logger(doc.asyncParser , .{null, treesitter_logger});
-			}
-		}
-		doc.parserHasInitialized = true;
+	if !ts_parser_set_language(parser , docCopy.language.treesitterLang) {
+		log("Language ABI mismatch: Language(%) is % and treesitter is %", docCopy.languageName, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(docCopy.language.treesitterLang));
 	}
 
+	tsVerboseLogging := false;
+	if tsVerboseLogging {
+		treesitter_logger :: (payload: *void, log_type: TSLogType, buffer: *u8) #c_call {
+		    push_context {
+		        log("%", to_string(buffer));
+		    }
+		}
+		ts_parser_set_logger(parser , .{null, treesitter_logger});
+	}
 
-	if doc.asyncParser && doc.language {
-		if !forceReparse {
-			inputEdit := TSInputEdit.{start_byte=xx taskData.startOffset, old_end_byte=xx taskData.oldEndOffset, new_end_byte=xx taskData.newEndOffset};
-			ts_tree_edit(doc.asyncTsTree, *inputEdit);
-			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, doc.asyncTsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
-		}
-		else {
-			ts_parser_reset(doc.asyncParser);
-			doc.asyncTsTree = ts_parser_parse(doc.asyncParser, null, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
-		}
+	if !forceReparse {
+		docCopy.tsTree = ts_parser_parse(parser, docCopy.tsTree, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
+	}
+	else {
+		docCopy.tsTree = ts_parser_parse(parser, null, .{payload=docCopy, read=document_parse_read, encoding=.UTF8});
 	}
 }
 ts_parse_task_complete :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
-	if doc.asyncTsTree {
-		// swap the ts trees
-		ts_tree_delete(doc.tsTree);
-		doc.tsTree = ts_tree_copy(doc.asyncTsTree);
-	}
+	// swap the ts trees
+	temp := doc.tsTree;
+	doc.tsTree = docCopy.tsTree;
+	docCopy.tsTree = temp;
 
 	document_copy_free(taskData.docCopy);
 	free(taskData);
@@ -1805,8 +1780,6 @@ document_reset :: (using doc: *Document) {
 	array_reset(*doc.redoStack);
 
 	ts_tree_delete(tsTree);
-	ts_tree_delete(asyncTsTree);
-	ts_parser_delete(asyncParser);
 
 	doc.* = .{};
 }
