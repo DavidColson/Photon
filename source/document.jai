@@ -101,9 +101,11 @@ Document :: struct {
 
 	UndoEntry :: struct {
 		tree: *Node;
-		offset: s64;
 		longestLine: s32;
 		longestLineLength: s32;
+		changeStartOffset: s64;
+		changeOldEndOffset: s64;
+		changeNewEndOffset: s64;
 		saved: bool;
 	}
 
@@ -126,7 +128,9 @@ Document :: struct {
 	// Undo
 	undoStack: [..]UndoEntry;
 	redoStack: [..]UndoEntry;
-	nextUndoOffset: s64 = -1;
+	currentEditStartOffset: s64 = 0;
+	currentEditOldEndOffset: s64 = 0;
+	currentEditTotalBytes: s64 = 0;
 
 	// Memory (except the undo stack for reasons?)
 	treeMemory: Flat_Pool;
@@ -428,7 +432,6 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 		doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
 		// setup initial undo point
-		doc.nextUndoOffset = 0;
 		commit_history(doc);
 		doc.undoStack[doc.undoStack.count-1].saved = true;
 
@@ -574,7 +577,6 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	doc.lineEndings = file.lineEndingMode;
 
 	// setup initial undo point
-	doc.nextUndoOffset = 0;
 	commit_history(doc);
 	doc.undoStack[doc.undoStack.count-1].saved = true;
 
@@ -696,8 +698,8 @@ document_save :: (doc: *Document, path: string, backup := false) {
 }
 
 document_is_unsaved :: (doc: *Document) -> bool {
-	// there is pending edits that have not been committed yet, definitely unsaved
-	if doc.nextUndoOffset != -1 {
+	// there is pending edits that have not been finished yet, definitely unsaved
+	if doc.editOpen {
 		return true;
 	}
 
@@ -724,16 +726,24 @@ document_get_by_path :: (path: string) -> bool, DocumentHandle {
 begin_edit :: (doc: *Document) {
 	assert(doc.editOpen == false, "Cannot begin edit on this document, another edit is in progress");
 	doc.editOpen = true;
-	// push tree onto undo stack
+
+	// shouldn't need this once we have tree undos
+	if doc.redoStack.count > 0 {
+		array_reset(*doc.redoStack);
+	}
+	doc.currentEditStartOffset = S64_MAX;
+	doc.currentEditOldEndOffset = 0;
+	doc.currentEditTotalBytes = 0;
 }
 
 end_edit :: (doc: *Document) {
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
+	commit_history(doc);
 	document_update_ts_tree(doc);
 }
 
-insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = false) {
+insert :: (doc: *Document, atOffset: s64, text: string) {
 	assert(doc.editOpen, "Cannot do insert without starting an edit");
 	assert(!doc.isCopy, "You must not edit copies!!!");
 
@@ -745,13 +755,9 @@ insert :: (doc: *Document, atOffset: s64, text: string, suppressHistory: bool = 
 		}
 	}
 
-	// undo updates
-	if doc.nextUndoOffset < 0 {
-		doc.nextUndoOffset = atOffset;
-	}
-	if suppressHistory == false {
-		defer commit_history(doc);
-	}
+	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
+	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset);
+	doc.currentEditTotalBytes = doc.currentEditTotalBytes + text.count;
 
 	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
 	ts_tree_edit(doc.tsTree, *inputEdit);
@@ -827,13 +833,9 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 
 	// delete length bytes in the document at offset
 
-	// undo updates
-	if doc.nextUndoOffset < 0 {
-		doc.nextUndoOffset = atOffset;
-	}
-	if suppressHistory == false {
-		defer commit_history(doc);
-	}
+	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
+	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset+length);
+	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
 
 	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
 	ts_tree_edit(doc.tsTree, *inputEdit);
@@ -1156,14 +1158,17 @@ shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.I
 }
 
 commit_history :: (doc: *Document) {
-	// TODO: free this memory somewhere
 	assert(!doc.isCopy, "You must not edit copies!!!");
-	array_add(*doc.undoStack);
-	doc.undoStack[doc.undoStack.count-1].tree = doc.tree;
-	doc.undoStack[doc.undoStack.count-1].offset = doc.nextUndoOffset;
-	doc.undoStack[doc.undoStack.count-1].longestLine = doc.longestLine;
-	doc.undoStack[doc.undoStack.count-1].longestLineLength = doc.longestLineLength;
-	doc.nextUndoOffset = -1;
+	top := array_add(*doc.undoStack);
+	top.tree = doc.tree;
+	top.longestLine = doc.longestLine;
+	top.longestLineLength = doc.longestLineLength;
+	top.changeStartOffset = doc.currentEditStartOffset;
+	top.changeOldEndOffset = doc.currentEditOldEndOffset;
+	top.changeNewEndOffset = doc.currentEditOldEndOffset + doc.currentEditTotalBytes;
+	log("start: %", top.changeStartOffset);
+	log("oldEnd: %", top.changeOldEndOffset);
+	log("newEnd: %", top.changeNewEndOffset);
 }
 
 undo :: (doc: *Document) -> s64 {
@@ -1172,19 +1177,21 @@ undo :: (doc: *Document) -> s64 {
 		push_notification("Undo history empty");
 		return -1;
 	}
+
+	// pop the current moment in history and put in redo stack
+	// and then set the document back to what is now the top of the undo stack
 	entry := pop(*doc.undoStack);
 	array_add(*doc.redoStack, entry);
-	doc.tree = doc.undoStack[doc.undoStack.count-1].tree;
-	doc.longestLine = doc.undoStack[doc.undoStack.count-1].longestLine;
-	doc.longestLineLength = doc.undoStack[doc.undoStack.count-1].longestLineLength;
+	top := *doc.undoStack[doc.undoStack.count-1];
+	doc.tree = top.tree;
+	doc.longestLine = top.longestLine;
+	doc.longestLineLength = top.longestLineLength;
 
-	// @todo: track and coalesce edits such that we can reparse after an undo more precisely
-	// You coalesce edits by doing something like this:
-	// combinedStart = min(combinedStart, start)
-	// combinedOldEnd = max(combinedOldEnd, oldEnd)
-	// combinedNewEnd = combinedOldEnd + totalDeltaBytes
-	document_reparse_ts_tree(doc);
-	return entry.offset;
+	// note we want to edit something that is the inverse of the stored change, so old and new are swapped
+	inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
+	ts_tree_edit(doc.tsTree, *inputEdit);
+	document_update_ts_tree(doc);
+	return entry.changeStartOffset;
 }
 
 redo :: (doc: *Document) -> s64 {
@@ -1199,9 +1206,10 @@ redo :: (doc: *Document) -> s64 {
 	doc.longestLineLength = entry.longestLineLength;
 	array_add(*doc.undoStack, entry);
 
-	// could be more efficient here, but don't know how to tell the diff of the undo?
-	document_reparse_ts_tree(doc);
-	return entry.offset;
+	inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)};
+	ts_tree_edit(doc.tsTree, *inputEdit);
+	document_update_ts_tree(doc);
+	return entry.changeStartOffset;
 }
 
 document_copy :: (doc: *Document) -> *Document {

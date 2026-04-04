@@ -496,15 +496,9 @@ collapse_selection :: (using panel: *Panel, args: []string) {
 enter_normal_mode :: (panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 
-	// @todo: how do we commit history with begin/end edit functions??
-	// need some special handling for that I guess
-	// You will want to begin the undo when you enter insert mode
-	// but each type should be a begin/end pair such that we update the syntax tree
-	// every keypress
-
-	// confirm undo action if we left insert mode with edits
-	if editorMode == .INSERT && panel.document.nextUndoOffset > 0 {
-		commit_history(panel.document);
+	// if we were in insert mode we must now end the edit
+	if editorMode == .INSERT {
+		end_edit(panel.document);
 	}
 	
 	editorMode = .NORMAL;
@@ -518,6 +512,7 @@ enter_insert_mode_start :: (using panel: *Panel, args: []string) {
 	}
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
+	begin_edit(document);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -531,6 +526,7 @@ enter_insert_mode_end :: (using panel: *Panel, args: []string) {
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
+	begin_edit(document);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -550,6 +546,7 @@ enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
+	begin_edit(document);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -558,6 +555,7 @@ enter_insert_mode_line_end :: (using panel: *Panel, args: []string) {
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
+	begin_edit(document);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -668,9 +666,8 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 
 	// insert into document
 	insertLocation := max(cursor.head, cursor.anchor);
-	insert(document, insertLocation, textToPaste, true);
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, textToPaste.count}, true);
-	commit_history(document);
+	insert(document, insertLocation, textToPaste);
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, textToPaste.count});
 
 	cursor.anchor = insertLocation;
 	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
@@ -692,27 +689,26 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 		coordinate := get_coordinate_from_offset(document, cursor.head);
 		_, insertLocation = get_line_range(document, coordinate.line, true);
 
-		insert(document, insertLocation, textToPaste, true);
+		insert(document, insertLocation, textToPaste);
 	}
 	else if linewise && pasteBefore {
 		coordinate := get_coordinate_from_offset(document, cursor.head);
 		// todo: paste on the first line
 		_, insertLocation = get_line_range(document, coordinate.line-1, true);
-		insert(document, insertLocation, textToPaste, true);
+		insert(document, insertLocation, textToPaste);
 	}
 	else if !linewise && !pasteBefore {
 		insertLocation = max(cursor.head, cursor.anchor) + 1;
 		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
-		insert(document, insertLocation, textToPaste, true);
+		insert(document, insertLocation, textToPaste);
 	}
 	else if !linewise && pasteBefore {
 		insertLocation = min(cursor.head, cursor.anchor);
 		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
-		insert(document, insertLocation, textToPaste, true);
+		insert(document, insertLocation, textToPaste);
 	}
 	
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count}, true);
-	commit_history(document);
+	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count});
 	newCursor := cursor;
 	newCursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
 	newCursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
@@ -721,23 +717,22 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 
 new_line_below :: (using panel: *Panel, args: []string) {
 	goto_line_end(panel, args);
-	insert_mode_line_break(panel, args);
 	enter_insert_mode_start(panel, args);
+	insert_mode_line_break(panel, args);
 }
 
 new_line_above :: (using panel: *Panel, args: []string) {
 	goto_line_start(panel, args);
-	insert_mode_line_break(panel, args);
+	panel.cursor.anchor = panel.cursor.head;
+	enter_insert_mode_start(panel, args);
 
+	insert_mode_line_break(panel, args);
 	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
 		panel.cursor.head -= 1;
 	}
 	else {
 		panel.cursor.head -= 2;
 	}
-
-	panel.cursor.anchor = panel.cursor.head;
-	enter_insert_mode_start(panel, args);
 }
 
 // TODO: should be defined alongside the language
@@ -780,11 +775,11 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 		}
 
 		if toggleComment {
-			insert(document, line.startByteOffset + firstNonBlankChar, commentString, true);
+			insert(document, line.startByteOffset + firstNonBlankChar, commentString);
 			offset = 3;
 		}
 		else {
-			delete(document, line.startByteOffset + firstNonBlankChar, commentString.count, true);
+			delete(document, line.startByteOffset + firstNonBlankChar, commentString.count);
 			offset = -3;
 		}
 	}
@@ -798,8 +793,6 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 		cursor.anchor += offset;
 		cursor.head += (endLine - startLine + 1)*offset;
 	}
-
-	commit_history(document);
 
 	panel_scroll_to_cursor(panel);
 }
@@ -816,7 +809,7 @@ indent_line :: (using panel: *Panel, args: []string) {
 
 	for startLine..endLine {
 		lineStartOffset := get_line_start(document, it);
-		insert(document, lineStartOffset, "\t", true);
+		insert(document, lineStartOffset, "\t");
 	}
 
 	if cursor.head < cursor.anchor {
@@ -827,7 +820,6 @@ indent_line :: (using panel: *Panel, args: []string) {
 		cursor.anchor += 1;
 		cursor.head += endLine - startLine + 1;
 	}
-	commit_history(document);
 
 	panel_scroll_to_cursor(panel);
 }
@@ -849,7 +841,7 @@ unindent_line :: (using panel: *Panel, args: []string) {
 	for startLine..endLine {
 		lineStartOffset := get_line_start(document, it);
 		if get_char_at(document, lineStartOffset) == #char "\t" {
-			delete(document, lineStartOffset, 1, true);
+			delete(document, lineStartOffset, 1);
 
 			if it == headCoord.line {
 				cursor.head -= 1;
@@ -869,7 +861,6 @@ unindent_line :: (using panel: *Panel, args: []string) {
 	else {
 		cursor.head -= bytesDeleted + 1;
 	}
-	commit_history(document);
 
 	panel_scroll_to_cursor(panel);
 }
@@ -1030,13 +1021,9 @@ document_search_on_edit :: (userData: *void, input: string) {
 // -----------------------------
 
 insert_mode_insert_string :: (input: string) {
-	// @todo: prevent each keypress from making an undo point
-	begin_edit(focusedPanel.document);
-	defer end_edit(focusedPanel.document);
-
 	// do the insert
 	distanceToAnchor := focusedPanel.cursor.anchor - focusedPanel.cursor.head;
-	insert(focusedPanel.document, focusedPanel.cursor.head, input, editorMode == .INSERT);
+	insert(focusedPanel.document, focusedPanel.cursor.head, input);
 
 	// move the cursor along
 	focusedPanel.cursor.head += input.count;
@@ -1052,6 +1039,7 @@ insert_mode_insert_string :: (input: string) {
 	else if distanceToAnchor == 0 {
 		focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 	}
+	document_update_ts_tree(focusedPanel.document);
 
 	panel_scroll_to_cursor(*focusedPanel);
 }
@@ -1075,9 +1063,6 @@ insert_tab_character :: (using panel: *Panel, args: []string) {
 }
 
 insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
-	begin_edit(document);
-	defer end_edit(document);
-
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head - 1, .REVERSE);
@@ -1102,9 +1087,6 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 }
 
 insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
-	begin_edit(document);
-	defer end_edit(document);
-
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
@@ -1345,22 +1327,18 @@ toggle_render_line_endings :: (panel: *Panel, args: []string) {
 	fontCode.drawLineEndings = !fontCode.drawLineEndings;
 }
 
-normalize_line_endings_common :: (document: *Document, targetEndings: Document.LineEndingMode, range: Document.Range, suppressHistory := false) -> s64 {
+normalize_line_endings_common :: (document: *Document, targetEndings: Document.LineEndingMode, range: Document.Range) -> s64 {
 	// this function needs to peak ahead, which requires it to binary query the tree for every single character checked
 	// probably can make it faster, but it's fine for now
 	// you could take the strategy of going line by line, rather than char by char
 	
-	if suppressHistory == false {
-		begin_edit(document);
-	}
-
 	iterator := make_iterator(document, range.start);
 	end := range.end;
 	if targetEndings == .LF {
 		for :raw_bytes iterator {
 			if it == #char "\r" && get_char_at(document, iterator.offset+1) == #char "\n" {
-				delete(document, iterator.offset, 2, true);
-				insert(document, iterator.offset, "\n", true);
+				delete(document, iterator.offset, 2);
+				insert(document, iterator.offset, "\n");
 				iterator.offset -= 1;
 				end -= 1;
 			}
@@ -1372,8 +1350,8 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 		for :raw_bytes iterator {
 			if it != #char "\r" && get_char_at(document, iterator.offset+1) == #char "\n" {
 				// this is done in two steps to ensure \r\n do not cross node boundaries in the piece tree
-				delete(document, iterator.offset+1, 1, true);
-				insert(document, iterator.offset+1, "\r\n", true);
+				delete(document, iterator.offset+1, 1);
+				insert(document, iterator.offset+1, "\r\n");
 				iterator.offset += 1;
 				end += 1;
 			}
@@ -1381,20 +1359,19 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 		}
 		document.lineEndings = .CRLF;
 	}
-	if suppressHistory == false then commit_history(document);
-
-	if suppressHistory == false {
-		end_edit(document);
-	}
 
 	return end - range.end;
 }
 
 normalize_line_endings_lf :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
 	normalize_line_endings_common(document, .LF, .{0, S64_MAX});
+	end_edit(document);
 }
 
 normalize_line_endings_crlf :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
 	normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
+	end_edit(document);
 }
 	
