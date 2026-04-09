@@ -1544,213 +1544,211 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 custom_draw_code :: (box: *UIBox, udata: *void) {
 	panel:*Panel = cast(*Panel)udata;
 
-	if panel.document && get_size(panel.document) > 0 {
-		metrics := get_font_metrics(box.font, xx box.fontSize);
-		documentLines := get_number_of_lines(panel.document);
+	metrics := get_font_metrics(box.font, xx box.fontSize);
+	documentLines := get_number_of_lines(panel.document);
 
-		cursorLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
+	cursorLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
 
-		startVisibleLine : s64;
-		endVisibleLine : s64;
-		visibleLines: [..]string;
-		visibleLines.allocator = temp;
+	startVisibleLine : s64;
+	endVisibleLine : s64;
+	visibleLines: [..]string;
+	visibleLines.allocator = temp;
 
-		startVisibleLine = clamp(cast(s64) (-box.viewOffset.y / metrics.lineSpacing) - 1, 0, documentLines - 1);
-		endVisibleLine = clamp(startVisibleLine + cast(s64)box.rect.h / metrics.lineSpacing + 2, 0, documentLines - 1);
+	startVisibleLine = clamp(cast(s64) (-box.viewOffset.y / metrics.lineSpacing) - 1, 0, documentLines - 1);
+	endVisibleLine = clamp(startVisibleLine + cast(s64)box.rect.h / metrics.lineSpacing + 2, 0, documentLines - 1);
 
-		startOffset := (startVisibleLine+2) * metrics.lineSpacing - metrics.lineSpacing;
+	startOffset := (startVisibleLine+2) * metrics.lineSpacing - metrics.lineSpacing;
 
-		gutterWidth := 0;
-		if lineNumbers {
-			maxLinesRun := generate_text_run(tprint(" % ", documentLines), xx box.fontSize, box.font,,temp);
-			gutterWidth = xx maxLinesRun.width;
+	gutterWidth := 0;
+	if lineNumbers {
+		maxLinesRun := generate_text_run(tprint(" % ", documentLines), xx box.fontSize, box.font,,temp);
+		gutterWidth = xx maxLinesRun.width;
+	}
+
+	textAreaX := box.rect.x + gutterWidth - box.viewOffset.x;
+	textAreaY := box.rect.y + startOffset + box.viewOffset.y;
+
+	linesOnScreen: [..]Document.LineContent;
+	linesOnScreen.allocator = temp;
+	{
+		lineIterator := make_line_iterator(panel.document, startVisibleLine, endVisibleLine);
+		for lineIterator {
+			lineContent := it;
+			lineContent.text = copy_temporary_string(it.text);
+			array_add(*linesOnScreen, lineContent);
 		}
+	}
 
-		textAreaX := box.rect.x + gutterWidth - box.viewOffset.x;
-		textAreaY := box.rect.y + startOffset + box.viewOffset.y;
-
-		linesOnScreen: [..]Document.LineContent;
-		linesOnScreen.allocator = temp;
-		{
-			lineIterator := make_line_iterator(panel.document, startVisibleLine, endVisibleLine);
-			for lineIterator {
-				lineContent := it;
-				lineContent.text = copy_temporary_string(it.text);
-				array_add(*linesOnScreen, lineContent);
-			}
+	// Draw cursor selection
+	if panel.activeDialog != .SEARCH {
+		if panel.cursor.head != panel.cursor.anchor {
+			start := min(panel.cursor.head, panel.cursor.anchor);
+			end := max(panel.cursor.head, panel.cursor.anchor);
+			end = shift_offset_line_endings(panel.document, end + 1, .FORWARD);
+			draw_document_range(panel.document, start, end,
+								box.font,
+								xx box.fontSize,
+								textAreaX,
+								textAreaY,
+								linesOnScreen,
+								startVisibleLine);
 		}
+	}
 
-		// Draw cursor selection
-		if panel.activeDialog != .SEARCH {
-			if panel.cursor.head != panel.cursor.anchor {
-				start := min(panel.cursor.head, panel.cursor.anchor);
-				end := max(panel.cursor.head, panel.cursor.anchor);
-				end = shift_offset_line_endings(panel.document, end + 1, .FORWARD);
-				draw_document_range(panel.document, start, end,
-									box.font,
-									xx box.fontSize,
-									textAreaX,
-									textAreaY,
-									linesOnScreen,
-									startVisibleLine);
-			}
+	// draw search results
+	if panel.activeDialog == .SEARCH {
+		for panel.results {
+			draw_document_range(panel.document,
+								it.start,
+								it.end,
+								box.font,
+								xx box.fontSize,
+								textAreaX,
+								textAreaY,
+								linesOnScreen,
+								startVisibleLine);
 		}
+	}
 
-		// draw search results
-		if panel.activeDialog == .SEARCH {
-			for panel.results {
-				draw_document_range(panel.document,
-									it.start,
-									it.end,
-									box.font,
-									xx box.fontSize,
-									textAreaX,
-									textAreaY,
-									linesOnScreen,
-									startVisibleLine);
-			}
-		}
+	// Draw code
+	if panel.document.language && panel.document.tsTree && panel.document.language.highlightsQuery {
+		queryCursor := ts_query_cursor_new();
+		rangeStartByte := linesOnScreen[0].startByteOffset;
+		rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
 
-		// Draw code
-		if panel.document.language && panel.document.tsTree && panel.document.language.highlightsQuery {
-			queryCursor := ts_query_cursor_new();
-			rangeStartByte := linesOnScreen[0].startByteOffset;
-			rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
+		ts_query_cursor_set_byte_range(queryCursor, xx rangeStartByte, xx rangeEndByte);
 
-			ts_query_cursor_set_byte_range(queryCursor, xx rangeStartByte, xx rangeEndByte);
+		treeNode := ts_tree_root_node(panel.document.tsTree);
+		treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
 
-			treeNode := ts_tree_root_node(panel.document.tsTree);
-			treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
+		ts_query_cursor_exec(queryCursor, panel.document.language.highlightsQuery, treeNode);
 
-			ts_query_cursor_exec(queryCursor, panel.document.language.highlightsQuery, treeNode);
+		highlights: [..]Highlight;
+		highlights.allocator = temp;
 
-			highlights: [..]Highlight;
-			highlights.allocator = temp;
+		// collect all the highlights for the region of code we must render
+		while true {
+			tsMatch: TSQueryMatch;
+			captureId: u32;
+			result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
+			if result == false then break;
+			capture := tsMatch.captures[captureId];
 
-			// collect all the highlights for the region of code we must render
-			while true {
-				tsMatch: TSQueryMatch;
-				captureId: u32;
-				result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
-				if result == false then break;
-				capture := tsMatch.captures[captureId];
+			startByte := ts_node_start_byte(capture.node);
+			endByte := ts_node_end_byte(capture.node);
+			type := to_string(ts_node_grammar_type(capture.node));
 
-				startByte := ts_node_start_byte(capture.node);
-				endByte := ts_node_end_byte(capture.node);
-				type := to_string(ts_node_grammar_type(capture.node));
-
-				success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
-				if evaluate_query_predicates(panel.document.language, tsMatch, panel.document) {
-					if highlights.count > 0 {
-						if highlights[highlights.count-1].start == startByte {
-							// override the previous range if there's a newer (better) one
-							highlights[highlights.count-1] = .{startByte, endByte, highlightType};
-							continue;
-						}
+			success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
+			if evaluate_query_predicates(panel.document.language, tsMatch, panel.document) {
+				if highlights.count > 0 {
+					if highlights[highlights.count-1].start == startByte {
+						// override the previous range if there's a newer (better) one
+						highlights[highlights.count-1] = .{startByte, endByte, highlightType};
+						continue;
 					}
-					array_add(*highlights, .{startByte, endByte, highlightType});
 				}
-			}
-
-			x :float = textAreaX;
-			y :float = textAreaY;
-			currentHighlightIndex := 0;
-			for line: linesOnScreen {
-				run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
-				for run.instances {
-					byteOffset := line.startByteOffset + run.byteOffsets[it_index];
-
-					if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
-						currentHighlightIndex += 1;
-					}
-
-					color := style.codeDefault;
-					if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].start && byteOffset < highlights[currentHighlightIndex].end {
-						color = style.codeColors[highlights[currentHighlightIndex].type];
-					}
-
-					instance := it;
-					instance.dstRect.x = round(x + instance.dstRect.x);
-					instance.dstRect.y = round(y + instance.dstRect.y);
-					instance.color = color;
-					submit_instance(instance);
-
-				}
-				y += metrics.lineSpacing;
-			}
-
-			// potentially cheaper to reuse the same cursor?
-			ts_query_cursor_delete(queryCursor);
-		}
-		else {
-			// draw text with no highlighting
-			x :float = textAreaX;
-			y :float = textAreaY;
-			for line: linesOnScreen {
-				run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
-				draw_text_run(run, x, y, style.textPrimary);
-				y += metrics.lineSpacing;
+				array_add(*highlights, .{startByte, endByte, highlightType});
 			}
 		}
 
-		// Draw cursor
-		if panel.activeDialog != .SEARCH && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
-			lineCopy := linesOnScreen[cursorLine - startVisibleLine];
-			lineCopy.text.count = panel.cursor.head - get_line_start(panel.document, cursorLine);
+		x :float = textAreaX;
+		y :float = textAreaY;
+		currentHighlightIndex := 0;
+		for line: linesOnScreen {
+			run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
+			for run.instances {
+				byteOffset := line.startByteOffset + run.byteOffsets[it_index];
 
-			// figuring out the width of the cursor requires knowing which vertical column of text
-			// we're in, including previous tabs
-			col:=0;
-			for lineCopy.text {
-				if it != #char "\t" {
-					col += 1;
-				} else {
-					charsToTabstop := box.font.tabSize - col % box.font.tabSize;
-					col += charsToTabstop;
+				if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
+					currentHighlightIndex += 1;
 				}
+
+				color := style.codeDefault;
+				if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].start && byteOffset < highlights[currentHighlightIndex].end {
+					color = style.codeColors[highlights[currentHighlightIndex].type];
+				}
+
+				instance := it;
+				instance.dstRect.x = round(x + instance.dstRect.x);
+				instance.dstRect.y = round(y + instance.dstRect.y);
+				instance.color = color;
+				submit_instance(instance);
+
 			}
-			cursorChar := get_char_at(panel.document, panel.cursor.head);
-			cursorRun := generate_text_run(cast(string) u8.[cursorChar], xx box.fontSize, box.font, col,,temp);
+			y += metrics.lineSpacing;
+		}
 
-			cursorX := textAreaX + generate_text_run(lineCopy.text, xx box.fontSize, box.font,,temp).width;
-			cursorY := textAreaY - metrics.typicalDescender + metrics.lineSpacing * (cursorLine-startVisibleLine-1);
+		// potentially cheaper to reuse the same cursor?
+		ts_query_cursor_delete(queryCursor);
+	}
+	else {
+		// draw text with no highlighting
+		x :float = textAreaX;
+		y :float = textAreaY;
+		for line: linesOnScreen {
+			run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
+			draw_text_run(run, x, y, style.textPrimary);
+			y += metrics.lineSpacing;
+		}
+	}
 
-			submit_instance(.{
-				dstRect = .{
-					cursorX,
-					cursorY,
-					cursorRun.width,
-					xx metrics.lineSpacing
-				},
-				color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary,
-				shader = .RECTS
-			});
+	// Draw cursor
+	if panel.activeDialog != .SEARCH && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
+		lineCopy := linesOnScreen[cursorLine - startVisibleLine];
+		lineCopy.text.count = panel.cursor.head - get_line_start(panel.document, cursorLine);
 
-			if cursorChar != 0 {
-				draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+		// figuring out the width of the cursor requires knowing which vertical column of text
+		// we're in, including previous tabs
+		col:=0;
+		for lineCopy.text {
+			if it != #char "\t" {
+				col += 1;
+			} else {
+				charsToTabstop := box.font.tabSize - col % box.font.tabSize;
+				col += charsToTabstop;
 			}
 		}
-		
-		// Draw gutter
-		if lineNumbers {
-			submit_instance(.{
-				dstRect = .{
-					cast(float)(box.rect.x),
-					cast(float)(box.rect.y),
-					cast(float)gutterWidth,
-					cast(float)box.rect.h
-				},
-				color = style.backgroundMid,
-				shader = .RECTS
-			});
+		cursorChar := get_char_at(panel.document, panel.cursor.head);
+		cursorRun := generate_text_run(cast(string) u8.[cursorChar], xx box.fontSize, box.font, col,,temp);
 
-			// Draw line numbers
-			y :float = box.rect.y + startOffset + box.viewOffset.y;
-			for startVisibleLine..endVisibleLine {
-				lineNoRun := generate_text_run(tprint("% ", it+1), xx box.fontSize, box.font,,temp);
-				draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, style.textSecondary);
-				y += metrics.lineSpacing;
-			}
+		cursorX := textAreaX + generate_text_run(lineCopy.text, xx box.fontSize, box.font,,temp).width;
+		cursorY := textAreaY - metrics.typicalDescender + metrics.lineSpacing * (cursorLine-startVisibleLine-1);
+
+		submit_instance(.{
+			dstRect = .{
+				cursorX,
+				cursorY,
+				cursorRun.width,
+				xx metrics.lineSpacing
+			},
+			color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary,
+			shader = .RECTS
+		});
+
+		if cursorChar != 0 {
+			draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+		}
+	}
+	
+	// Draw gutter
+	if lineNumbers {
+		submit_instance(.{
+			dstRect = .{
+				cast(float)(box.rect.x),
+				cast(float)(box.rect.y),
+				cast(float)gutterWidth,
+				cast(float)box.rect.h
+			},
+			color = style.backgroundMid,
+			shader = .RECTS
+		});
+
+		// Draw line numbers
+		y :float = box.rect.y + startOffset + box.viewOffset.y;
+		for startVisibleLine..endVisibleLine {
+			lineNoRun := generate_text_run(tprint("% ", it+1), xx box.fontSize, box.font,,temp);
+			draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, style.textSecondary);
+			y += metrics.lineSpacing;
 		}
 	}
 }

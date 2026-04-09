@@ -499,7 +499,13 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 	
 	// @todo: handle failed case
 	f, result := file_open(file.fullName);
-	content, success := read_entire_file(f);
+	content: string;
+	if file_length(f) > 0 {
+		content, result = read_entire_file(f);
+	}
+	else {
+		result = true;
+	}
 	file_close(*f);
 
 	modtime := file_modtime_and_size(file.fullName);

@@ -358,8 +358,14 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 
 		// now actually read in the file data
 		file: string;
-	    file, success = read_entire_file(f,,buffer_allocator(doc));
+		if file_length(f) > 0 {
+			file, success = read_entire_file(f,,buffer_allocator(doc));
+		}
+		else {
+			success = true;
+		}
 		file_close(*f);
+
 
 		modtime, size, result := file_modtime_and_size(doc.path);
 		if result {
@@ -551,7 +557,13 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 		init(*doc.otherMemory, 512 * 1024 * 1024);
 	}
 
-	text := copy_string(file.content,,buffer_allocator(doc));
+	text: string;
+	if file.content.count > 0 {
+		text = copy_string(file.content,,buffer_allocator(doc));
+	}
+	else {
+		text = copy_string(" ",,buffer_allocator(doc));
+	}
 	doc.buffers[0].text.data = text.data;
 	doc.buffers[0].text.count = text.count;
 	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
@@ -759,9 +771,16 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset);
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes + text.count;
 
-	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
-	ts_tree_edit(doc.tsTree, *inputEdit);
+	if doc.tsTree {
+		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	}
 
+	if get_size(doc) == 0 {
+		rootPiece := make_piece(doc, text);
+		doc.tree = make_rb_tree(tree_allocator(doc), rootPiece);
+		return;
+	}
 
 	// insert text at offset in document
 
@@ -837,9 +856,11 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset+length);
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
 
-	inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
-	ts_tree_edit(doc.tsTree, *inputEdit);
-
+	if doc.tsTree {
+		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	}
+	
 	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
 	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
 
@@ -1013,6 +1034,8 @@ search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTer
 
 get_char_at :: (doc: *Document, offset: s64) -> u8 {
 	// get the literal char at the given offset
+	// log("size %", get_size(doc));
+	if offset >= get_size(doc) || offset < 0 then return #char " ";
 
 	node, remainder, _ := node_at_offset(doc, doc.tree, offset);
 	bufferIndex := node.piece.bufferIndex;
@@ -1814,6 +1837,9 @@ make_piece :: (pieceTree: *Document, t: string) -> Document.Piece {
 
 	text := copy_string(t,, buffer_allocator(pieceTree));
 	currentBufferEnd := pieceTree.buffers[1].text.count;
+	if pieceTree.buffers[1].text.data == null {
+		pieceTree.buffers[1].text.data = text.data;
+	}
 	pieceTree.buffers[1].text.count = pieceTree.buffers[1].text.count + text.count;
 
 	// count line endings
