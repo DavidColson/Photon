@@ -1017,7 +1017,13 @@ document_search_on_edit :: (userData: *void, input: string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(panel.cursor.head, panel.cursor.anchor), input);
+	start := max(panel.cursor.head, panel.cursor.anchor);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, start, input);
+
+	// we do another search if we found nothing to wrap from the start
+	if panel.hasMatches == false && start > 0 {
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, input);
+	}
 
 	// is the result off the edge of the screen? if so scroll so it's centered
 	if panel.hasMatches {
