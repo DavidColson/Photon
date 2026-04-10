@@ -1208,8 +1208,10 @@ undo :: (doc: *Document) -> s64 {
 	doc.longestLineLength = top.longestLineLength;
 
 	// note we want to edit something that is the inverse of the stored change, so old and new are swapped
-	inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
-	ts_tree_edit(doc.tsTree, *inputEdit);
+	if doc.tsTree {
+		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	}
 	document_update_ts_tree(doc);
 	return entry.changeStartOffset;
 }
@@ -1226,8 +1228,10 @@ redo :: (doc: *Document) -> s64 {
 	doc.longestLineLength = entry.longestLineLength;
 	array_add(*doc.undoStack, entry);
 
-	inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)};
-	ts_tree_edit(doc.tsTree, *inputEdit);
+	if doc.tsTree {
+		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)};
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	}
 	document_update_ts_tree(doc);
 	return entry.changeStartOffset;
 }
