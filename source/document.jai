@@ -1189,9 +1189,6 @@ commit_history :: (doc: *Document) {
 	top.changeStartOffset = doc.currentEditStartOffset;
 	top.changeOldEndOffset = doc.currentEditOldEndOffset;
 	top.changeNewEndOffset = doc.currentEditOldEndOffset + doc.currentEditTotalBytes;
-	log("start: %", top.changeStartOffset);
-	log("oldEnd: %", top.changeOldEndOffset);
-	log("newEnd: %", top.changeNewEndOffset);
 }
 
 undo :: (doc: *Document) -> s64 {

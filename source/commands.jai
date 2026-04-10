@@ -582,10 +582,22 @@ delete_selection :: (using panel: *Panel, args: []string) {
 	begin_edit(document);
 	defer end_edit(document);
 
+	// copy the selection into a register before deleting it
+	rangeStart := min(cursor.head, cursor.anchor);
+	rangeEnd := max(cursor.head, cursor.anchor);
+
+	text: [..]u8;
+	iterator := make_iterator(document, rangeStart);
+	for :raw_bytes iterator {
+		array_add(*text, it,,temp);
+		if it != #char "\r" && iterator.offset >= rangeEnd then break;
+	}
+	textStr := string.{text.count, text.data};
+	write_register(registers.selectedRegister, textStr);
+
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
 
-	// @todo: put the deletion into a register
 	panel_scroll_to_cursor(panel);
 }
 
