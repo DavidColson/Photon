@@ -21,6 +21,10 @@ Panel :: struct {
 	// cursors
 	cursor: Cursor;
 
+	// we key by the document path because documentHandle is not actually hashable
+	// TODO: make documentHandle be hashable and improve this
+	documentScrollOffsets: Table(string, Vector2);
+
 	// Dialogs
 	activeDialog: DialogType;
 	commandPicker: CommandPicker;
@@ -44,6 +48,28 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;
 	panel.cursor.virtualColumn = 0;
+
+	pScrollOffset := table_find_pointer(*panel.documentScrollOffsets, panel.document.path);
+	success, box := find_box(ui_key("code"));
+	if success {
+		if pScrollOffset {
+			box.viewOffset = pScrollOffset.*;
+			box.viewOffsetTarget = pScrollOffset.*;
+		}
+		else {
+			box.viewOffset = .{};
+			box.viewOffsetTarget = .{};
+		}
+	}
+	else {
+		if pScrollOffset {
+			// @todo: initial offsets should support x
+			codeScrollInitialOffset = (pScrollOffset.*).y;
+		}
+		else {
+			codeScrollInitialOffset = 0;
+		}
+	}
 }
 
 panel_reset_dialogs :: (panel: *Panel) {

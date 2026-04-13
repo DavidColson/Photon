@@ -797,6 +797,16 @@ build_ui_panel :: (panel: *Panel) {
 								longestLinePixelWidth,
 								codeBox.rect.w,
 								ui_key("code"));
+
+		
+		// Store the scroll offsets in the panel so they an be restored when we come back to this document
+		pOffset := table_find_pointer(*panel.documentScrollOffsets, panel.document.path);
+		if pOffset {
+			pOffset.* = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
+		}
+		else {
+			table_add(*panel.documentScrollOffsets, panel.document.path, .{codeBox.viewOffset.x, codeBox.viewOffset.y});
+		}
 	}
 
 	// Draw the search dialog
@@ -2838,10 +2848,15 @@ assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
 
 
 
+#if BUILD_TYPE == .SHIPPING {
+	#import "Basic"()(MEMORY_DEBUGGER = false);
+}
+else {
+	#import "Basic"()(MEMORY_DEBUGGER = true);
+}
 Input :: #import "Input";
 #import "Window_Creation";
 #import "Process";
-#import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Math";
 #import "System";
 #import "String";
