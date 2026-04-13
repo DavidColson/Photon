@@ -14,6 +14,7 @@ Panel :: struct {
 	// this will be updated every frame using the handle
 	// Never copy and store this pointer, it can change underneath you
 	document: *Document;
+	previousDocument: DocumentHandle;
 
 	layoutRect: Rect;
 	optionsMenuOpen: bool;
@@ -42,8 +43,10 @@ Panel :: struct {
 }
 
 panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
-	panel.docHandle = doc;
-	panel.document = document_get(doc);
+	newDoc := document_get(doc);
+	panel.previousDocument = panel.docHandle;
+	panel.docHandle = newDoc.handle;
+	panel.document = newDoc;
 	panel.cursor = .{};
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;

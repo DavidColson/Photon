@@ -1035,6 +1035,10 @@ document_search_on_edit :: (userData: *void, input: string) {
 	}
 }
 
+jump_to_last_open_document :: (using panel: *Panel, args: []string) {
+	panel_set_active_document(panel, panel.previousDocument);
+}
+
 // Insert Mode
 // -----------------------------
 

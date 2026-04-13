@@ -109,6 +109,7 @@ normalModeCommands :: Command.[
 	.{ "Select register {char}", .["\"{char}"], 0, select_register },
 	.{ "Next search result", .["n"], 0, next_search_result },
 	.{ "Previous search result", .["N"], 0, previous_search_result },
+	.{ "Jump to last open document", .["gp"], 0, jump_to_last_open_document },
 
 	// search
 	.{ "Search Document", .["/"], 0, start_document_search },
