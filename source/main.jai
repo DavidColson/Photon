@@ -1502,6 +1502,7 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 			startByte := ts_node_start_byte(capture.node);
 			endByte := ts_node_end_byte(capture.node);
 			type := to_string(ts_node_grammar_type(capture.node));
+			if type == "ERROR" then continue;
 
 			success, highlightType := table_find(*language.captureToHighlight, capture.index);
 			if evaluate_query_predicates(language, tsMatch, line) {
