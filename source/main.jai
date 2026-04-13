@@ -85,6 +85,7 @@ lastTime:float64 = 0.0;
 asyncWorker: Async;
 logger: LoggerData;
 startTime: Apollo_Time;
+queuePrintHighlightDebug := false;
 
 // current project (only one active at a time)
 project: Project;
@@ -1651,6 +1652,22 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 				}
 				array_add(*highlights, .{startByte, endByte, highlightType});
 			}
+		}
+
+		if queuePrintHighlightDebug {
+			get_text_range :: (doc: *Document, start: s64, end: s64) -> string {
+				captureText := alloc_string(end-start,,temp);
+				iter := make_iterator(doc, start,,temp);
+				for iter {
+					if it_index >= captureText.count break;
+					captureText[it_index] = it;
+				}
+				return captureText;
+			}
+			for highlight: highlights {
+				log("Highlight: % %", highlight, get_text_range(panel.document, highlight.start, highlight.end));
+			}
+			queuePrintHighlightDebug = false;
 		}
 
 		x :float = textAreaX;

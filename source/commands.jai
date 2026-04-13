@@ -1337,6 +1337,14 @@ print_piece_chain_debug :: (using panel: *Panel, args: []string) {
 	}
 }
 
+print_highlight_debug :: (using panel: *Panel, args: []string) {
+	queuePrintHighlightDebug = true;
+}
+
+reparse_syntax :: (using panel: *Panel, args: []string) {
+	document_reparse_ts_tree(document, false);
+}
+
 visualize_undos :: (using panel: *Panel, args: []string) {
 	// document_debug_print_undos(document);
 }

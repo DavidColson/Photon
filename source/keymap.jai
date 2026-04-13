@@ -145,6 +145,8 @@ normalModeCommands :: Command.[
 	// misc commands
 	.{ "Print piece chain debug", .[], 0, print_piece_chain_debug },
 	.{ "Toggle draw line endings", .[], 0, toggle_render_line_endings },
+	.{ "Print syntax highlight debug", .[], 0, print_highlight_debug },
+	.{ "Reparse syntax tree", .[], 0, reparse_syntax },
 
 	// @todo: need command arguments to clean this up, second option box pops up to select from a dropdown
 	.{ "Normalize Line Endings To LF", .[], 0, normalize_line_endings_lf },
