@@ -86,28 +86,33 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 	success, box := find_box(ui_key("code"));
 	if success {
 		metrics := get_font_metrics(box.font, xx box.fontSize);
-
-		// need to make sure bounds are up to date as file may have changed since last render
-		numDocumentLines := get_number_of_lines(panel.document);
-		box.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
-
 		box.viewOffsetTarget.y = cast(float, -targetLine * metrics.lineSpacing);
 		box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
+	}
+	else {
+		// when the box doesn't exist, we may want to set it's initial scroll setup for when it gets created
+		metrics := get_font_metrics(fontCode, xx style.fontSize);
+		codeScrollInitialOffset = cast(float, -targetLine * metrics.lineSpacing);
 	}
 }
 
 panel_calculate_visible_lines :: (panel: *Panel, useAnimTarget:bool=false) -> s64, s64 {
 	success, box := find_box(ui_key("code"));
 	if success {
-		if box.rect.h == 0.0 return 0,0;
-		documentLines := get_number_of_lines(panel.document);
 		metrics := get_font_metrics(box.font, xx box.fontSize);
+		if box.rect.h == 0.0 {
+			return 0, cast(s64, panel.layoutRect.h / metrics.lineSpacing)-1;
+		}
 
+		documentLines := get_number_of_lines(panel.document);
 		viewOffset := ifx useAnimTarget then box.viewOffsetTarget.y else box.viewOffset.y;
 		startVisibleLines := clamp(cast(s64) (-viewOffset / metrics.lineSpacing), 0, documentLines - 1);
 		return startVisibleLines, cast(s64, box.rect.h / metrics.lineSpacing)-1;
 	}
-	return 0,0;
+	
+	// fallback for when there is no codebox to use
+	metrics := get_font_metrics(fontCode, xx style.fontSize);
+	return 0, cast(s64, panel.layoutRect.h / metrics.lineSpacing)-1;
 }
 
 panel_get_page_size :: (panel: *Panel) -> s64 {

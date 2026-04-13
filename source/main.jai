@@ -85,6 +85,13 @@ lastTime:float64 = 0.0;
 asyncWorker: Async;
 logger: LoggerData;
 startTime: Apollo_Time;
+
+// this is used to set the codebox's initial scroll offset before it's been created
+// potentially a nicer way to do this??
+codeScrollInitialOffset := 0.0;
+codeScrollInitialBounds := 0.0;
+
+// some deferred actions, might want a nicer way to do things like this at some point
 queuePrintHighlightDebug := false;
 
 // current project (only one active at a time)
@@ -699,6 +706,11 @@ build_ui_panel :: (panel: *Panel) {
 			numDocumentLines := get_number_of_lines(panel.document);
 			metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
 			codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+
+			if codeBox.firstTouchedFrame == uiState.frameIndex {
+				codeBox.viewOffsetTarget.y = codeScrollInitialOffset;
+				codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
+			}
 
 			// TODO: cache this calculation, it won't change much and it can be slow
 			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
