@@ -1638,6 +1638,8 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			endByte := ts_node_end_byte(capture.node);
 			type := to_string(ts_node_grammar_type(capture.node));
 
+			if type == "ERROR" then continue;
+
 			success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
 			if evaluate_query_predicates(panel.document.language, tsMatch, panel.document) {
 				if highlights.count > 0 {
