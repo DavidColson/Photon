@@ -99,10 +99,10 @@ platform_init_crash_handler :: () {
 }
 
 #run {
-    // #if BUILD_TYPE == .RELEASE {
-    //     WR :: #import "Windows_Resources";
-    //     WR.disable_runtime_console();
-    // }
+    #if BUILD_TYPE == .SHIPPING {
+        WR :: #import "Windows_Resources";
+        WR.disable_runtime_console();
+    }
 }
 
 #scope_file 
