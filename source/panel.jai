@@ -24,7 +24,11 @@ Panel :: struct {
 
 	// we key by the document path because documentHandle is not actually hashable
 	// TODO: make documentHandle be hashable and improve this
-	documentScrollOffsets: Table(string, Vector2);
+	DocumentPanelLocation :: struct {
+		scrollOffset: Vector2;
+		cursor: Cursor;
+	}
+	documentLocations: Table(string, DocumentPanelLocation);
 
 	// Dialogs
 	activeDialog: DialogType;
@@ -44,6 +48,20 @@ Panel :: struct {
 
 panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	newDoc := document_get(doc);
+
+	// Save the scroll offset of the old document so we can come back to it
+	success, codeBox := find_box(ui_key("code"));
+	if success {
+		location := table_find_pointer(*panel.documentLocations, panel.document.path);
+		if location {
+			location.scrollOffset = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
+			location.cursor = panel.cursor;
+		}
+		else {
+			table_add(*panel.documentLocations, panel.document.path, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
+		}
+	}
+
 	panel.previousDocument = panel.docHandle;
 	panel.docHandle = newDoc.handle;
 	panel.document = newDoc;
@@ -52,22 +70,24 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	panel.cursor.anchor = 0;
 	panel.cursor.virtualColumn = 0;
 
-	pScrollOffset := table_find_pointer(*panel.documentScrollOffsets, panel.document.path);
-	success, box := find_box(ui_key("code"));
+	// Restore a saved scroll offset if one exists
+	location := table_find_pointer(*panel.documentLocations, panel.document.path);
 	if success {
-		if pScrollOffset {
-			box.viewOffset = pScrollOffset.*;
-			box.viewOffsetTarget = pScrollOffset.*;
+		if location {
+			codeBox.viewOffset = location.scrollOffset;
+			codeBox.viewOffsetTarget = location.scrollOffset;
+			panel.cursor = location.cursor;
 		}
 		else {
-			box.viewOffset = .{};
-			box.viewOffsetTarget = .{};
+			codeBox.viewOffset = .{};
+			codeBox.viewOffsetTarget = .{};
 		}
 	}
 	else {
-		if pScrollOffset {
+		if location {
 			// @todo: initial offsets should support x
-			codeScrollInitialOffset = (pScrollOffset.*).y;
+			codeScrollInitialOffset = location.scrollOffset.y;
+			panel.cursor = location.cursor;
 		}
 		else {
 			codeScrollInitialOffset = 0;
