@@ -799,14 +799,6 @@ build_ui_panel :: (panel: *Panel) {
 								ui_key("code"));
 
 		
-		// Store the scroll offsets in the panel so they an be restored when we come back to this document
-		pOffset := table_find_pointer(*panel.documentScrollOffsets, panel.document.path);
-		if pOffset {
-			pOffset.* = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
-		}
-		else {
-			table_add(*panel.documentScrollOffsets, panel.document.path, .{codeBox.viewOffset.x, codeBox.viewOffset.y});
-		}
 	}
 
 	// Draw the search dialog
