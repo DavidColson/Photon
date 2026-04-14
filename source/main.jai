@@ -748,7 +748,6 @@ build_ui_panel :: (panel: *Panel) {
 				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
 				column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
 				cursor.head = lineContent.startByteOffset + column;
-				cursor.anchor = cursor.head;
 
 				// update the virtual column
 				cursor.virtualColumn = 0;
@@ -765,7 +764,7 @@ build_ui_panel :: (panel: *Panel) {
 		
 			if signal.pressed {
 				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
-				panel.cursor.head = panel.cursor.anchor;
+				panel.cursor.anchor = panel.cursor.head;
 			}
 
 			if signal.holding {
