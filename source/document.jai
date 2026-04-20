@@ -795,6 +795,9 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 	node, remainder, nodeStartOffset, line := node_at_offset(doc, doc.tree, atOffset);
 	insertCursor := buffer_offset_to_cursor(doc, node.piece, remainder);
 
+	// potentially could optimize this, need to know when an insert string is multiline, and how long the lines are
+	defer calculate_longest_line(doc);
+	
 	// need the line/column in the buffer?, lets see for later
 	
 	// first case, inserting at the start of a node
