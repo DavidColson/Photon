@@ -74,6 +74,9 @@ init_renderer :: (_window: Window_Type) {
 	gl_load(*gl);
 	gl_enable_debug_output(break_on_error = true);
 
+	// experimental, want to see if it fixes a perf issue on my work PC
+	wglSwapIntervalEXT(0);
+
 	glViewport(0, 0, xx windowWidth, xx windowHeight);
 
 	scissorTop = -1;
