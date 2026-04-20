@@ -747,7 +747,7 @@ build_ui_panel :: (panel: *Panel) {
 				lineContent := get_line_content(doc, clickedLine,,temp);
 				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
 				column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
-				cursor.head = lineContent.startByteOffset + column;
+				cursor.head = min(get_size(doc)-1, lineContent.startByteOffset + column);
 
 				// update the virtual column
 				cursor.virtualColumn = 0;
