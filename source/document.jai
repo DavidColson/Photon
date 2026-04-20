@@ -562,11 +562,15 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 		text = copy_string(file.content,,buffer_allocator(doc));
 	}
 	else {
+		// this may seem redundant, but we need buffer[1].text.data to point to the bottom of the add buffer memory
+		// and to do that we need the allocator to initialize the pool, so we just allocate something so that
+		// the pointers are valid
 		text = copy_string(" ",,buffer_allocator(doc));
+		text.count = 0;
 	}
 	doc.buffers[0].text.data = text.data;
 	doc.buffers[0].text.count = text.count;
-	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
+	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count + 1;
 	doc.buffers[1].text.count = 0;
 
 	array_copy(*doc.buffers[0].lineStarts, file.lineStarts);
@@ -751,8 +755,12 @@ begin_edit :: (doc: *Document) {
 end_edit :: (doc: *Document) {
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
-	commit_history(doc);
-	document_update_ts_tree(doc);
+
+	// check if the tree even changed since the begin, if it did commit the change
+	if doc.tree != doc.undoStack[doc.undoStack.count-1].tree {
+		commit_history(doc);
+		document_update_ts_tree(doc);
+	}
 }
 
 insert :: (doc: *Document, atOffset: s64, text: string) {
@@ -855,6 +863,22 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
 	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset+length);
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
+
+	// edge case, delete the entire document, or do nothing
+	if get_size(doc) - length <= 0 {
+		if get_size(doc) == 0 {
+			return;
+		}
+		
+		firstPiece: Document.Piece;
+		firstPiece.length = 0;
+		firstPiece.lineFeedCount = 0;
+		firstPiece.start = .{0,0};
+		firstPiece.end = .{firstPiece.lineFeedCount, 0};
+		firstPiece.bufferIndex = 0;
+		doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
+		return;
+	}
 
 	if doc.tsTree {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
@@ -1461,7 +1485,7 @@ step_line :: (iter: *Document.LineIterator) {
 		// line is fully contained in this node
 
 		buffer := *iter.doc.buffers[iter.node.piece.bufferIndex];
-		startOffset := buffer_cursor_to_offset(buffer, .{iter.lineNumInNode, 0} );
+		startOffset := buffer_cursor_to_offset(buffer, ifx iter.line == 0 then iter.node.piece.start else .{iter.lineNumInNode, 0} );
 		endOffset := buffer_cursor_to_offset(buffer, .{iter.lineNumInNode + 1, 0});
 		lineLength := endOffset - startOffset;
 

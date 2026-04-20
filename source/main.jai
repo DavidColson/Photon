@@ -1913,7 +1913,7 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 		line := linesOnScreen[it - startVisibleLine];
 
 		// hide CRLF endings
-		if line.text[line.text.count-2] == #char "\r" {
+		if line.text.count >= 2 && line.text[line.text.count-2] == #char "\r" {
 			line.text.count -= 1;
 			line.endByteOffset -= 1;
 		}

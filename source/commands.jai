@@ -579,9 +579,6 @@ delete_cursor_range :: (doc: *Document, start: s64, end: s64) -> s64 {
 }
 
 delete_selection :: (using panel: *Panel, args: []string) {
-	begin_edit(document);
-	defer end_edit(document);
-
 	// copy the selection into a register before deleting it
 	rangeStart := min(cursor.head, cursor.anchor);
 	rangeEnd := max(cursor.head, cursor.anchor);
@@ -595,6 +592,8 @@ delete_selection :: (using panel: *Panel, args: []string) {
 	textStr := string.{text.count, text.data};
 	write_register(registers.selectedRegister, textStr);
 
+	begin_edit(document);
+	defer end_edit(document);
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
 
@@ -879,7 +878,7 @@ unindent_line :: (using panel: *Panel, args: []string) {
 
 undo :: (using panel: *Panel, args: []string) {
 	result := undo(document);
-	if result > 0 {
+	if result >= 0 {
 		panel.cursor.head = result;
 		panel.cursor.anchor = panel.cursor.head;
 	}
