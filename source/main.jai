@@ -625,8 +625,7 @@ build_ui_panel :: (panel: *Panel) {
 		spacer(.X, fixed(em(2.0)));
 
 		// file type
-		// @todo
-		box(ui_key("jai"), .{
+		box(ui_key(panel.document.languageName), .{
 			flags=.DRAW_TEXT,
 			layout=.{ width=text_content(), height=text_content() },
 		});
