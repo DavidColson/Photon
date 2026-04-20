@@ -414,7 +414,7 @@ input_handler :: (event: Input.Event) {
 		nodePtr = table_find_pointer(keyMap.pendingKeyNode.children, keyString);
 	}
 
-	if editorMode != .INSERT && nodePtr != null {
+	if editorMode != .INSERT && (nodePtr != null || is_digit(keyString[0])) {
 		for keyString {
 			array_add(*keyMap.pendingKeyString, it);
 		}
