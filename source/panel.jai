@@ -28,7 +28,7 @@ Panel :: struct {
 		scrollOffset: Vector2;
 		cursor: Cursor;
 	}
-	documentLocations: Table(string, DocumentPanelLocation);
+	documentLocations: Table(DocumentHandle, DocumentPanelLocation, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
 
 	// Dialogs
 	activeDialog: DialogType;
@@ -47,31 +47,29 @@ Panel :: struct {
 }
 
 panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
-	newDoc := document_get(doc);
-
 	// Save the scroll offset of the old document so we can come back to it
 	success, codeBox := find_box(ui_key("code"));
 	if success {
-		location := table_find_pointer(*panel.documentLocations, panel.document.path);
+		location := table_find_pointer(*panel.documentLocations, panel.docHandle);
 		if location {
 			location.scrollOffset = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
 			location.cursor = panel.cursor;
 		}
 		else {
-			table_add(*panel.documentLocations, panel.document.path, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
+			table_add(*panel.documentLocations, panel.docHandle, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
 		}
 	}
 
 	panel.previousDocument = panel.docHandle;
-	panel.docHandle = newDoc.handle;
-	panel.document = newDoc;
+	panel.docHandle = doc;
+	panel.document = document_get(doc); // note this may be null at time of query if document isn't loaded yet
 	panel.cursor = .{};
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;
 	panel.cursor.virtualColumn = 0;
 
 	// Restore a saved scroll offset if one exists
-	location := table_find_pointer(*panel.documentLocations, panel.document.path);
+	location := table_find_pointer(*panel.documentLocations, panel.docHandle);
 	if success {
 		if location {
 			codeBox.viewOffset = location.scrollOffset;

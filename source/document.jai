@@ -1809,6 +1809,14 @@ node_at_offset :: (doc: *Document, node: *Document.Node, offset: s64) -> node: *
 	return null, 0, 0, 0;
 }
 
+document_handle_hash :: (handle: DocumentHandle) -> u32 {
+	return cast,trunc(u32) inline fnv1a_hash(*handle, size_of(DocumentHandle));
+}
+
+document_handle_compare :: (handleA: DocumentHandle, handleB: DocumentHandle) -> bool {
+	return handleA.bucket_index == handleB.bucket_index && handleA.slot_index == handleB.slot_index;
+}
+
 #scope_file
 
 document_reset :: (using doc: *Document) {
