@@ -560,18 +560,22 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	text: string;
 	if file.content.count > 0 {
 		text = copy_string(file.content,,buffer_allocator(doc));
+		doc.buffers[0].text.data = text.data;
+		doc.buffers[0].text.count = text.count;
+		doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count;
+		doc.buffers[1].text.count = 0;
 	}
 	else {
 		// this may seem redundant, but we need buffer[1].text.data to point to the bottom of the add buffer memory
 		// and to do that we need the allocator to initialize the pool, so we just allocate something so that
 		// the pointers are valid
 		text = copy_string(" ",,buffer_allocator(doc));
-		text.count = 0;
+		doc.buffers[0].text.data = text.data;
+		doc.buffers[0].text.count = 0;
+		doc.buffers[1].text.data = doc.buffers[0].text.data + 1;
+		doc.buffers[1].text.count = 0;
 	}
-	doc.buffers[0].text.data = text.data;
-	doc.buffers[0].text.count = text.count;
-	doc.buffers[1].text.data = doc.buffers[0].text.data + doc.buffers[0].text.count + 1;
-	doc.buffers[1].text.count = 0;
+
 
 	array_copy(*doc.buffers[0].lineStarts, file.lineStarts);
 
@@ -1873,9 +1877,6 @@ make_piece :: (pieceTree: *Document, t: string) -> Document.Piece {
 
 	text := copy_string(t,, buffer_allocator(pieceTree));
 	currentBufferEnd := pieceTree.buffers[1].text.count;
-	if pieceTree.buffers[1].text.data == null {
-		pieceTree.buffers[1].text.data = text.data;
-	}
 	pieceTree.buffers[1].text.count = pieceTree.buffers[1].text.count + text.count;
 
 	// count line endings
