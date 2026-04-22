@@ -1561,6 +1561,7 @@ step_line :: (iter: *Document.LineIterator) {
 					array_reserve(*iter.lineBuffer, iter.lineBuffer.count + sectionLength);
 					memcpy(iter.lineBuffer.data+iter.lineBuffer.count, buffer.text.data + startOffset, sectionLength);
 					iter.lineBuffer.count = iter.lineBuffer.count + sectionLength;
+					iter.lineContent.endByteOffset = iter.lineContent.startByteOffset + iter.lineBuffer.count;
 				}
 			}
 			else {
