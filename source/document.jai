@@ -1111,7 +1111,7 @@ get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s6
 	lineStart := get_line_start(doc, line);
 	lineEnd := get_line_start(doc, line+1);
 
-	if !includeLineEndings {
+	if !includeLineEndings && line < get_number_of_lines(doc)-1 {
 		rem := 0;
 		if get_char_at(doc, lineEnd-1) == #char "\n" {
 			rem += 1;

@@ -145,7 +145,7 @@ goto_document_start :: (using panel: *Panel, args: []string) {
 
 goto_document_end :: (using panel: *Panel, args: []string) {
 	cursor.head = get_size(document)-1;
-	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
+	cursor.head = shift_offset_line_endings(document, cursor.head, .FORWARD);
 	cursor.anchor = cursor.head;
 
 	// scroll the window if the cursor will now become out of view
