@@ -701,7 +701,13 @@ document_save :: (doc: *Document, path: string, backup := false) {
 
 			push_notification("Document Saved");
 
-			// mark last undo as saved
+			// update undo/redo states
+			for * doc.undoStack {
+				it.saved = false;
+			}
+			for * doc.redoStack {
+				it.saved = false;
+			}
 			doc.undoStack[doc.undoStack.count-1].saved = true;
 		}
 		else {
