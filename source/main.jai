@@ -869,7 +869,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			inputBox.customDrawUdata = cast(*void, *panel.commandPicker.input);
 
 			elementHeight := cast(float, fontMetrics.characterHeight*2);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"),
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"), ui_key("commandListScroller"),
 								panel.layoutRect.h/2,
 								elementHeight,
 								panel.commandPicker.numToDisplay,
@@ -924,7 +924,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				}
 			}
 
-			scroll_list_end(ui_key("commandListScroller")); 
+			scroll_list_end(); 
 
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,
@@ -1012,7 +1012,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			}
 
 			elementHeight := cast(float, fontMetrics.characterHeight*2);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("fileNav_fileList"),
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("fileNav_fileList"),ui_key("filesystemNavScroller"),
 								panel.layoutRect.h/2,
 								elementHeight,
 								panel.filesystemNav.numToDisplay,
@@ -1086,7 +1086,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				}
 			}
 
-			scroll_list_end(ui_key("filesystemNavScroller")); 
+			scroll_list_end(); 
 
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,
@@ -1151,7 +1151,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			inputBox.customDrawUdata = cast(*void, *panel.projectSearcher.input);
 
 			elementHeight := cast(float, fontMetrics.lineSpacing * 1.5);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("searchResults"),
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("searchResults"),ui_key("projectSearchScroller"),
 								panel.layoutRect.h/2,
 								elementHeight,
 								panel.projectSearcher.results.count,
@@ -1236,7 +1236,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				}
 			}
 
-			scroll_list_end(ui_key("projectSearchScroller")); 
+			scroll_list_end(); 
 
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,
@@ -1300,7 +1300,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			inputBox.customDrawUdata = cast(*void, *panel.fileFinder.input);
 
 			elementHeight := cast(float, fontMetrics.characterHeight*3);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("fileList"),
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("fileList"),ui_key("fileFinderScroller"),
 								panel.layoutRect.h/2,
 								elementHeight,
 								panel.fileFinder.numToDisplay,
@@ -1349,7 +1349,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				}
 			}
 
-			scroll_list_end(ui_key("fileFinderScroller")); 
+			scroll_list_end(); 
 
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,

@@ -747,7 +747,7 @@ scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange
 	}
 }
 
-scroll_list_begin :: (listKey: UIKey, maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: int, selectedElementChanged: bool) -> rangeStart: int, rangeEnd: int {
+scroll_list_begin :: (listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: int, selectedElementChanged: bool) -> rangeStart: int, rangeEnd: int {
 	outerContainer := box(ui_key_nil, .{ flags=0, layout=.{width=grow(), height=fit(), }});
 	push_parent(outerContainer);
 
@@ -757,6 +757,16 @@ scroll_list_begin :: (listKey: UIKey, maxContainerHeight: float, elementHeight: 
 		flags=.CLIP_CONTENTS, 
 		layout=.{ childLayoutAxis = .Y, width=grow(), height=fit(0.0, maxContainerHeight), padding=.{0,0, em(0.4), em(0.4)} },
 	});
+
+	// scroll bar if there are too many elements to display
+	if container.viewBounds.y != 0.0 {
+		scrollData:= scroll_bar(scrollBarKey,
+								.Y,
+								container.viewOffset.y/container.viewBounds.y,
+								container.viewBounds.y,
+								container.layout.height.max - em(0.4)*2,
+								container.key);
+	}
 
 	elementsBefore := cast(int, floor(abs(container.viewOffset.y) / elementHeight));
 	elementsOnScreen := min(cast(int, round(maxContainerHeightInner / elementHeight) + 1), maxElements);
@@ -788,23 +798,13 @@ scroll_list_begin :: (listKey: UIKey, maxContainerHeight: float, elementHeight: 
 	return rangeStart, rangeEnd;
 }
 
-scroll_list_end :: (scrollBarKey: UIKey) {
+scroll_list_end :: () {
 	container := pop_parent(); // list element container
 
 	container.viewOffset.y = clamp(container.viewOffset.y, container.viewBounds.y, 0);
 	container.viewOffset.x = clamp(container.viewOffset.x, container.viewBounds.x, 0);
 	container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
 	container.viewOffsetTarget.x = clamp(container.viewOffsetTarget.x, container.viewBounds.x, 0);
-
-	// scroll bar if there are too many elements to display
-	if container.viewBounds.y != 0.0 {
-		scrollData:= scroll_bar(scrollBarKey,
-								.Y,
-								container.viewOffset.y/container.viewBounds.y,
-								container.viewBounds.y,
-								container.layout.height.max - em(0.4)*2,
-								container.key);
-	}
 
 	pop_parent(); // outer container (inc scroll bar)
 }
