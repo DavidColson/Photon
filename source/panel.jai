@@ -123,6 +123,26 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 	else if currentLine-range >= startVisibleLine {
 		panel_scroll_to_line(panel, currentLine-range);
 	}
+
+	// do horizontal scroll to cursor, implemented quite differently sadly
+	success, codeBox := find_box(ui_key("code"));
+	if success {
+		// cursors X location
+		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursor.head);
+		lineContent := get_line_content(panel.document, cursorCoordinate.line,,temp);
+		lineContent.text.count = panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line);
+		cursorX := generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
+	
+		// the total range
+		longestLinePixelWidth := cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
+	
+		metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
+	
+		desiredScrollPos := (cursorX/longestLinePixelWidth) * codeBox.viewBounds.x;
+
+		codeBox.viewOffsetTarget.x = desiredScrollPos;
+		codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
+	}
 }
 
 // targetLine will be the top edge of the panel, such that target line = 0 will leave you scrolled

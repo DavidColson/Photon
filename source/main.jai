@@ -713,6 +713,7 @@ build_ui_panel :: (panel: *Panel) {
 
 			// TODO: cache this calculation, it won't change much and it can be slow
 			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
+			longestLinePixelWidth += metrics.emWidth; // add extra monospace width for cursor to sit on end of line
 
 			if longestLinePixelWidth > codeBox.rect.w {
 				gutterWidth := 0;

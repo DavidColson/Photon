@@ -33,6 +33,7 @@ FontMetrics :: struct {
 	maxDescender: int;
 	maxAscender: int;
 	lineSpacing: int;
+	emWidth: int;
 }
 
 GlyphData :: struct {
@@ -149,6 +150,12 @@ get_font_metrics :: (font: *Font, size: int) -> FontMetrics {
 		if glyphIndexTemp {
 			FT_Load_Glyph(font.face, glyphIndexTemp, FT_LOAD_DEFAULT);
 			fontStyle.metrics.typicalDescender = FT_ROUND(font.face.glyph.metrics.horiBearingY - font.face.glyph.metrics.height);
+		}
+
+		glyphIndexTemp = FT_Get_Char_Index(font.face, #char "M");
+		if glyphIndexTemp {
+			FT_Load_Glyph(font.face, glyphIndexTemp, FT_LOAD_DEFAULT);
+	        fontStyle.metrics.emWidth = FT_ROUND(font.face.glyph.metrics.width);
 		}
 
 		scale := font.face.size.metrics.y_scale/(64.0*65536.0);
