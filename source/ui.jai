@@ -188,7 +188,6 @@ box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 	// if it can't be found it's new
 	if !success {
 		// transient box, we'll allocate in the frame allocator (cleared at the end of the frame)
-			childAlignment: UIAlignment;
 		if key == ui_key_nil {
 			box = New(UIBox,, uiState.frameAlloc);
 		}
@@ -282,9 +281,27 @@ box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 
 signal_from_box :: (box: *UIBox) -> UISignal {
 	signal: UISignal;
-    x, y, success := get_mouse_pointer_position(window, false);
-	box_contains_cursor := contains_point(box.rect, xx x, xx y);
 
+	// figure out if this box's parent is a floating root parent
+	contextMenuIsAncestor: bool = false;
+	parent: *UIBox = box.parent;
+	while parent {
+		if parent == uiState.contextMenu {
+			contextMenuIsAncestor = true;
+			break;
+		}
+		parent = parent.parent;
+	}
+
+	// if it isn't, then get the context menu's rectangle
+	blacklistRect: Rect;
+	if !contextMenuIsAncestor && uiState.contextMenu != null {
+		blacklistRect = uiState.contextMenu.rect;
+	}
+
+    x, y, success := get_mouse_pointer_position(window, false);
+	box_contains_cursor := !contains_point(blacklistRect, xx x, xx y) && contains_point(box.rect, xx x, xx y);
+	
 	if  box_contains_cursor {
 		signal.hovering = true;
 		if box.flags & .MOUSE_CLICKABLE {
