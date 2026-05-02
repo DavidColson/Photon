@@ -20,7 +20,7 @@ Project :: struct {
 		locator: Bucket_Locator;
 		diskLastModtime: Apollo_Time;
 		lineEndingMode: Document.LineEndingMode;
-		lineStarts: [..]s64;
+		lineStarts: []s64;
 	}
 	projectFiles: Bucket_Array(File, 128);
 	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
@@ -35,6 +35,7 @@ Project :: struct {
 	loadProgress: ProjectLoadProgress;
 	pendingFileLoads: s32;
 	threadGroup: Thread_Group; // @todo: rename
+    lineStartTempArrays: [ ][..]s64;
 
 	SearchResult :: struct {
 		matchLine: string;
@@ -372,6 +373,11 @@ init_thread_groups :: () {
     init(*project.threadGroup, numThreads, project_file_load_thread_proc);
     project.threadGroup.name    = "Project File Loading";
     project.threadGroup.logging = false;
+	// todo: make sure you yeet these after project loading is done
+	project.lineStartTempArrays = NewArray(numThreads, [..]s64);
+	for * project.lineStartTempArrays {
+		it.allocator = temp;
+	}
 
     init(*project.searchThreads, numThreads, project_search_thread_proc);
     project.searchThreads.name    = "Project Searcher";
@@ -496,6 +502,9 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 
 	// @todo: mutex/atomic or some kind of protection
 	free_file(file);
+
+	tempArray := *project.lineStartTempArrays[thread.worker_info.worker_index];
+	array_reset_keeping_memory(tempArray);
 	
 	// @todo: handle failed case
 	f, result := file_open(file.fullName);
@@ -514,7 +523,7 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 	file.content = content;
 
 	// find line starts
-	array_add(*file.lineStarts, 0);
+	array_add(tempArray, 0);
 	lfCount := 0;
 	crlfCount := 0;
 	i := 0;
@@ -527,13 +536,16 @@ project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *
 			else {
 				lfCount += 1;
 			}
-			array_add(*file.lineStarts, j+1);
+			array_add(tempArray, j+1);
 			i = j+1;
 		}
 		else {
 			i = file.content.count;
 		}
 	}
+
+	file.lineStarts = NewArray(tempArray.count, s64);
+	memcpy(file.lineStarts.data, tempArray.data, size_of(s64)*tempArray.count);
 	
 	// set line ending mode
 	if lfCount > 0 && crlfCount == 0 {
