@@ -141,7 +141,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 		desiredScrollPos := (cursorX/longestLinePixelWidth) * codeBox.viewBounds.x;
 
 		codeBox.viewOffsetTarget.x = desiredScrollPos;
-		codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
+		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
 	}
 }
 
