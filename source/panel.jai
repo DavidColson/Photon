@@ -153,6 +153,10 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 	success, box := find_box(ui_key("code"));
 	if success {
 		metrics := get_font_metrics(box.font, xx box.fontSize);
+
+		documentLines := get_number_of_lines(panel.document);
+		box.viewBounds.y = cast(float, -(metrics.lineSpacing * documentLines) + metrics.lineSpacing * 5);
+
 		box.viewOffsetTarget.y = cast(float, -targetLine * metrics.lineSpacing);
 		box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 	}
