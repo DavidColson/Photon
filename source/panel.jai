@@ -138,7 +138,9 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 	
 		metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
 	
-		desiredScrollPos := (cursorX/longestLinePixelWidth) * codeBox.viewBounds.x;
+		desiredScrollPos := 0.0;
+		if longestLinePixelWidth > 0 
+			desiredScrollPos = (cursorX/longestLinePixelWidth) * codeBox.viewBounds.x;
 
 		codeBox.viewOffsetTarget.x = desiredScrollPos;
 		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
