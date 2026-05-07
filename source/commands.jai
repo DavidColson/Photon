@@ -1312,6 +1312,11 @@ save_file_as :: (panel: *Panel, args: []string) {
 	filesystem_nav_open(*panel.filesystemNav, true);
 }
 
+p4_checkout_file :: (panel: *Panel, args: []string) {
+	result, output, error := run_command("p4", "edit", panel.document.path, capture_and_return_output=true);
+	log("%", output);
+}
+
 print_piece_chain_debug :: (using panel: *Panel, args: []string) {
 	log("Tree Nodes: ");
 	pretty_print_tree(document.tree);

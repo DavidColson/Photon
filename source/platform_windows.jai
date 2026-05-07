@@ -21,7 +21,7 @@ platform_enumerate_logical_drives :: () -> [] string {
 
 platform_is_path_directory :: (path: string) -> bool {
 	push_allocator(temp);
-	attrib := GetFileAttributesW(utf8_to_wide(path));
+	attrib := GetFileAttributesW(utf8_to_wide(path,,temp));
 	if attrib & FILE_ATTRIBUTE_DIRECTORY {
 		return true;
 	}
@@ -40,6 +40,16 @@ platform_path_equal :: (path1: string, path2: string) -> bool {
 	path_overwrite_separators(path1low, #char "/");
 	path_overwrite_separators(path2low, #char "/");
 	return equal(path1low, path2low);
+}
+
+platform_file_is_read_only :: (file: string) -> bool {
+    attribs := GetFileAttributesW(utf8_to_wide(file,,temp));
+    if attribs != INVALID_FILE_ATTRIBUTES {
+		if attribs & FILE_ATTRIBUTE_READONLY {
+			return true;
+		}
+	}
+	return false;
 }
 
 platform_get_dpi_scale :: (window: Window_Type) -> float {

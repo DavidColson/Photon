@@ -115,6 +115,7 @@ Document :: struct {
 	lineEndings: LineEndingMode;
 	path: string;
 	diskLastModtime: Apollo_Time;
+	diskReadOnly: bool;
 	handle: DocumentHandle;
 	longestLine: s32;
 	longestLineLength: s32;
@@ -371,6 +372,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 		if result {
 			doc.diskLastModtime = modtime;
 		}
+		doc.diskReadOnly = platform_file_is_read_only(doc.path);
 
 		if !success {
 			taskData.result = .FAILED_TO_READ_FILE_DATA;
@@ -512,6 +514,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	data.workingDocument = newSlot;
 	data.workingDocument.path = copy_string(oldSlot.path);
 	data.workingDocument.diskLastModtime = oldSlot.diskLastModtime;
+	data.workingDocument.diskReadOnly = oldSlot.diskReadOnly;
 	data.workingDocument.handle= docHandle;
 	
 	data.result = .IN_PROGRESS;
@@ -594,6 +597,7 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
 	doc.diskLastModtime = file.diskLastModtime;
+	doc.diskReadOnly = platform_file_is_read_only(doc.path);
 	doc.lineEndings = file.lineEndingMode;
 
 	// setup initial undo point
@@ -698,6 +702,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 			if success {
 				doc.diskLastModtime = modtime;
 			}
+			doc.diskReadOnly = platform_file_is_read_only(doc.path);
 
 			push_notification("Document Saved");
 

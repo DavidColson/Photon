@@ -555,7 +555,7 @@ build_ui_panel :: (panel: *Panel) {
 		}
 
 		// lock icon @todo: implement for real
-		if false {
+		if panel.document.diskReadOnly {
 			box(ui_key(style.iconLock), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
@@ -1972,6 +1972,7 @@ do_backup_callback :: () {
 document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
 	found, handle := document_get_by_path(change.full_path);
 	if found {
+		log("FileChange detected % %", change.full_path, change.events);
 		doc := document_get(handle);
 		if change.events & .MODIFIED || change.events & .MOVED_TO {
 			modtime, size, success := file_modtime_and_size(doc.path);
@@ -1986,6 +1987,8 @@ document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change,
 					push_notification("File on disk changed, but you have unsaved edits");
 				}
 			}
+			// Even the file modtime has not changed, there could have been an attribute change
+			doc.diskReadOnly = platform_file_is_read_only(doc.path);
 		}
 		if change.events & .REMOVED {
 			doc.undoStack[doc.undoStack.count-1].saved = false;

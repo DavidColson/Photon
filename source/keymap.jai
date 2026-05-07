@@ -49,6 +49,7 @@ normalModeCommands :: Command.[
 	.{ "Quit", .["Q"], 0, quit },
 	.{ "Save File", .["ctrl+s"], 0, save_file },
 	.{ "Save File As", .["ctrl+shift+s"], 0, save_file_as },
+	.{ "P4 Checkout File", .[], 0, p4_checkout_file },
 
 	// movements
 	.{ "Move one char left", .["h", "<left>"], .REPEATABLE, move_one_char_left },
