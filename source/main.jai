@@ -86,6 +86,15 @@ asyncWorker: Async;
 logger: LoggerData;
 startTime: Apollo_Time;
 
+// allows UI to safely execute key commands
+DeferredCommand :: struct {
+	panel: *Panel;
+	args: []string;
+	exec: (*Panel, []string);
+}
+deferredCommands: [5]DeferredCommand;
+pendingDeferredCommands := 0;
+
 // this is used to set the codebox's initial scroll offset before it's been created
 // potentially a nicer way to do this??
 codeScrollInitialOffset := 0.0;
@@ -272,6 +281,14 @@ update :: (deltaTime: float64) {
 	}
 
 	build_ui();
+
+	for 0..pendingDeferredCommands-1 {
+		command := *deferredCommands[it];
+		command.exec(command.panel, command.args);
+		// if the command changed the mode we need to reset the root keymap
+		keyMap.pendingKeyNode = *keyMap.root[editorMode];
+	}
+	pendingDeferredCommands = 0;
 
 	// after ui has taken any inputs it wants, we'll give the rest to the default input handler
 	for uiState.events {
@@ -1164,9 +1181,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			for rangeStart..rangeEnd {
 				searchResult := panel.projectSearcher.results[it];
 
-				entryFlags:UIBoxFlags = 0;
+				entryFlags:UIBoxFlags =	.DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND;
 				if it == panel.projectSearcher.selectedEntry {
-					entryFlags |= .DRAW_BACKGROUND;
+					entryFlags |= .FOCUS_HOT;
 				}
 
 				entryBox := box(ui_key("entry##%", it), .{
@@ -1175,8 +1192,16 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						height=fixed(elementHeight),
 						childLayoutAxis=.X,
 					},
-					palette=.{ background=style.backgroundLighter },
+					palette=.{ background=style.backgroundLight },
 				});
+				signal := signal_from_box(entryBox);
+				if signal.hoverEnter {
+					panel.projectSearcher.selectedEntry = xx it;
+				}
+				if signal.pressed {
+					deferredCommands[pendingDeferredCommands] =.{panel, .[], project_search_open_result};
+					pendingDeferredCommands += 1;
+				}
 				{
 					push_parent(entryBox); defer pop_parent();
 
@@ -1308,6 +1333,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 								panel.fileFinder.selectedEntry,
 								panel.fileFinder.selectedEntryChanged);
 
+			// @todo: may be advisable to update this whole mechanism to be done by the UI system?
+			// keyboard key events would be sent to UI and it would figure out the next element to select in a list
+			// setting it as the hotboxkey in the process?
 			if panel.fileFinder.selectedEntryChanged then panel.fileFinder.selectedEntryChanged = false;
 
 			for rangeStart..rangeEnd {
@@ -1315,10 +1343,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 				if entry.sortKey == 0 continue;
 
-				// @todo: may be desirable to use the UI focus (hot/active) system for this?
-				entryFlags:UIBoxFlags = 0;
+				entryFlags:UIBoxFlags =	.DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND;
 				if it == panel.fileFinder.selectedEntry {
-					entryFlags |= .DRAW_BACKGROUND;
+					entryFlags |= .FOCUS_HOT;
 				}
 
 				entryBox := box(ui_key("entry##%", it), .{
@@ -1328,11 +1355,20 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						padding=padding_all(em(0.2)),
 						childLayoutAxis=.Y
 					},
-					palette=.{ background=style.backgroundLighter },
+					palette=.{ background=style.backgroundLight },
 				});
+
+				// we can now be the selected entry AND get hot effects
+				signal := signal_from_box(entryBox);
+				if signal.hoverEnter {
+					panel.fileFinder.selectedEntry = xx it;
+				}
+				if signal.pressed {
+					deferredCommands[pendingDeferredCommands] =.{panel, .[], file_finder_select_file};
+					pendingDeferredCommands += 1;
+				}
 				{
 					push_parent(entryBox); defer pop_parent();
-
 
 					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.handle.bucket_index, entry.handle.slot_index);
 					fileLabel := box(key, .{

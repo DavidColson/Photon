@@ -121,7 +121,7 @@ file_finder_reset :: (panel: *Panel) {
 	panel.activeDialog = .NONE;
 }
 
-file_finder_select_file :: (panel: *Panel) {
+file_finder_select_file :: (panel: *Panel, args: []string) {
 	finder := *panel.fileFinder;
 	entry := finder.fileList[finder.selectedEntry];
 	if entry.loaded {

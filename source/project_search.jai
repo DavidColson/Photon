@@ -70,7 +70,7 @@ project_search_reset :: (panel: *Panel) {
 	panel.activeDialog = .NONE;
 }
 
-project_search_open_result :: (using panel: *Panel) {
+project_search_open_result :: (using panel: *Panel, args: []string) {
 	searcher := *panel.projectSearcher;
 	
 	result := searcher.results[searcher.selectedEntry];

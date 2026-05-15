@@ -63,6 +63,8 @@ UILayoutData :: struct {
 // transient states like "onpressed" to be implemented better than now
 // also needs "double click" events
 UISignal :: struct {
+	hoverEnter: bool;
+	hoverExit: bool;
 	hovering: bool;
 	pressed: bool;
 	released: bool;
@@ -87,6 +89,8 @@ UIBoxFlags :: enum_flags {
 	FIXED_WIDTH;
 	FIXED_HEIGHT;
 	CLIP_CONTENTS;
+	FOCUS_HOT;
+	FOCUS_ACTIVE;
 }
 
 UIAxis :: enum {
@@ -158,6 +162,7 @@ UIState :: struct {
 	activeContextMenu: UIKey;
 	nextActiveContextMenu: UIKey;
 	hotBoxKey: UIKey;
+	hotBoxKeyLastFrame: UIKey;
 	activeBoxKey: UIKey;
 
 	frameIndex: u64;
@@ -302,11 +307,18 @@ signal_from_box :: (box: *UIBox) -> UISignal {
     x, y, success := get_mouse_pointer_position(window, false);
 	box_contains_cursor := !contains_point(blacklistRect, xx x, xx y) && contains_point(box.rect, xx x, xx y);
 	
-	if  box_contains_cursor {
+	if box_contains_cursor && uiState.hotBoxKey == ui_key_nil {
 		signal.hovering = true;
 		if box.flags & .MOUSE_CLICKABLE {
 			uiState.hotBoxKey = box.key;
 		}
+
+		if uiState.hotBoxKeyLastFrame != box.key {
+			signal.hoverEnter = true;
+		}
+	}
+	else if uiState.hotBoxKeyLastFrame == box.key {
+		signal.hoverExit = true;
 	}
 
 	for uiState.events {
@@ -391,6 +403,7 @@ begin_ui :: () {
 	uiState.rootbox = box(ui_key_nil, .{
 		layout=.{childLayoutAxis=.Y, width=fixed(xx windowWidth), height=fixed(xx windowHeight)},
 	}); 
+	uiState.hotBoxKeyLastFrame = uiState.hotBoxKey;
 	uiState.hotBoxKey = ui_key_nil;
 	uiState.tooltip = null;
 	push_parent(uiState.rootbox);
@@ -856,10 +869,14 @@ render_ui_recursive :: (box: *UIBox) {
 	if box.flags & .DRAW_BACKGROUND {
 		color := box.palette.background;
 
-		if box.flags & .DRAW_HOT_EFFECTS && uiState.hotBoxKey != ui_key_nil && box.key == uiState.hotBoxKey {
+		if (box.flags & .DRAW_HOT_EFFECTS && 
+			(uiState.hotBoxKey != ui_key_nil && box.key == uiState.hotBoxKey))
+			|| box.flags & .FOCUS_HOT {
 			color = box.palette.hot;
 		}
-		if box.flags & .DRAW_ACTIVE_EFFECTS && uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey {
+		if (box.flags & .DRAW_ACTIVE_EFFECTS &&
+			(uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey))
+			|| box.flags & .FOCUS_ACTIVE {
 			color = box.palette.active;
 		}
 

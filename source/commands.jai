@@ -1223,11 +1223,11 @@ dialog_action_item :: (using panel: *Panel, args: []string) {
 		case .FILESYSTEM_NAVIGATOR;
 			filesystem_nav_action_item(panel, args);
 		case .FILE_FINDER;
-			file_finder_select_file(panel);
+			file_finder_select_file(panel, args);
 		case .SEARCH;
 			confirm_document_search(panel, args);
 		case .PROJECT_SEARCH;
-			project_search_open_result(panel);
+			project_search_open_result(panel, args);
 	}
 }
 
