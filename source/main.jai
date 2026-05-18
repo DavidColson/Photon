@@ -32,6 +32,7 @@ style : struct {
 	textSecondary := #run hex_to_color_vec4("5C6370");
 	textHighlight := #run hex_to_color_vec4("7e90bd");
 	textSelection := #run hex_to_color_vec4("434d60");
+	textSelection2 := #run hex_to_color_vec4("8c262e"); // used for highlights in search dialogs
 
 	borders := #run hex_to_color_vec4("5C6476");
 
@@ -1075,16 +1076,11 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					}
 				}
 				else {
-
-					// @todo: may be desirable to use the UI focus (hot/active) system for this?
-					entryFlags:UIBoxFlags = 0;
-					if it == panel.filesystemNav.selectedItem {
-						entryFlags |= .DRAW_BACKGROUND;
-					}
-
+					selected := it == panel.filesystemNav.selectedItem;
 					entryBox := box(ui_key("directoryItem##%", it), .{
-						flags=entryFlags, layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
-						palette=.{ background=style.backgroundLighter },
+						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
+						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
+						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 					});
 					{
 						push_parent(entryBox); defer pop_parent();
@@ -1180,29 +1176,23 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 			for rangeStart..rangeEnd {
 				searchResult := panel.projectSearcher.results[it];
-
 				selected := it == panel.projectSearcher.selectedEntry;
-				entryFlags:UIBoxFlags =	.DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND;
-				if selected {
-					entryFlags |= .FOCUS_HOT;
-				}
 
 				entryBox := box(ui_key("entry##%", it), .{
-					flags=entryFlags, layout=.{
+					flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
+					layout=.{
 						width=grow(),
 						height=fixed(elementHeight),
 						childLayoutAxis=.X,
 					},
-					palette=.{ background=style.backgroundLight },
+					palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 				});
 				signal := signal_from_box(entryBox);
-				if signal.hoverEnter {
-					panel.projectSearcher.selectedEntry = xx it;
-				}
 				if signal.pressed {
 					deferredCommands[pendingDeferredCommands] =.{panel, .[], project_search_open_result};
 					pendingDeferredCommands += 1;
 				}
+
 				{
 					push_parent(entryBox); defer pop_parent();
 
@@ -1245,18 +1235,26 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 					key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum+1, it);
 					lineNumLabel := box(key1, .{
-						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-						layout=.{ width=text_content(), height=grow() },
+						flags=.DRAW_TEXT,
+						layout=.{ width=fixed(em(2.0)), height=grow() },
 						font=fontCode,
+						textAlignment=.RIGHT,
 						palette=.{ background= ifx selected then style.backgroundLighter else style.backgroundMid },
 					});
 
-					key2 := ui_key("%##searcherResult%", trim_left(searchResult.matchLine), it);
+					color := style.backgroundMid;
+					if selected {
+						color = style.backgroundLighter;
+					}
+					if signal.hovering {
+						color = style.hotHighlight;
+					}
+					key2 := ui_key("##searcherResult%", it);
 					searchResultLabel := box(key2, .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=grow(), height=grow() },
 						font=fontCode,
-						palette=.{ background= ifx selected then style.backgroundLighter else style.backgroundMid },
+						palette=.{ background=color },
 					});
 				
 					searchResultLabel.customDrawFunction = custom_draw_search_result;
@@ -1335,40 +1333,30 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 								panel.fileFinder.selectedEntry,
 								panel.fileFinder.selectedEntryChanged);
 
-			// @todo: may be advisable to update this whole mechanism to be done by the UI system?
-			// keyboard key events would be sent to UI and it would figure out the next element to select in a list
-			// setting it as the hotboxkey in the process?
 			if panel.fileFinder.selectedEntryChanged then panel.fileFinder.selectedEntryChanged = false;
 
 			for rangeStart..rangeEnd {
 				entry := panel.fileFinder.fileList[it];
+				selected := it == panel.fileFinder.selectedEntry;
 
 				if entry.sortKey == 0 continue;
 
-				entryFlags:UIBoxFlags =	.DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND;
-				if it == panel.fileFinder.selectedEntry {
-					entryFlags |= .FOCUS_HOT;
-				}
-
 				entryBox := box(ui_key("entry##%", it), .{
-					flags=entryFlags, layout=.{
+					flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
+					layout=.{
 						width=grow(),
 						height=fixed(elementHeight),
 						padding=padding_all(em(0.2)),
 						childLayoutAxis=.Y
 					},
-					palette=.{ background=style.backgroundLight },
+					palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 				});
 
-				// we can now be the selected entry AND get hot effects
-				signal := signal_from_box(entryBox);
-				if signal.hoverEnter {
-					panel.fileFinder.selectedEntry = xx it;
-				}
-				if signal.pressed {
+				if signal_from_box(entryBox).pressed {
 					deferredCommands[pendingDeferredCommands] =.{panel, .[], file_finder_select_file};
 					pendingDeferredCommands += 1;
 				}
+
 				{
 					push_parent(entryBox); defer pop_parent();
 
@@ -1482,13 +1470,6 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 custom_draw_search_result :: (box: *UIBox, udata: *void) {
 	searchResult:*Project.SearchResult = cast(*Project.SearchResult)udata;
 
-	// draw background
-	submit_instance(.{
-		dstRect = box.rect,
-		color = box.palette.background,
-		cornerRadii = box.cornerRadius,
-	});
-
 	// todo
 	// Draw a selection highlight if selected
 	// syntax highlight the line
@@ -1516,7 +1497,7 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 			matchEndX - matchStartX,
 			xx metrics.lineSpacing
 		},
-		color = style.backgroundLight,
+		color = style.textSelection2,
 		cornerRadii = box.cornerRadius,
 	});
 
