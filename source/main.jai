@@ -1181,8 +1181,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			for rangeStart..rangeEnd {
 				searchResult := panel.projectSearcher.results[it];
 
+				selected := it == panel.projectSearcher.selectedEntry;
 				entryFlags:UIBoxFlags =	.DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND;
-				if it == panel.projectSearcher.selectedEntry {
+				if selected {
 					entryFlags |= .FOCUS_HOT;
 				}
 
@@ -1247,7 +1248,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=grow() },
 						font=fontCode,
-						palette=.{ text=style.textSecondary, background=style.backgroundMid }
+						palette=.{ background= ifx selected then style.backgroundLighter else style.backgroundMid },
 					});
 
 					key2 := ui_key("%##searcherResult%", trim_left(searchResult.matchLine), it);
@@ -1255,8 +1256,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=grow(), height=grow() },
 						font=fontCode,
-						palette=.{ background=style.backgroundMid },
+						palette=.{ background= ifx selected then style.backgroundLighter else style.backgroundMid },
 					});
+				
 					searchResultLabel.customDrawFunction = custom_draw_search_result;
 					searchResultLabel.customDrawUdata = cast(*void, *panel.projectSearcher.results[it]);
 				}
