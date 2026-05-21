@@ -413,6 +413,7 @@ end_ui :: () {
 	// yeet any unused boxes
 	for uiState.boxTable {
 		if it.lastTouchedFrame < uiState.frameIndex || it.key == ui_key_nil {
+			if it.key == uiState.activeBoxKey then uiState.activeBoxKey = ui_key_nil;
 			table_remove(*uiState.boxTable, it.key);
 			linked_list_insert(*uiState.freeListHead, *uiState.freeListTail, uiState.freeListTail, it);
 		}

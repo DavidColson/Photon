@@ -1189,6 +1189,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				});
 				signal := signal_from_box(entryBox);
 				if signal.pressed {
+					panel.projectSearcher.selectedEntry = xx it;
 					deferredCommands[pendingDeferredCommands] =.{panel, .[], project_search_open_result};
 					pendingDeferredCommands += 1;
 				}
@@ -1353,6 +1354,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				});
 
 				if signal_from_box(entryBox).pressed {
+					panel.fileFinder.selectedEntry = xx it;
 					deferredCommands[pendingDeferredCommands] =.{panel, .[], file_finder_select_file};
 					pendingDeferredCommands += 1;
 				}
