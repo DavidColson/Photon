@@ -899,19 +899,21 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 			for rangeStart..rangeEnd {
 				commandEntry := panel.commandPicker.filteredCommandList[it];
+				selected := it == panel.commandPicker.selectedCommand;
 
 				if commandEntry.sortKey == 0 continue;
 
-				// @todo: may be desirable to use the UI focus (hot/active) system for this?
-				entryFlags:UIBoxFlags = 0;
-				if it == panel.commandPicker.selectedCommand {
-					entryFlags |= .DRAW_BACKGROUND;
-				}
-
 				entryBox := box(ui_key("commandEntry##%", it), .{
-					flags=entryFlags, layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
-					palette=.{ background=style.backgroundLighter },
+					flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
+					layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
+					palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 				});
+				signal := signal_from_box(entryBox);
+				if signal.pressed {
+					panel.commandPicker.selectedCommand = xx it;
+					deferredCommands[pendingDeferredCommands] =.{panel, .[], command_picker_execute_command};
+					pendingDeferredCommands += 1;
+				}
 				{
 					push_parent(entryBox); defer pop_parent();
 
@@ -1058,7 +1060,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					append(*builder, input_field_get_text(*panel.filesystemNav.input));
 
 					entryBox := box(ui_key("savefileItem"), .{
-						flags=.DRAW_BACKGROUND,
+						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
 						layout=.{
 							width=grow(),
 							height=fixed(elementHeight),
@@ -1067,6 +1069,12 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						},
 						palette=.{ background=style.backgroundLighter },
 					});
+					signal := signal_from_box(entryBox);
+					if signal.pressed {
+						panel.filesystemNav.selectedItem = xx it;
+						deferredCommands[pendingDeferredCommands] =.{panel, .[], filesystem_nav_action_item};
+						pendingDeferredCommands += 1;
+					}
 					{
 						push_parent(entryBox); defer pop_parent();
 						itemLabel := box(ui_key("%", builder_to_string(*builder,,temp)), .{
@@ -1082,6 +1090,12 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
 						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 					});
+					signal := signal_from_box(entryBox);
+					if signal.pressed {
+						panel.filesystemNav.selectedItem = xx it;
+						deferredCommands[pendingDeferredCommands] =.{panel, .[], filesystem_nav_action_item};
+						pendingDeferredCommands += 1;
+					}
 					{
 						push_parent(entryBox); defer pop_parent();
 
