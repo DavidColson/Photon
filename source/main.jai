@@ -2473,6 +2473,7 @@ staticLanguageData :: Language.[
 	.{name="jai", url="https://github.com/constantitus/tree-sitter-jai.git", revision="e15938a94c931662aa3e38cc07dfb98cf7436a90"},
 	.{name="cpp", url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
 	.{name="c", url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
+	.{name="py", url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
 ];
 
 LanguageFunc :: #type () -> *TSLanguage #c_call;
