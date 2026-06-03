@@ -863,6 +863,7 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
 	assert(doc.editOpen, "Cannot do deletion without starting an edit");
 	assert(!doc.isCopy, "You must not edit copies!!!");
+	assert(atOffset >= 0, "Don't delete before the document starts");
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 
@@ -1209,7 +1210,10 @@ get_size :: (doc: *Document) -> s64 {
 shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.IterateDirection) -> s64 {
 	// if offset is sat in between \r and \n, that is \r is the char behind it, then shift
 	// in the desired direction
-	if direction == .FORWARD {
+	if offset == 0 {
+		return offset;
+	}
+	else if direction == .FORWARD {
 		if get_char_at(doc, max(offset-1, 0)) == #char "\r" {
 			return offset + 1;
 		}
@@ -1889,6 +1893,10 @@ make_piece :: (pieceTree: *Document, t: string) -> Document.Piece {
 
 	text := copy_string(t,, buffer_allocator(pieceTree));
 	currentBufferEnd := pieceTree.buffers[1].text.count;
+	// this case occurs when the file is empty and someone types in the first every bytes
+	if pieceTree.buffers[1].text.data == null {
+		pieceTree.buffers[1].text.data = text.data;
+	}
 	pieceTree.buffers[1].text.count = pieceTree.buffers[1].text.count + text.count;
 
 	// count line endings
