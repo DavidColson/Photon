@@ -1691,6 +1691,9 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			if type == "ERROR" then continue;
 
 			success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
+			// TODO: it occurs to me that if we have several captures per match, we actually are being wasteful here are we not?
+			// don't we evaluate a query predicate for a given match several times over?
+			// investigate if this is a real issue
 			if evaluate_query_predicates(*panel.document.language.highlightsQuery, tsMatch, panel.document) {
 				if highlights.count > 0 {
 					if highlights[highlights.count-1].start == startByte {

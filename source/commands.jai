@@ -726,10 +726,58 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 	return newCursor;
 }
 
+calculate_indentation_at_location :: (document: *Document, locationStart: s64, locationEnd: s64) -> s64 {
+	queryCursor := ts_query_cursor_new();
+
+	ts_query_cursor_set_byte_range(queryCursor, xx locationStart, xx locationEnd);
+
+	// if you want to know the S-expression at this location use descent for byte range and print the node you get back
+	// this is useful for debugging indent queries
+	// treeNode := ts_tree_root_node(panel.document.tsTree);
+	// treeNode = ts_node_descendant_for_byte_range(treeNode, xx locationStart, xx locationEnd);
+	// log("%", to_string(ts_node_string(treeNode));
+
+	ts_query_cursor_exec(queryCursor, document.language.indentQuery.query, ts_tree_root_node(document.tsTree));
+
+	// TODO: generate a library of debug functions for inspecting treesitter objects
+	// - [ ] Nodes
+	// - [ ] Captures
+	// - [ ] Patterns
+
+	numIndents := 0;
+	while true {
+		tsMatch: TSQueryMatch;
+		captureId: u32;
+		result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
+		if result == false then break;
+		capture := tsMatch.captures[captureId];
+
+		captureName: string;
+		len:u32;
+		captureName.data = ts_query_capture_name_for_id(document.language.indentQuery.query, captureId, *len);
+		captureName.count = xx len;
+
+		if captureName == "indent" {
+			numIndents += 1;
+		}
+		if captureName == "outdent" {
+			numIndents -= 1;
+		}
+	}
+	
+	ts_query_cursor_delete(queryCursor);
+	return numIndents;
+}
+
 new_line_below :: (using panel: *Panel, args: []string) {
 	goto_line_end(panel, args);
 	enter_insert_mode_start(panel, args);
 	insert_mode_line_break(panel, args);
+
+	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	for 0..numIndents-1 {
+		insert_tab_character(panel, args);
+	}
 }
 
 new_line_above :: (using panel: *Panel, args: []string) {
