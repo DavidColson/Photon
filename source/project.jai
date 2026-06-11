@@ -583,7 +583,7 @@ knownExtensionsTable :: #run -> Table(string, KnownExtensionFileType) {
         "jai", "c", "cpp", "h", "hpp", "cc", "cs", "d", "txt", "md", "ini", "csv", "go", "log",
         "bat", "sql", "py", "m", "html", "xml", "plist", "js", "jsx", "ts", "tsx", "json", "yml",
         "yaml", "toml", "zig", "odin", "photon-project", "lua", "luau", "inl", "cmake", "prl",
-		"prl", "ps1", "qml", "vcxproj", "sln", "props", "cxx", "css", "decl", "groovy", 
+		"prl", "ps1", "qml", "vcxproj", "sln", "props", "cxx", "css", "decl", "groovy", "scm", 
     ];
     for textFiles  table_add(*table, it, .TEXT);
 
