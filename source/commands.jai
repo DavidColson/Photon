@@ -856,6 +856,41 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 	panel_scroll_to_cursor(panel);
 }
 
+autoindent_line :: (using panel: *Panel, args: []string) {
+	// TODO: allow setting tabs or spaces, and tab width
+
+	begin_edit(document);
+	defer end_edit(document);
+
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
+
+	startLine := min(headCoord.line, anchorCoord.line);
+	endLine := max(headCoord.line, anchorCoord.line);
+
+	for lineNumber: startLine..endLine {
+		lineContent := get_line_content(panel.document, lineNumber);
+	
+		// delete any existing indentation
+		for lineContent.text {
+			if it != #char "\t" && it != #char " " {
+				// cursor.head = lineContent.startByteOffset + it_index;
+				// cursor.anchor = lineContent.startByteOffset;
+				delete(document, lineContent.startByteOffset, it_index);
+				break;
+			}
+		}
+	
+		// Calculate the correct indentation and insert it
+		numIndents := calculate_indentation_at_location(document, lineContent.startByteOffset, lineContent.startByteOffset);
+		for 0..numIndents-1 {
+			insert(document, lineContent.startByteOffset, "\t");
+		}
+	}
+
+	panel_scroll_to_cursor(panel);
+}
+
 indent_line :: (using panel: *Panel, args: []string) {
 	begin_edit(document);
 	defer end_edit(document);

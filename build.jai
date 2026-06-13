@@ -26,35 +26,33 @@ BUILD_SHIPPING_DIR :: "build/shipping";
 
 Build :: ()
 {
-    w := compiler_create_workspace();
+	w := compiler_create_workspace();
 
 	// @todo, create build output when it does not exist
-    target_options := get_build_options(w);
-    args := target_options.compile_time_command_line;
+	target_options := get_build_options(w);
+	args := target_options.compile_time_command_line;
     
-    set_working_directory(#filepath);
+	set_working_directory(#filepath);
 	target_options.output_executable_name = "Photon";
 	set_build_options(target_options, w);
 	set_build_options_dc(.{do_output=false});
     
 	buildType: BuildType = .DEBUG;
-    for arg: args
-    {
-    	if arg ==
-    	{
-    		case "-optimized_debug";
-    			buildType = .OPTIMIZED_DEBUG;
-    		case "shipping"; // use like jai build.jai - shipping
-    			buildType = .SHIPPING;
-    	}
-    }
+	for arg: args {
+		if arg == {
+			case "-optimized_debug";
+				buildType = .OPTIMIZED_DEBUG;
+			case "shipping"; // use like jai build.jai - shipping
+				buildType = .SHIPPING;
+		}
+	}
 
 
-    intercept_flags: Intercept_Flags;
+	intercept_flags: Intercept_Flags;
 	res, pluginsToCreate, remaining := parse_plugin_arguments(args);
 	plugins : [..]*Metaprogram_Plugin;
 	init_plugins(pluginsToCreate, *plugins , w);
-    for plugins if it.before_intercept it.before_intercept(it, *intercept_flags);
+	for plugins if it.before_intercept it.before_intercept(it, *intercept_flags);
     
 	Compiler.compiler_begin_intercept(w, intercept_flags);
 
@@ -99,8 +97,8 @@ Build :: ()
 	}
 	Compiler.compiler_end_intercept(w);
 
-    for plugins if it.finish   it.finish  (it);
-    for plugins if it.shutdown it.shutdown(it);
+	for plugins if it.finish   it.finish  (it);
+	for plugins if it.shutdown it.shutdown(it);
 
 	// Edit the exe and do any other bits we need
 	build_opts := get_build_options(w);
@@ -114,8 +112,8 @@ Build :: ()
 	manifest_options: Windows_Resources.Manifest_Options;
 	success := Windows_Resources.add_manifest_to_executable(exe_name, manifest_options);
 	if !success {
-        log_error("ERROR: Couldn't add manifest to executable '%'\n", exe_name);
-    }
+		log_error("ERROR: Couldn't add manifest to executable '%'\n", exe_name);
+	}
 
 	// copy stuff to output
 	copy_file("modules/treesitter/windows/treesitter.dll", tprint("%/treesitter.dll", build_opts.output_path));
@@ -125,9 +123,9 @@ Build :: ()
 		copy_directory("fonts", tprint("%/fonts", BUILD_SHIPPING_DIR));
 	    visitor :: (info: *File_Visit_Info, args: *void) {
 	        if info.is_directory {
-                info.descend_into_directory = false;
+				info.descend_into_directory = false;
 				return;
-            }
+			}
 			if path_extension(info.full_name) == "dll" {
 		        copy_file(info.full_name, tprint("%/grammars/%", BUILD_SHIPPING_DIR, info.short_name));
 			}
