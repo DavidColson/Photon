@@ -563,34 +563,33 @@ select_register :: (using panel: *Panel, args: []string) {
 	registers.selectedRegister = args[0][0];
 }
 
-delete_cursor_range :: (doc: *Document, start: s64, end: s64) -> s64 {
-	if start < end {
-		startOffset := shift_offset_line_endings(doc, start, .REVERSE);
-		endOffset := shift_offset_line_endings(doc, end + 1, .FORWARD);
-		delete(doc, startOffset, endOffset-startOffset);
-		return start;
+delete_cursor_range :: (doc: *Document, locationA: s64, locationB:s64) -> s64 {
+	start := min(locationA, locationB);
+	end := max(locationA, locationB);
+
+	startOffset := shift_offset_line_endings(doc, start, .REVERSE);
+	endOffset := shift_offset_line_endings(doc, end + 1, .FORWARD);
+	delete(doc, startOffset, endOffset-startOffset);
+	return start;
+}
+
+yank_range_to_register :: (doc: *Document, locationA: s64, locationB:s64) {
+	start := min(locationA, locationB);
+	end := max(locationA, locationB);
+
+	text: [..]u8;
+	iterator := make_iterator(doc, start);
+	for :raw_bytes iterator {
+		array_add(*text, it,,temp);
+		if it != #char "\r" && iterator.offset >= end then break;
 	}
-	else {
-		startOffset := shift_offset_line_endings(doc, end, .REVERSE);
-		endOffset := shift_offset_line_endings(doc, start + 1, .FORWARD);
-		delete(doc, startOffset, endOffset-startOffset);
-		return end;
-	}
+	textStr := string.{text.count, text.data};
+	write_register(registers.selectedRegister, textStr);
 }
 
 delete_selection :: (using panel: *Panel, args: []string) {
 	// copy the selection into a register before deleting it
-	rangeStart := min(cursor.head, cursor.anchor);
-	rangeEnd := max(cursor.head, cursor.anchor);
-
-	text: [..]u8;
-	iterator := make_iterator(document, rangeStart);
-	for :raw_bytes iterator {
-		array_add(*text, it,,temp);
-		if it != #char "\r" && iterator.offset >= rangeEnd then break;
-	}
-	textStr := string.{text.count, text.data};
-	write_register(registers.selectedRegister, textStr);
+	yank_range_to_register(document, cursor.head, cursor.anchor);
 
 	begin_edit(document);
 	defer end_edit(document);
@@ -601,26 +600,41 @@ delete_selection :: (using panel: *Panel, args: []string) {
 }
 
 change_selection :: (using panel: *Panel, args: []string) {
-	delete_selection(panel, args);
+	yank_range_to_register(document, cursor.head, cursor.anchor);
+
+	rangeEnd := max(cursor.head, cursor.anchor);
+	endChar := get_char_at(document, rangeEnd);
+	linewiseChange := endChar == #char "\n" || endChar == #char "\r";
+	
 	enter_insert_mode_start(panel, args);
+
+	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
+	cursor.anchor = cursor.head;
+
+	if linewiseChange {
+		// Calculate the correct indentation and insert it
+		numIndents := calculate_indentation_at_location(document, cursor.head, cursor.head);
+		for 0..numIndents-1 {
+			insert_tab_character(panel, args);
+		}
+
+		// reinsert a line ending
+		textToInsert := "\r\n";
+		if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+			textToInsert = "\n";
+		}
+		insert_mode_insert_string(textToInsert);
+		cursor.head -= textToInsert.count;
+		cursor.anchor -= textToInsert.count;
+	}
 }
 
 yank_selection :: (using panel: *Panel, args: []string) {
-	// read the selection from the document
-	// @todo: it may be useful to pull out this snippet as a generic "read range from document"
 	rangeStart := min(cursor.head, cursor.anchor);
 	rangeEnd := max(cursor.head, cursor.anchor);
 
-	text: [..]u8;
-	iterator := make_iterator(document, rangeStart);
-	for :raw_bytes iterator {
-		array_add(*text, it,,temp);
-		if it != #char "\r" && iterator.offset >= rangeEnd then break;
-	}
-	textStr := string.{text.count, text.data};
+	yank_range_to_register(document, rangeStart, rangeEnd);
 	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
-
-	write_register(registers.selectedRegister, textStr);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -772,7 +786,12 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 new_line_below :: (using panel: *Panel, args: []string) {
 	goto_line_end(panel, args);
 	enter_insert_mode_start(panel, args);
-	insert_mode_line_break(panel, args);
+
+	textToInsert := "\r\n";
+	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+		textToInsert = "\n";
+	}
+	insert_mode_insert_string(textToInsert);
 
 	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
 	for 0..numIndents-1 {
@@ -785,13 +804,25 @@ new_line_above :: (using panel: *Panel, args: []string) {
 	panel.cursor.anchor = panel.cursor.head;
 	enter_insert_mode_start(panel, args);
 
-	insert_mode_line_break(panel, args);
+	textToInsert := "\r\n";
+	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+		textToInsert = "\n";
+	}
+	insert_mode_insert_string(textToInsert);
+
 	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
 		panel.cursor.head -= 1;
 	}
 	else {
 		panel.cursor.head -= 2;
 	}
+
+	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	for 0..numIndents-1 {
+		insert_tab_character(panel, args);
+	}
+
+	panel.cursor.anchor = panel.cursor.head;
 }
 
 // TODO: should be defined alongside the language
@@ -874,8 +905,6 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 		// delete any existing indentation
 		for lineContent.text {
 			if it != #char "\t" && it != #char " " {
-				// cursor.head = lineContent.startByteOffset + it_index;
-				// cursor.anchor = lineContent.startByteOffset;
 				delete(document, lineContent.startByteOffset, it_index);
 				break;
 			}
@@ -1159,6 +1188,11 @@ insert_mode_line_break :: (using panel: *Panel, args: []string) {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
+
+	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	for 0..numIndents-1 {
+		insert_tab_character(panel, args);
+	}
 }
 
 insert_tab_character :: (using panel: *Panel, args: []string) {
