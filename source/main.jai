@@ -1828,6 +1828,12 @@ evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, doc
 	predicateList := table_find_pointer(*query.predicates, tsMatch.pattern_index);
 	if predicateList == null then return true;
 
+	// I want to make it clear cause I keep fucking this up, but captureIndex, as in capture.index is the
+	// index of the capture in the query source
+	// get_next_capture on a query returns an index which is an index into the list of captures of the match
+	// these indices are NOT the same
+	// here we use capture.index because this is what the predicate source specifies. DO NOT MIX IT UP
+
 	get_capture_content :: (tsMatch: TSQueryMatch, document: *Document, captureIndex: u32) -> string {
 		capture: TSQueryCapture;
 		for 0..tsMatch.capture_count-1 {
@@ -1836,7 +1842,7 @@ evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, doc
 				break;
 			}
 		}
-		
+	
 		startByte := ts_node_start_byte(capture.node);
 		endByte := ts_node_end_byte(capture.node);
 
@@ -1850,12 +1856,27 @@ evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, doc
 		return captureText;
 	}
 
+	get_capture_kind :: (tsMatch: TSQueryMatch, captureIndex: u32) -> string {
+		capture: TSQueryCapture;
+		for 0..tsMatch.capture_count-1 {
+			if tsMatch.captures[it].index == captureIndex {
+				capture = tsMatch.captures[it];
+				break;
+			}
+		}
+		nodeKind := to_string(ts_node_type(capture.node));
+		return nodeKind;
+	}
+
 	for predicate: predicateList.* {
 		if predicate.type == {
 			case .MATCH;
 				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
 				matched, captures := match(captureText, predicate.regex,,temp);
 				if !matched return false ^ predicate.not;
+			case .EQ_KIND;
+				captureKind := get_capture_kind(tsMatch, predicate.captureIndex1);
+				if captureKind != predicate.basicStr then return false ^ predicate.not;
 			case .ANY_OF;
 				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
 				matched := false;
@@ -2442,6 +2463,8 @@ Language :: struct {
 			EQ_TEXT;
 			EQ_CAPTURE;
 			ANY_OF;
+			EQ_KIND;
+			SET;
 		}
 		type: Type;
 		not: bool;
@@ -2454,6 +2477,8 @@ Language :: struct {
 
 	Query :: struct {
 		query: *TSQuery;
+		// this is indexed by the pattern index
+		// so for each pattern there is some number of predicates
 		predicates: Table(u32, [..]Predicate);
 	}
 	highlightsQuery: Query;
@@ -2657,11 +2682,44 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 						regex.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
 						regex.count = len;
 
-						success, captures := match("HELLO", regex);
 						matchPredicate.regex = compile(regex);
 
 						predicateList, _ := find_or_add(*query.predicates, patternIndex);
 						array_add(predicateList, matchPredicate);
+						i += 1;
+					}
+					else if predicateName == "not-kind-eq?" || predicateName == "kind-eq?" {
+						kindEqPredicate: Language.Predicate;
+						kindEqPredicate.type = .EQ_KIND;
+
+						if contains(predicateName, "not") {
+							kindEqPredicate.not = true;
+						}
+
+						// expect capture, then string
+						i += 1;
+						if steps[i].type != .Capture {
+							log("Expected capture as first argument of kind eq predicate");
+							continue patternIndex;
+						}
+
+						kindEqPredicate.captureIndex1 = steps[i].value_id;
+
+						// now grab the kind string
+						i += 1;
+						if steps[i].type != .String {
+							log("Expected string as second argument of kind eq predicate");
+							continue patternIndex;
+						}
+
+						kind:string;
+						len: u32;
+						kind.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
+						kind.count = len;
+						kindEqPredicate.basicStr = kind;
+
+						predicateList, _ := find_or_add(*query.predicates, patternIndex);
+						array_add(predicateList, kindEqPredicate);
 						i += 1;
 					}
 					else if predicateName == "any-of?" || predicateName == "not-any-of?" {
@@ -2738,9 +2796,54 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 						array_add(predicateList, eqPredicate);
 						i += 1;
 					}
+					else if predicateName == "set!" {
+						// so what the fuck does this do?
+						
+						// You're given two parameters
+						// a name, and then a string argument
+						// You want to store this as metadata in the predicate
+						// such that if someone matches this pattern, then the metadata will have this information
+						// the metadata is basically a map of string to string
+						setPredicate: Language.Predicate;
+						setPredicate.type = .SET;
+
+						// expect string, then string
+						i += 1;
+						if steps[i].type != .String {
+							log("Expected string as first argument of set predicate");
+							continue patternIndex;
+						}
+
+						metaDataKey:string;
+						len: u32;
+						metaDataKey.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
+						metaDataKey.count = len;
+						setPredicate.basicStr = metaDataKey;
+
+						// now grab the value
+						i += 1;
+						if steps[i].type != .String {
+							log("Expected string as second argument of set predicate");
+							continue patternIndex;
+						}
+
+						metaDataValue:string;
+						metaDataValue.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
+						metaDataValue.count = len;
+						array_add(*setPredicate.strings, metaDataValue);
+
+						predicateList, _ := find_or_add(*query.predicates, patternIndex);
+						array_add(predicateList, setPredicate);
+						i += 1;
+					}
+					else {
+						log("Unknown predicate type %", predicateName);
+						break;
+					}
 				}
 				else if steps[i].type == .Done {
-					break;
+					i += 1;
+					continue;
 				}
 				else {
 					log("Unexpected element in predicate");
