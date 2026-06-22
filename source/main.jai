@@ -1531,38 +1531,34 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 		tree := ts_parser_parse_string(parser, null, line.data, xx line.count);
 		defer ts_tree_delete(tree);
 
-		queryCursor := ts_query_cursor_new(); // @todo: delete?
-		treeNode := ts_tree_root_node(tree);
-		ts_query_cursor_exec(queryCursor, language.highlightsQuery.query, treeNode);
+		query_start(*language.highlightsQuery, ts_tree_root_node(tree), 0, line.count);
 
 		// @TODO: reuse this code with the usual code drawing stuff
+		// move the whole block here to the languages file where it can be a polymorph
 		highlights: [..]Highlight;
 		highlights.allocator = temp;
 
 		// collect all the highlights for the region of code we must render
 		while true {
-			tsMatch: TSQueryMatch;
-			captureId: u32;
-			result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
+			result, capture := query_next(*language.highlightsQuery, line);
 			if result == false then break;
-			capture := tsMatch.captures[captureId];
 
 			startByte := ts_node_start_byte(capture.node);
 			endByte := ts_node_end_byte(capture.node);
 			type := to_string(ts_node_grammar_type(capture.node));
+
 			if type == "ERROR" then continue;
 
 			success, highlightType := table_find(*language.captureToHighlight, capture.index);
-			if evaluate_query_predicates(*language.highlightsQuery, tsMatch, line) {
-				if highlights.count > 0 {
-					if highlights[highlights.count-1].start == startByte {
-						// override the previous range if there's a newer (better) one
-						highlights[highlights.count-1] = .{startByte, endByte, highlightType};
-						continue;
-					}
+
+			if highlights.count > 0 {
+				if highlights[highlights.count-1].start == startByte {
+					// override the previous range if there's a newer (better) one
+					highlights[highlights.count-1] = .{startByte, endByte, highlightType};
+					continue;
 				}
-				array_add(*highlights, .{startByte, endByte, highlightType});
 			}
+			array_add(*highlights, .{startByte, endByte, highlightType});
 		}
 
 		currentHighlightIndex := 0;
@@ -1662,27 +1658,21 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 	// Draw code
 	if panel.document.language && panel.document.tsTree && panel.document.language.highlightsQuery.query {
-		queryCursor := ts_query_cursor_new();
 		rangeStartByte := linesOnScreen[0].startByteOffset;
 		rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
-
-		ts_query_cursor_set_byte_range(queryCursor, xx rangeStartByte, xx rangeEndByte);
 
 		treeNode := ts_tree_root_node(panel.document.tsTree);
 		treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
 
-		ts_query_cursor_exec(queryCursor, panel.document.language.highlightsQuery.query, treeNode);
+		query_start(*panel.document.language.highlightsQuery, treeNode, rangeStartByte, rangeEndByte);
 
 		highlights: [..]Highlight;
 		highlights.allocator = temp;
 
 		// collect all the highlights for the region of code we must render
 		while true {
-			tsMatch: TSQueryMatch;
-			captureId: u32;
-			result := ts_query_cursor_next_capture(queryCursor, *tsMatch, *captureId);
+			result, capture := query_next(*panel.document.language.highlightsQuery, panel.document);
 			if result == false then break;
-			capture := tsMatch.captures[captureId];
 
 			startByte := ts_node_start_byte(capture.node);
 			endByte := ts_node_end_byte(capture.node);
@@ -1691,19 +1681,15 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			if type == "ERROR" then continue;
 
 			success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
-			// TODO: it occurs to me that if we have several captures per match, we actually are being wasteful here are we not?
-			// don't we evaluate a query predicate for a given match several times over?
-			// investigate if this is a real issue
-			if evaluate_query_predicates(*panel.document.language.highlightsQuery, tsMatch, panel.document) {
-				if highlights.count > 0 {
-					if highlights[highlights.count-1].start == startByte {
-						// override the previous range if there's a newer (better) one
-						highlights[highlights.count-1] = .{startByte, endByte, highlightType};
-						continue;
-					}
+
+			if highlights.count > 0 {
+				if highlights[highlights.count-1].start == startByte {
+					// override the previous range if there's a newer (better) one
+					highlights[highlights.count-1] = .{startByte, endByte, highlightType};
+					continue;
 				}
-				array_add(*highlights, .{startByte, endByte, highlightType});
 			}
+			array_add(*highlights, .{startByte, endByte, highlightType});
 		}
 
 		if queuePrintHighlightDebug {
@@ -1748,9 +1734,6 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			}
 			y += metrics.lineSpacing;
 		}
-
-		// potentially cheaper to reuse the same cursor?
-		ts_query_cursor_delete(queryCursor);
 	}
 	else {
 		// draw text with no highlighting
@@ -1822,131 +1805,6 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			y += metrics.lineSpacing;
 		}
 	}
-}
-
-evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, document: *Document) -> bool {
-	predicateList := table_find_pointer(*query.predicates, tsMatch.pattern_index);
-	if predicateList == null then return true;
-
-	// I want to make it clear cause I keep fucking this up, but captureIndex, as in capture.index is the
-	// index of the capture in the query source
-	// get_next_capture on a query returns an index which is an index into the list of captures of the match
-	// these indices are NOT the same
-	// here we use capture.index because this is what the predicate source specifies. DO NOT MIX IT UP
-
-	get_capture_content :: (tsMatch: TSQueryMatch, document: *Document, captureIndex: u32) -> string {
-		capture: TSQueryCapture;
-		for 0..tsMatch.capture_count-1 {
-			if tsMatch.captures[it].index == captureIndex {
-				capture = tsMatch.captures[it];
-				break;
-			}
-		}
-	
-		startByte := ts_node_start_byte(capture.node);
-		endByte := ts_node_end_byte(capture.node);
-
-		// need to find the text corresponding to this node
-		captureText := alloc_string(endByte-startByte,,temp);
-		iter := make_iterator(document, startByte,,temp);
-		for iter {
-			if it_index >= captureText.count break;
-			captureText[it_index] = it;
-		}
-		return captureText;
-	}
-
-	get_capture_kind :: (tsMatch: TSQueryMatch, captureIndex: u32) -> string {
-		capture: TSQueryCapture;
-		for 0..tsMatch.capture_count-1 {
-			if tsMatch.captures[it].index == captureIndex {
-				capture = tsMatch.captures[it];
-				break;
-			}
-		}
-		nodeKind := to_string(ts_node_type(capture.node));
-		return nodeKind;
-	}
-
-	for predicate: predicateList.* {
-		if predicate.type == {
-			case .MATCH;
-				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
-				matched, captures := match(captureText, predicate.regex,,temp);
-				if !matched return false ^ predicate.not;
-			case .EQ_KIND;
-				captureKind := get_capture_kind(tsMatch, predicate.captureIndex1);
-				if captureKind != predicate.basicStr then return false ^ predicate.not;
-			case .ANY_OF;
-				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
-				matched := false;
-				for predicate.strings {
-					if captureText == it then matched = true;
-				}
-				if !matched return false ^ predicate.not;
-			case .EQ_TEXT;
-				captureText := get_capture_content(tsMatch, document, predicate.captureIndex1);
-				if captureText != predicate.basicStr then return false ^ predicate.not;
-			case .EQ_CAPTURE;
-				captureText1 := get_capture_content(tsMatch, document, predicate.captureIndex1);
-				captureText2 := get_capture_content(tsMatch, document, predicate.captureIndex2);
-				if captureText1 != captureText2 then return false ^ predicate.not;
-			case;
-				return true;
-		}
-	}
-
-	// all predicates passed
-	return true;
-}
-
-evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, text: string) -> bool {
-	// @todo: very much duplicated with the above can we refactor??
-
-	predicateList := table_find_pointer(*query.predicates, tsMatch.pattern_index);
-	if predicateList == null then return true;
-
-	get_capture_content :: (tsMatch: TSQueryMatch, text: string, captureIndex: u32) -> string {
-		capture: TSQueryCapture;
-		for 0..tsMatch.capture_count-1 {
-			if tsMatch.captures[it].index == captureIndex {
-				capture = tsMatch.captures[it];
-				break;
-			}
-		}
-		startByte := ts_node_start_byte(capture.node);
-		endByte := ts_node_end_byte(capture.node);
-
-		return slice(text, startByte, endByte-startByte);
-	}
-
-	for predicate: predicateList.* {
-		if predicate.type == {
-			case .MATCH;
-				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
-				matched, captures := match(captureText, predicate.regex,,temp);
-				if !matched return false ^ predicate.not;
-			case .ANY_OF;
-				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
-				matched := false;
-				for predicate.strings {
-					if captureText == it then matched = true;
-				}
-				if !matched return false ^ predicate.not;
-			case .EQ_TEXT;
-				captureText := get_capture_content(tsMatch, text, predicate.captureIndex1);
-				if captureText != predicate.basicStr then return false ^ predicate.not;
-			case .EQ_CAPTURE;
-				captureText1 := get_capture_content(tsMatch, text, predicate.captureIndex1);
-				captureText2 := get_capture_content(tsMatch, text, predicate.captureIndex2);
-				if captureText1 != captureText2 then return false ^ predicate.not;
-			case;
-			return true;
-		}
-	}
-
-	// all predicates passed
-	return true;
 }
 
 draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontSize: int, textAreaX: float, textAreaY: float, linesOnScreen: []Document.LineContent, startVisibleLine: s64) {
@@ -2446,515 +2304,6 @@ Utf8_Char :: struct {
 	count: s32;
 }
 
-// Languages
-
-Language :: struct {
-	// note we allocate memory for this (arrays/tables)
-	// But it's intended this lives the whole duration of the program
-	// So we do not free it
-	name: string;
-	url: string;
-	revision: string;
-	treesitterLang: *TSLanguage;
-
-	Predicate :: struct {
-		Type :: enum {
-			MATCH;
-			EQ_TEXT;
-			EQ_CAPTURE;
-			ANY_OF;
-			EQ_KIND;
-			SET;
-		}
-		type: Type;
-		not: bool;
-		captureIndex1: u32;
-		captureIndex2: u32;
-		regex: Regexp;
-		basicStr: string;
-		strings: [..]string;
-	}
-
-	Query :: struct {
-		query: *TSQuery;
-		// this is indexed by the pattern index
-		// so for each pattern there is some number of predicates
-		predicates: Table(u32, [..]Predicate);
-	}
-	highlightsQuery: Query;
-	captureToHighlight: Table(u32, HighlightType);
-	indentQuery: Query;
-}
-
-HighlightType :: enum {
-	NONE;
-	FUNCTION;
-	KEYWORD;
-	VARIABLE;
-	CONSTANT;
-	STRING;
-	TYPE;
-	NAMESPACE;
-	COMMENT;
-	COUNT;
-}
-
-// should probably be in a config file or something?
-staticLanguageData :: Language.[
-	.{name="jai", url="https://github.com/constantitus/tree-sitter-jai.git", revision="e15938a94c931662aa3e38cc07dfb98cf7436a90"},
-	.{name="cpp", url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
-	.{name="c", url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
-	.{name="python", url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
-];
-
-LanguageFunc :: #type () -> *TSLanguage #c_call;
-languages: Table(string, Language);
-languagesMutex: Mutex;
-
-get_language :: (_languageName: string) -> bool, *Language {
-	languageName := _languageName;
-	// TODO: proper remap table!!!
-	if equal(languageName, "h") {
-		languageName = "cpp";
-	} 
-	if equal(languageName, "py") {
-		languageName = "python";
-	} 
-
-	if languageName.count == 0 return false, null;
-
-	staticLangData: Language;
-	supportsLang := false;
-	for staticLanguageData {
-		if it.name==languageName {
-			staticLangData = it;
-			supportsLang = true;
-			break;
-		}
-	}
-
-	if supportsLang == false {
-		return false, null;
-	}
-
-	lock(*languagesMutex);
-	lang, added := find_or_add(*languages, languageName);
-	unlock(*languagesMutex);
-	if !added {
-		return true, lang;
-	}
-
-	basePath := get_app_base_path();
-	libPath := tprint("%grammars/%.dll", basePath, languageName);
-	if !file_exists(libPath) {
-		return false, null;
-	}
-
-	// copy data from static lang stuff
-	lang.* = staticLangData;
-
-	// @todo: windows specific code here, need to move to platform_windows
-	grammarLib := LoadLibraryA(temp_c_string(libPath));
-
-	// Load the treesitter language structure
-	functionName := tprint("tree_sitter_%", languageName);
-	loadFunc := cast(LanguageFunc, GetProcAddress(grammarLib, temp_c_string(functionName)));
-	lang.treesitterLang = loadFunc();
-	
-	lang.highlightsQuery = load_query(lang, "highlights");
-	lang.indentQuery = load_query(lang, "indents");
-
-	// build mapping table for highlight captures
-	captureCount := ts_query_capture_count(lang.highlightsQuery.query);
-	for captureIndex: 0..captureCount-1 {
-		captureName: string;
-		len:u32;
-		captureName.data = ts_query_capture_name_for_id(lang.highlightsQuery.query, captureIndex, *len);
-		captureName.count = xx len;
-
-		highlightType := HighlightType.NONE;
-		if contains(captureName, "function") {
-			highlightType = .FUNCTION;
-		}
-		if contains(captureName, "keyword") {
-			highlightType = .KEYWORD;
-		}
-		if contains(captureName, "variable") {
-			highlightType = .VARIABLE;
-		}
-		if contains(captureName, "constant") {
-			highlightType = .CONSTANT;
-		}
-		if contains(captureName, "string") {
-			highlightType = .STRING;
-		}
-		if contains(captureName, "type") {
-			highlightType = .TYPE;
-		}
-		if contains(captureName, "namespace") {
-			highlightType = .NAMESPACE;
-		}
-		if contains(captureName, "comment") {
-			highlightType = .COMMENT;
-		}
-		table_add(*lang.captureToHighlight, captureIndex, highlightType);
-	}
-	
-	return true, lang;
-}
-
-load_query :: (language: *Language, queryName: string) -> Language.Query {
-	query: Language.Query;
-
-	basePath := get_app_base_path();
-	queryPath := tprint("%queries/%/%.scm", basePath, language.name, queryName);
-	file, success := read_entire_file(queryPath,,temp);
-	if success == false {
-		log("Failed to load query \"%\" for language \"%\"", queryName, language.name);
-		return query;
-	}
-
-	errorLocation: u32;
-	errorType: TSQueryError;
-	query.query = ts_query_new(language.treesitterLang, file.data, xx file.count, *errorLocation, *errorType);
-	if query.query == null {
-		errorTypeStr := "None";
-		if errorType == {
-			case .None; errorTypeStr = "None";
-			case .Syntax; errorTypeStr = "Syntax";
-			case .NodeType; errorTypeStr = "NodeType";
-			case .Field; errorTypeStr = "Field";
-			case .Capture; errorTypeStr = "Capture";
-			case .Structure; errorTypeStr = "Structure";
-			case .Language; errorTypeStr = "Language";
-		}
-		// @todo: can probably make this nicer, figure out the line/column etc
-		log("Query Error in file %: %Error at %", queryPath, errorTypeStr, errorLocation);
-	}
-	else {
-		// Prepare information to speed up query use, such as predicate information
-		
-		patternCount := ts_query_pattern_count(query.query);
-		captureCount := ts_query_capture_count(query.query);
-		stringCount := ts_query_string_count(query.query);
-
-		// loop over all the patterns looking for predicates
-		// We will save them all in a table to use later
-		for patternIndex: 0..patternCount-1 {
-			steps: *TSQueryPredicateStep;
-			stepCount: u32;
-			steps = ts_query_predicates_for_pattern(query.query, patternIndex, *stepCount);
-
-			i: u32 = 0;
-			while i<stepCount {
-				if steps[i].type == .String {
-					predicateName:string;
-					len: u32;
-					predicateName.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-					predicateName.count = len;
-
-					if predicateName == "match?" || predicateName == "not-match?" {
-						matchPredicate: Language.Predicate;
-						matchPredicate.type = .MATCH;
-
-						if contains(predicateName, "not") {
-							matchPredicate.not = true;
-						}
-
-						// expect capture, then string
-						i += 1;
-						if steps[i].type != .Capture {
-							log("Expected capture as first argument of match predicate");
-							continue patternIndex;
-						}
-
-						matchPredicate.captureIndex1 = steps[i].value_id;
-
-						// now grab the regex string
-						i += 1;
-						if steps[i].type != .String {
-							log("Expected string as second argument of match predicate");
-							continue patternIndex;
-						}
-
-						regex:string;
-						len: u32;
-						regex.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-						regex.count = len;
-
-						matchPredicate.regex = compile(regex);
-
-						predicateList, _ := find_or_add(*query.predicates, patternIndex);
-						array_add(predicateList, matchPredicate);
-						i += 1;
-					}
-					else if predicateName == "not-kind-eq?" || predicateName == "kind-eq?" {
-						kindEqPredicate: Language.Predicate;
-						kindEqPredicate.type = .EQ_KIND;
-
-						if contains(predicateName, "not") {
-							kindEqPredicate.not = true;
-						}
-
-						// expect capture, then string
-						i += 1;
-						if steps[i].type != .Capture {
-							log("Expected capture as first argument of kind eq predicate");
-							continue patternIndex;
-						}
-
-						kindEqPredicate.captureIndex1 = steps[i].value_id;
-
-						// now grab the kind string
-						i += 1;
-						if steps[i].type != .String {
-							log("Expected string as second argument of kind eq predicate");
-							continue patternIndex;
-						}
-
-						kind:string;
-						len: u32;
-						kind.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-						kind.count = len;
-						kindEqPredicate.basicStr = kind;
-
-						predicateList, _ := find_or_add(*query.predicates, patternIndex);
-						array_add(predicateList, kindEqPredicate);
-						i += 1;
-					}
-					else if predicateName == "any-of?" || predicateName == "not-any-of?" {
-						anyOfPredicate: Language.Predicate;
-						anyOfPredicate.type = .ANY_OF;
-
-						if contains(predicateName, "not") {
-							anyOfPredicate.not = true;
-						}
-
-						i += 1;
-						if steps[i].type != .Capture {
-							log("Expected capture as first argument of any-of predicate");
-							continue patternIndex;
-						}
-
-						anyOfPredicate.captureIndex1 = steps[i].value_id;
-
-						i += 1;
-						while steps[i].type != .Done {
-							if steps[i].type != .String {
-								log("Expected string as argument of any-of predicate");
-								continue patternIndex;
-							}
-
-							candidate:string;
-							len: u32;
-							candidate.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-							candidate.count = len;
-
-							i += 1;
-							array_add(*anyOfPredicate.strings, candidate);
-						}
-
-						predicateList, _ := find_or_add(*query.predicates, patternIndex);
-						array_add(predicateList, anyOfPredicate);
-					}
-					else if predicateName == "eq?" || predicateName == "not-eq?" {
-						eqPredicate: Language.Predicate;
-						eqPredicate.type = .EQ_TEXT;
-
-						if contains(predicateName, "not") {
-							eqPredicate.not = true;
-						}
-
-						i += 1;
-						if steps[i].type != .Capture {
-							log("Expected capture as first argument of eq predicate");
-							continue patternIndex;
-						}
-
-						eqPredicate.captureIndex1 = steps[i].value_id;
-
-						i += 1;
-						if steps[i].type == .String {
-							eqPredicate.type = .EQ_TEXT;
-
-							otherStr:string;
-							len: u32;
-							otherStr.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-							otherStr.count = len;
-							eqPredicate.basicStr = otherStr;
-						}
-						else if steps[i].type == .Capture {
-							eqPredicate.captureIndex2 = steps[i].value_id;
-							eqPredicate.type = .EQ_CAPTURE;
-						}
-						else {
-							log("Unexpected second predicate argument in eq predicate, must be string or capture");
-							continue patternIndex;
-						}
-
-						predicateList, _ := find_or_add(*query.predicates, patternIndex);
-						array_add(predicateList, eqPredicate);
-						i += 1;
-					}
-					else if predicateName == "set!" {
-						// so what the fuck does this do?
-						
-						// You're given two parameters
-						// a name, and then a string argument
-						// You want to store this as metadata in the predicate
-						// such that if someone matches this pattern, then the metadata will have this information
-						// the metadata is basically a map of string to string
-						setPredicate: Language.Predicate;
-						setPredicate.type = .SET;
-
-						// expect string, then string
-						i += 1;
-						if steps[i].type != .String {
-							log("Expected string as first argument of set predicate");
-							continue patternIndex;
-						}
-
-						metaDataKey:string;
-						len: u32;
-						metaDataKey.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-						metaDataKey.count = len;
-						setPredicate.basicStr = metaDataKey;
-
-						// now grab the value
-						i += 1;
-						if steps[i].type != .String {
-							log("Expected string as second argument of set predicate");
-							continue patternIndex;
-						}
-
-						metaDataValue:string;
-						metaDataValue.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
-						metaDataValue.count = len;
-						array_add(*setPredicate.strings, metaDataValue);
-
-						predicateList, _ := find_or_add(*query.predicates, patternIndex);
-						array_add(predicateList, setPredicate);
-						i += 1;
-					}
-					else {
-						log("Unknown predicate type %", predicateName);
-						break;
-					}
-				}
-				else if steps[i].type == .Done {
-					i += 1;
-					continue;
-				}
-				else {
-					log("Unexpected element in predicate");
-				}
-			}
-		}
-	}
-	return query;
-}
-
-fetch_grammars :: () {
-	// Have a list of grammar repositories
-	// Clone them at a certain revision
-
-	verboseOutput := false;
-
-	// @todo: check that git actually exists on this machine
-	// @todo: error if not on windows
-
-	for staticLanguageData {
-		directory := tprint("grammars/sources/%", it.name);
-
-		// @todo: check if directory exists and if so check what revision before doing a clone
-		if file_exists(directory) {
-			delete_directory(directory);
-		}
-		
-		log("Fetching %..", it.name);
-		make_directory_if_it_does_not_exist(directory);
-		result, output, error := run_command("git", "clone", "--no-checkout", it.url, directory, capture_and_return_output=true);
-		if verboseOutput {
-			log("%", output);
-		}
-		if result.exit_code != 0 {
-			log_error("Error!");
-			log_error("Output:\n%", output);
-			log_error("Errors:\n%", error);
-		}
-
-		result, output, error = run_command("git", "-C", directory, "checkout", it.revision, capture_and_return_output=true);
-		if verboseOutput {
-			log("%", output);
-		}
-		if result.exit_code != 0 {
-			log_error("Error!");
-			log_error("Output:\n%", output);
-			log_error("Errors:\n%", error);
-		}
-	}
-}
-
-build_grammars :: () {
-	// set up compile environment
-	vcPath, linkerPath := find_visual_studio_in_a_ridiculous_garbage_way();
-	compiler := join(linkerPath, "\\", "cl.exe");
-	windowsKit := find_windows_kit_root();
-	vcIncludePath := join(vcPath, "\\..\\..\\include");
-	windowsKitInclude := replace(windowsKit, "Lib", "Include");
-
-	// @todo: error if you can't find visual studio
-
-	verboseOutput := false;
-	for staticLanguageData {
-		log("Compiling %..", it.name);
-		directory := tprint("grammars/sources/%", it.name);
-
-		args: [..] string;
-		array_add(*args, compiler);
-		defer array_free(args);
-
-		array_add(*args, "src\\parser.c");
-		if file_exists(tprint("%\\src\\scanner.c", directory)) {
-			array_add(*args, "src\\scanner.c");
-		}
-		array_add(*args,
-			"/O2",                      // Maximize speed.
-			"/Oi",                      // Enable intrinsics.
-			// "/Zi",
-		);
-
-		array_add(*args,
-			tprint("/I%", vcIncludePath),
-			tprint("/I%\\um", windowsKitInclude),
-			tprint("/I%\\ucrt", windowsKitInclude),
-			tprint("/I%\\shared", windowsKitInclude),
-		);
-		
-		array_add(*args, "/link");
-		array_add(*args, "/DLL");
-		array_add(*args, "/MACHINE:AMD64");
-		array_add(*args, tprint("/OUT:%.dll", it.name));
-		array_add(*args,
-			tprint("/libpath:%", vcPath),
-			tprint("/libpath:%\\um\\x64", windowsKit),
-			tprint("/libpath:%\\ucrt\\x64", windowsKit),
-		);
-		
-		result, output, error := run_command(..args, capture_and_return_output=true, working_directory=directory);
-		if verboseOutput {
-			log("%", output);
-		}
-		if result.exit_code != 0 {
-			log_error("Error!");
-			log_error("Output:\n%", output);
-			log_error("Errors:\n%", error);
-			return;
-		}
-		copy_file(tprint("%/%.dll", directory, it.name), tprint("grammars/%.dll", it.name));
-	}
-}
-
 get_app_base_path :: () -> string {
 	#if BUILD_TYPE == .SHIPPING {
 		return path_strip_filename(get_path_of_running_executable());
@@ -3043,6 +2392,7 @@ Input :: #import "Input";
 #load "document.jai";
 #load "project.jai";
 #load "project_search.jai";
+#load "language.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";
