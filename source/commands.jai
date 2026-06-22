@@ -741,8 +741,18 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 }
 
 calculate_indentation_at_location :: (document: *Document, locationStart: s64, locationEnd: s64) -> s64 {
+	// all the tables in here will be temporary unless otherwise specified
+	push_allocator(temp);
 
-	log("Query Start");
+	Metadata :: struct {
+		immediate: bool;
+		startAtSameLine: bool;
+		avoidLastMatchingNext: bool;
+		openDelimiter: string;
+		closeDelimiter: string;
+	}
+	indents: Table(string, Table(*void, Metadata));
+	
 	query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), locationStart, locationEnd);
 	numIndents := 0;
 	while true {
@@ -750,18 +760,10 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 		if result == false then break;
 
 		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
+		indent := find_or_add(*indents, captureName);
 
-		log("Capture Content: \n %", get_capture_content(capture, document,,temp));
-		log("Capture Node Type %", get_capture_node_type(capture));
-		log("Capture Name %", captureName);
-		log("Pattern index %", patternIndex); 
-
-		if captureName == "indent.begin" {
-			numIndents += 1;
-		}
-		if captureName == "indent.end" {
-			numIndents -= 1;
-		}
+		// TODO: set the metadata value based on the predicate metadata
+		table_set(indent, capture.node.id, .{});
 	}
 	
 	return numIndents;
