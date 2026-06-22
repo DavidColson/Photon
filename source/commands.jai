@@ -751,7 +751,7 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 
 		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
 
-		log("Capture Content: \n %", get_capture_content(capture, document));
+		log("Capture Content: \n %", get_capture_content(capture, document,,temp));
 		log("Capture Node Type %", get_capture_node_type(capture));
 		log("Capture Name %", captureName);
 		log("Pattern index %", patternIndex); 

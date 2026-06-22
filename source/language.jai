@@ -533,25 +533,25 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 		for predicate: predicateList.* {
 			if predicate.type == {
 				case .MATCH;
-					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text);
+					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched, captures := match(captureText, predicate.regex,,temp);
 					if !matched return false ^ predicate.not;
 				case .EQ_KIND;
 					captureKind := get_capture_node_type(find_capture(tsMatch, predicate.captureIndex1));
 					if captureKind != predicate.basicStr then return false ^ predicate.not;
 				case .ANY_OF;
-					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text);
+					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched := false;
 					for predicate.strings {
 						if captureText == it then matched = true;
 					}
 					if !matched return false ^ predicate.not;
 				case .EQ_TEXT;
-					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text);
+					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					if captureText != predicate.basicStr then return false ^ predicate.not;
 				case .EQ_CAPTURE;
-					captureText1 := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text);
-					captureText2 := get_capture_content(find_capture(tsMatch, predicate.captureIndex2), text);
+					captureText1 := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
+					captureText2 := get_capture_content(find_capture(tsMatch, predicate.captureIndex2), text,,temp);
 					if captureText1 != captureText2 then return false ^ predicate.not;
 				case;
 					return true;
