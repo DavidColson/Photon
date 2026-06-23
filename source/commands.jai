@@ -10,19 +10,7 @@ move_one_char_left :: (using panel: *Panel, args: []string) {
 	cursor.head -= 1;
 	cursor.head = clamp(cursor.head, lineStart, lineEnd);
 	
-	// recalculate virtual column
-	newLineContent := get_line_content(panel.document, cursorCoordinate.line);
-	cursor.virtualColumn = 0;
-	for newLineContent.text {
-		if it_index >= cursorCoordinate.col-1 then break;
-		if it == #char "\t" {
-			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-		}
-		else {
-			cursor.virtualColumn += 1;
-		}
-	}
-
+	set_virtual_column(panel);
 	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
@@ -35,19 +23,7 @@ move_one_char_right :: (using panel: *Panel, args: []string) {
 	panel.cursor.head += 1;
 	panel.cursor.head = clamp(panel.cursor.head, lineStart, lineEnd);
 
-	// recalculate virtual column
-	newLineContent := get_line_content(panel.document, cursorCoordinate.line);
-	cursor.virtualColumn = 0;
-	for newLineContent.text {
-		if it_index >= cursorCoordinate.col+1 then break;
-		if it == #char "\t" {
-			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-		}
-		else {
-			cursor.virtualColumn += 1;
-		}
-	}
-
+	set_virtual_column(panel);
 	cursor.anchor = cursor.head;
 	panel_scroll_to_cursor(panel);
 }
@@ -136,6 +112,21 @@ move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
 	cursor.head = newLineContent.startByteOffset + targetByteOffset;
 }
 
+set_virtual_column :: (using panel: *Panel) {
+	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
+	newLineContent := get_line_content(document, cursorCoordinate.line);
+	cursor.virtualColumn = 0;
+	for newLineContent.text {
+		if it_index >= cursorCoordinate.col then break;
+		if it == #char "\t" {
+			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
+		}
+		else {
+			cursor.virtualColumn += 1;
+		}
+	}
+}
+
 goto_document_start :: (using panel: *Panel, args: []string) {
 	cursor.head = 0;
 	cursor.anchor = cursor.head;
@@ -159,20 +150,7 @@ goto_line_end :: (using panel: *Panel, args: []string) {
 	_, cursor.head = get_line_range(document, coordinate.line);
 	cursor.anchor = cursor.head;
 
-	// recalculate virtual column
-	newCoordinate := get_coordinate_from_offset(document, cursor.head);
-	newLineContent := get_line_content(panel.document, newCoordinate.line);
-	cursor.virtualColumn = 0;
-	for newLineContent.text {
-		if it_index >= newCoordinate.col+1 then break;
-		if it == #char "\t" {
-			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-		}
-		else {
-			cursor.virtualColumn += 1;
-		}
-	}
-
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -250,6 +228,7 @@ move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	}
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	cursor.anchor = shift_offset_line_endings(document, cursor.anchor, .REVERSE);
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -274,6 +253,7 @@ move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	}
 	cursor.head = shift_offset_line_endings(document, cursor.head, .FORWARD);
 	cursor.anchor = shift_offset_line_endings(document, cursor.anchor, .FORWARD);
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -386,6 +366,7 @@ jump_to_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -398,6 +379,7 @@ jump_to_last_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -411,6 +393,7 @@ jump_to_before_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
@@ -424,6 +407,7 @@ jump_to_before_last_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
+	set_virtual_column(panel);
 	panel_scroll_to_cursor(panel);
 }
 
