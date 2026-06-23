@@ -726,7 +726,21 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 
 calculate_indentation_at_location :: (document: *Document, locationStart: s64, locationEnd: s64) -> s64 {
 	// all the tables in here will be temporary unless otherwise specified
+	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
+	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
 	push_allocator(temp);
+
+	// calculate the node that we want to start with for the indentation calculation
+
+	// by default we start with a line number rather than a position
+	// you want to get the line content for said line, and find the first non whitespace char
+	// the node corresponding to said char is the first node
+	// you would get it with descendant for range
+
+	// if the current line is entirely blank, then we fallback
+	// go to the _last_ non whitespace char of the previous line and get that node with descendant for range
+	// if that node is a comment, then somehow you will need to reach backward to find a non-comment node
+	// and use that 
 
 	Metadata :: struct {
 		immediate: bool;
@@ -735,20 +749,54 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 		openDelimiter: string;
 		closeDelimiter: string;
 	}
-	indents: Table(string, Table(*void, Metadata));
+	Indents :: struct {
+		auto: Table(*void, Metadata);
+		begin: Table(*void, Metadata);
+		end: Table(*void, Metadata);
+		dedent: Table(*void, Metadata);
+		branch: Table(*void, Metadata);
+		ignore: Table(*void, Metadata);
+		align: Table(*void, Metadata);
+		zero: Table(*void, Metadata);
+	}
+	indents: Indents;
 	
 	query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), locationStart, locationEnd);
 	numIndents := 0;
 	while true {
-		result, capture, patternIndex := query_next(*document.language.indentQuery, document);
+		result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document);
 		if result == false then break;
 
-		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
-		indent := find_or_add(*indents, captureName);
+		metadata: Metadata;
+		if metadataTable.count > 0 {
+			for metadataTable {
+				log("key: % value: %", it_index, it);
+				if it_index == {
+					case "indent.immediate"; metadata.immediate = true;
+					case "indent.start_at_same_line"; metadata.startAtSameLine = true;
+					case "indent.avoid_last_matching_next"; metadata.avoidLastMatchingNext = true;
+					case "indent.open_delimiter"; metadata.openDelimiter = it;
+					case "indent.close_delimiter"; metadata.closeDelimiter = it;
+					case; continue;
+				}
+			}
+		}
 
-		// TODO: set the metadata value based on the predicate metadata
-		table_set(indent, capture.node.id, .{});
+		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
+		if captureName == {
+			case "indent.auto"; table_set(*indents.auto, capture.node.id, metadata);
+			case "indent.begin"; table_set(*indents.begin, capture.node.id, metadata);
+			case "indent.end"; table_set(*indents.end, capture.node.id, metadata);
+			case "indent.dedent"; table_set(*indents.dedent, capture.node.id, metadata);
+			case "indent.branch"; table_set(*indents.branch, capture.node.id, metadata);
+			case "indent.ignore"; table_set(*indents.ignore, capture.node.id, metadata);
+			case "indent.align"; table_set(*indents.align, capture.node.id, metadata);
+			case "indent.zero"; table_set(*indents.zero, capture.node.id, metadata);
+			case; continue;
+		}
 	}
+
+	
 	
 	return numIndents;
 }

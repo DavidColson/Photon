@@ -349,8 +349,6 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 						i += 1;
 					}
 					else if predicateName == "set!" {
-						// so what the fuck does this do?
-						
 						// You're given two parameters
 						// a name, and then a string argument
 						// You want to store this as metadata in the predicate
@@ -520,9 +518,9 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 	return false;
 } {
 
-	evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, text: $T) -> bool {
+	evaluate_query_predicates :: (query: *Language.Query, tsMatch: TSQueryMatch, text: $T) -> bool, Table(string, string) {
 		predicateList := table_find_pointer(*query.predicates, tsMatch.pattern_index);
-		if predicateList == null then return true;
+		if predicateList == null then return true, .{};
 	
 		// I want to make it clear cause I keep fucking this up, but captureIndex, as in capture.index is the
 		// index of the capture in the query source
@@ -530,36 +528,42 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 		// these indices are NOT the same
 		// here we use capture.index because this is what the predicate source specifies. DO NOT MIX IT UP
 	
+		metadata: Table(string, string) = .{};
+		result := true;
 		for predicate: predicateList.* {
 			if predicate.type == {
 				case .MATCH;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched, captures := match(captureText, predicate.regex,,temp);
-					if !matched return false ^ predicate.not;
+					if !matched result = result && false ^ predicate.not;
 				case .EQ_KIND;
 					captureKind := get_capture_node_type(find_capture(tsMatch, predicate.captureIndex1));
-					if captureKind != predicate.basicStr then return false ^ predicate.not;
+					if captureKind != predicate.basicStr then result = result && false ^ predicate.not;
 				case .ANY_OF;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched := false;
 					for predicate.strings {
 						if captureText == it then matched = true;
 					}
-					if !matched return false ^ predicate.not;
+					if !matched result = result && false ^ predicate.not;
 				case .EQ_TEXT;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
-					if captureText != predicate.basicStr then return false ^ predicate.not;
+					if captureText != predicate.basicStr then result = result && false ^ predicate.not;
 				case .EQ_CAPTURE;
 					captureText1 := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					captureText2 := get_capture_content(find_capture(tsMatch, predicate.captureIndex2), text,,temp);
-					if captureText1 != captureText2 then return false ^ predicate.not;
+					if captureText1 != captureText2 then result = result && false ^ predicate.not;
+				case .SET;
+					assert(predicate.strings.count == 1, "This is a set predicate, but no value is available to set in the predicate source");
+					table_set(*metadata, predicate.basicStr, predicate.strings[0]);
+					continue;
 				case;
-					return true;
+					continue;
 			}
 		}
 	
 		// all predicates passed
-		return true;
+		return result, metadata;
 	}
 	
 	while true {
@@ -569,8 +573,9 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 		if result == false then return false, .{}, 0, .{};
 	
 		capture := tsMatch.captures[captureId];
-		if evaluate_query_predicates(query, tsMatch, text) {
-			return true, capture, tsMatch.pattern_index, .{};
+		passed, metadata := evaluate_query_predicates(query, tsMatch, text);
+		if passed {
+			return true, capture, tsMatch.pattern_index, metadata;
 		}
 	}
 	return false, .{}, 0, .{};

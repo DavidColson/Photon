@@ -1540,7 +1540,7 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 
 		// collect all the highlights for the region of code we must render
 		while true {
-			result, capture := query_next(*language.highlightsQuery, line);
+			result, capture := query_next(*language.highlightsQuery, line,,temp);
 			if result == false then break;
 
 			startByte := ts_node_start_byte(capture.node);
@@ -1671,7 +1671,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 		// collect all the highlights for the region of code we must render
 		while true {
-			result, capture := query_next(*panel.document.language.highlightsQuery, panel.document);
+			result, capture := query_next(*panel.document.language.highlightsQuery, panel.document,,temp);
 			if result == false then break;
 
 			startByte := ts_node_start_byte(capture.node);
