@@ -537,7 +537,7 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 					matched, captures := match(captureText, predicate.regex,,temp);
 					if !matched result = result && false ^ predicate.not;
 				case .EQ_KIND;
-					captureKind := get_capture_node_type(find_capture(tsMatch, predicate.captureIndex1));
+					captureKind := get_node_type(find_capture(tsMatch, predicate.captureIndex1).node);
 					if captureKind != predicate.basicStr then result = result && false ^ predicate.not;
 				case .ANY_OF;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
@@ -582,18 +582,23 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 }
 
 // allocates memory for the returned string
-get_capture_content :: (capture: TSQueryCapture, doc: *Document) -> string {
-	startByte := ts_node_start_byte(capture.node);
-	endByte := ts_node_end_byte(capture.node);
+get_node_content :: (node: TSNode, doc: *Document) -> string {
+	startByte := ts_node_start_byte(node);
+	endByte := ts_node_end_byte(node);
 
 	// need to find the text corresponding to this node
-	captureText := alloc_string(endByte-startByte);
+	text := alloc_string(endByte-startByte);
 	iter := make_iterator(doc, startByte);
 	for iter {
-		if it_index >= captureText.count break;
-		captureText[it_index] = it;
+		if it_index >= text.count break;
+		text[it_index] = it;
 	}
-	return captureText;
+	return text;
+}
+
+// allocates memory for the returned string
+get_capture_content :: (capture: TSQueryCapture, doc: *Document) -> string {
+	return get_node_content(capture.node, doc);
 }
 
 // allocates memory for the returned string, doesn't strictly need to but it ensures we have the same
@@ -612,8 +617,8 @@ get_capture_name :: (capture: TSQueryCapture, query: *Language.Query) -> string 
 	return captureName;
 }
 
-get_capture_node_type :: (capture: TSQueryCapture) -> string {
-	return to_string(ts_node_type(capture.node));
+get_node_type :: (node: TSNode) -> string {
+	return to_string(ts_node_type(node));
 }
 
 find_capture :: (tsMatch: TSQueryMatch, captureIndex: u32) -> TSQueryCapture {

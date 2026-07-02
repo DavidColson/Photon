@@ -597,7 +597,7 @@ change_selection :: (using panel: *Panel, args: []string) {
 
 	if linewiseChange {
 		// Calculate the correct indentation and insert it
-		numIndents := calculate_indentation_at_location(document, cursor.head, cursor.head);
+		numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 		for 0..numIndents-1 {
 			insert_tab_character(panel, args);
 		}
@@ -724,24 +724,75 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 	return newCursor;
 }
 
-calculate_indentation_at_location :: (document: *Document, locationStart: s64, locationEnd: s64) -> s64 {
+calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 	// all the tables in here will be temporary unless otherwise specified
 	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
 	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
 	push_allocator(temp);
 
 	// calculate the node that we want to start with for the indentation calculation
+	first_non_whitespace :: (text: string) -> s64 {
+		for text {
+			if !is_space(it) {
+				return it_index; 
+			}
+		}
+		return -1;
+	}
 
-	// by default we start with a line number rather than a position
-	// you want to get the line content for said line, and find the first non whitespace char
-	// the node corresponding to said char is the first node
-	// you would get it with descendant for range
+	last_non_whitespace :: (text: string) -> s64 {
+		for < text {
+			if !is_space(it) {
+				return it_index; 
+			}
+		}
+		return -1;
+	}
+	
+	line := get_line_content(document, lineNumber);
+	firstNonWhitespace := first_non_whitespace(line.text);
+	startNode := ts_tree_root_node(document.tsTree);
 
-	// if the current line is entirely blank, then we fallback
-	// go to the _last_ non whitespace char of the previous line and get that node with descendant for range
-	// if that node is a comment, then somehow you will need to reach backward to find a non-comment node
-	// and use that 
+	if lineNumber > 0 && firstNonWhitespace < 0 {
+		// line is blank, so we look at the end of the previous line
+		prevLine := get_line_content(document, lineNumber - 1); 	// TODO: handle start of file
+		lastNonWhitespace := prevLine.startByteOffset + last_non_whitespace(prevLine.text);
 
+		startNode = ts_node_descendant_for_byte_range(startNode, xx lastNonWhitespace, xx lastNonWhitespace);
+
+		if get_node_type(startNode) == "comment" {
+			nodeAtStartOfPrevLine := startNode;
+			for prevLine.text {
+				if !is_space(it) {
+					nodeAtStartOfPrevLine = ts_tree_root_node(document.tsTree);
+					nodeAtStartOfPrevLine = ts_node_descendant_for_byte_range(nodeAtStartOfPrevLine, xx (prevLine.startByteOffset + it_index), xx (prevLine.startByteOffset + it_index));
+					break;
+				}
+			}
+
+			// If startNode is a full line comment, we'll just use that, but if it's a trailing comment we want the node just before it
+			if nodeAtStartOfPrevLine.id != startNode.id {
+				prevLine.text.count -= prevLine.endByteOffset - ts_node_start_byte(startNode);
+				nonCommentOffset := prevLine.startByteOffset + last_non_whitespace(prevLine.text);
+				startNode = ts_tree_root_node(document.tsTree);
+				startNode = ts_node_descendant_for_byte_range(startNode, xx nonCommentOffset, xx nonCommentOffset);
+			}
+		}
+	}
+	else if firstNonWhitespace >= 0 {
+		// line is NOT blank, so get first node on the line
+		offset := line.startByteOffset + firstNonWhitespace;
+		startNode = ts_node_descendant_for_byte_range(startNode, xx offset, xx offset);
+	}
+	else {
+		startNode = ts_node_descendant_for_byte_range(startNode, 0, 0);
+	}
+
+
+	log("Start node: %  %\ncontent: %", startNode.id, to_string(ts_node_string(startNode)), get_node_content(startNode, document,,temp));
+
+
+	// Build our table of indentation data
 	Metadata :: struct {
 		immediate: bool;
 		startAtSameLine: bool;
@@ -761,11 +812,16 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 	}
 	indents: Indents;
 	
-	query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), locationStart, locationEnd);
+	log("Query");
+	query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), ts_node_start_byte(startNode), ts_node_end_byte(startNode));
 	numIndents := 0;
 	while true {
 		result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document);
 		if result == false then break;
+
+
+		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
+		log("Node: %::% (%,%) --> %", capture.node.id, to_string(ts_node_type(capture.node)), ts_node_start_byte(capture.node), ts_node_end_byte(capture.node), captureName);
 
 		metadata: Metadata;
 		if metadataTable.count > 0 {
@@ -782,7 +838,6 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 			}
 		}
 
-		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
 		if captureName == {
 			case "indent.auto"; table_set(*indents.auto, capture.node.id, metadata);
 			case "indent.begin"; table_set(*indents.begin, capture.node.id, metadata);
@@ -796,6 +851,18 @@ calculate_indentation_at_location :: (document: *Document, locationStart: s64, l
 		}
 	}
 
+	log("Walk");
+	// walk up the tree from our start node through the parent
+	node := startNode;
+	while !ts_node_is_null(node) {
+		log("Node: %::% (%,%)", node.id, to_string(ts_node_type(node)), ts_node_start_byte(node), ts_node_end_byte(node));
+
+		success, result := table_find(*indents.begin, node.id);
+		if success {
+			// log("Found indent for node");
+		}
+		node = ts_node_parent(node);
+	}
 	
 	
 	return numIndents;
@@ -811,7 +878,7 @@ new_line_below :: (using panel: *Panel, args: []string) {
 	}
 	insert_mode_insert_string(textToInsert);
 
-	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 	for 0..numIndents-1 {
 		insert_tab_character(panel, args);
 	}
@@ -835,7 +902,7 @@ new_line_above :: (using panel: *Panel, args: []string) {
 		panel.cursor.head -= 2;
 	}
 
-	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 	for 0..numIndents-1 {
 		insert_tab_character(panel, args);
 	}
@@ -929,7 +996,7 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 		}
 	
 		// Calculate the correct indentation and insert it
-		numIndents := calculate_indentation_at_location(document, lineContent.startByteOffset, lineContent.startByteOffset);
+		numIndents := calculate_indentation_for_line(document, lineNumber);
 		for 0..numIndents-1 {
 			insert(document, lineContent.startByteOffset, "\t");
 		}
@@ -1207,7 +1274,7 @@ insert_mode_line_break :: (using panel: *Panel, args: []string) {
 	}
 	insert_mode_insert_string(textToInsert);
 
-	numIndents := calculate_indentation_at_location(document, min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor));
+	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 	for 0..numIndents-1 {
 		insert_tab_character(panel, args);
 	}
