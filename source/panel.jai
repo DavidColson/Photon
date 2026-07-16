@@ -131,7 +131,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursor.head);
 		lineContent := get_line_content(panel.document, cursorCoordinate.line,,temp);
 		lineContent.text.count = panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line);
-		cursorX := generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
+		cursorX := ifx lineContent.text.count == 0 then 0 else generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
 	
 		// the total range
 		longestLinePixelWidth := cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);

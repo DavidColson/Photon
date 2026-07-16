@@ -535,24 +535,29 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 				case .MATCH;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched, captures := match(captureText, predicate.regex,,temp);
-					if !matched result = result && false ^ predicate.not;
+					test := ifx predicate.not then !matched else matched;
+					result = result && test;
 				case .EQ_KIND;
 					captureKind := get_node_type(find_capture(tsMatch, predicate.captureIndex1).node);
-					if captureKind != predicate.basicStr then result = result && false ^ predicate.not;
+					test := ifx predicate.not then captureKind != predicate.basicStr else captureKind == predicate.basicStr;
+					result = result && test;
 				case .ANY_OF;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					matched := false;
 					for predicate.strings {
 						if captureText == it then matched = true;
 					}
-					if !matched result = result && false ^ predicate.not;
+					test := ifx predicate.not then !matched else matched;
+					result = result && test;
 				case .EQ_TEXT;
 					captureText := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
-					if captureText != predicate.basicStr then result = result && false ^ predicate.not;
+					test := ifx predicate.not then captureText != predicate.basicStr else captureText == predicate.basicStr;
+					result = result && test;
 				case .EQ_CAPTURE;
 					captureText1 := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					captureText2 := get_capture_content(find_capture(tsMatch, predicate.captureIndex2), text,,temp);
-					if captureText1 != captureText2 then result = result && false ^ predicate.not;
+					test := ifx predicate.not then captureText1 != captureText2 else captureText1 == captureText2;
+					result = result && test;
 				case .SET;
 					assert(predicate.strings.count == 1, "This is a set predicate, but no value is available to set in the predicate source");
 					table_set(*metadata, predicate.basicStr, predicate.strings[0]);
