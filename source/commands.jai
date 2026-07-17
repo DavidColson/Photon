@@ -824,6 +824,8 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 		// line is blank, so we look at the end of the previous line
 		prevLine := get_line_content(document, lineNumber - 1); 	// TODO: handle start of file
 		lastNonWhitespace := prevLine.startByteOffset + last_non_whitespace(prevLine.text);
+		
+		if lastNonWhitespace < 0 then return 0;
 
 		startNode = ts_node_descendant_for_byte_range(startNode, xx lastNonWhitespace, xx (lastNonWhitespace+1));
 
@@ -868,6 +870,10 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 
 
 
+	zeroFound := table_find(*indents.zero, startNode.id);
+	if !ts_node_is_null(startNode) && zeroFound {
+		return 0;
+	}
 
 	log("Walk line:%", lineNumber);
 	// walk up the tree from our start node through the parent
@@ -886,6 +892,12 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 
 		branchFound, branch := table_find(*indents.branch, node.id); if branchFound then log("indent.branch");
 		dedentFound, dedent := table_find(*indents.dedent, node.id); if dedentFound then log("indent.dedent");
+		beginFound,  begin := table_find(*indents.begin, node.id); if beginFound then log("indent.begin");
+		ignoreFound, ignore := table_find(*indents.ignore, node.id); if ignoreFound then log("indent.ignore");
+		
+		if !beginFound && ignoreFound && nodeStartLine <= lineNumber && lineNumber <= nodeEndLine {
+			return 0;
+		}		
 		
 		if !alreadyProcessed &&
 			( (branchFound && nodeStartLine == lineNumber) 
@@ -896,14 +908,9 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 
 		shouldProcessBegin := !alreadyProcessed && !isProcessed;
 
-		beginFound, beginMetadata := table_find(*indents.begin, node.id); if beginFound then log("indent.begin");
 		if shouldProcessBegin && beginFound {
-			// Condition A: Node spans multiple lines OR immediate flag is set
-	        // (Ignoring is_in_err fallback here for simplicity unless you need it)
-	        validRange := (nodeStartLine != nodeEndLine) || beginMetadata.immediate;
-	        
-	        // Condition B: Node starts on a previous line OR start_at_same_line flag is set
-	        validStart := (nodeStartLine != lineNumber) || beginMetadata.startAtSameLine;
+	        validRange := (nodeStartLine != nodeEndLine) || begin.immediate;
+	        validStart := (nodeStartLine != lineNumber) || begin.startAtSameLine;
 	
 	        if validRange && validStart {
 	            indentLevel += 1;
