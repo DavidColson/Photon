@@ -597,10 +597,8 @@ change_selection :: (using panel: *Panel, args: []string) {
 
 	if linewiseChange {
 		// Calculate the correct indentation and insert it
-		numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-		for 0..numIndents-1 {
-			insert_tab_character(panel, args);
-		}
+		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+		insert_mode_insert_string(indentation);
 
 		// reinsert a line ending
 		textToInsert := "\r\n";
@@ -724,8 +722,9 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 	return newCursor;
 }
 
-calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
-	verboseLogging :: false;
+calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
+	tabsOverSpaces :: true;
+	verboseLogging :: true;
 	// all the tables in here will be temporary unless otherwise specified
 	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
 	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
@@ -733,7 +732,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 
 	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
 	if !supportsAutoIndentation
-		return 0;
+		return "";
 
 
 	// Build our table of indentation data
@@ -831,7 +830,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 		prevLine := get_line_content(document, lineNumber - 1); 	// TODO: handle start of file
 		lastNonWhitespace := prevLine.startByteOffset + last_non_whitespace(prevLine.text);
 		
-		if lastNonWhitespace < 0 then return 0;
+		if lastNonWhitespace < 0 then return "";
 
 		startNode = ts_node_descendant_for_byte_range(startNode, xx lastNonWhitespace, xx (lastNonWhitespace+1));
 
@@ -879,11 +878,22 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 
 	zeroFound := table_find(*indents.zero, startNode.id);
 	if !ts_node_is_null(startNode) && zeroFound {
-		return 0;
+		return "";
 	}
 
 	#if verboseLogging {
 		log("Walk line:%", lineNumber);
+	}
+	
+	find_delimiter_node :: (node: TSNode, delimiter: string) -> TSNode, bool {
+		for 0..ts_node_child_count(node)-1 {
+			child := ts_node_child(node, it);
+			if get_node_type(child) == delimiter {
+				// TODO: figure out if this delimiter is the last node on the line
+				return child, true;
+			}
+		}
+		return TSNode.{}, false;
 	}
 	
 	// walk up the tree from our start node through the parent
@@ -909,28 +919,54 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 		dedentFound, dedent := table_find(*indents.dedent, node.id); if verboseLogging && dedentFound then log("indent.dedent");
 		beginFound,  begin := table_find(*indents.begin, node.id); if verboseLogging && beginFound then log("indent.begin");
 		ignoreFound, ignore := table_find(*indents.ignore, node.id); if verboseLogging && ignoreFound then log("indent.ignore");
+		alignFound, align := table_find(*indents.align, node.id); if verboseLogging && alignFound then log("indent.align");
 		
 		if !beginFound && ignoreFound && nodeStart.line <= lineNumber && lineNumber <= nodeEnd.line {
-			return 0;
-		}		
+			return "";
+		}
 		
 		if !alreadyProcessed &&
 			( (branchFound && nodeStart.line == lineNumber) 
 			|| (dedentFound && nodeStart.line != lineNumber)) {
-			indentLevel -= 1;
+			indentLevel -= tabSize;
 			isProcessed = true;
 		}
 
-		shouldProcessBegin := !alreadyProcessed && !isProcessed;
+		shouldProcess := !alreadyProcessed && !isProcessed;
 
-		if shouldProcessBegin && beginFound {
+		if shouldProcess && beginFound {
 	        validRange := (nodeStart.line != nodeEnd.line) || begin.immediate;
 	        validStart := (nodeStart.line != lineNumber) || begin.startAtSameLine;
 	
 	        if validRange && validStart {
-	            indentLevel += 1;
+	            indentLevel += tabSize;
 	            isProcessed = true;
 	        }
+		}
+		
+		if shouldProcess && alignFound {
+	        validStart := (nodeStart.line != lineNumber);
+			
+			if validStart {
+				
+				// we need to find the open and close delimiter nodes now
+				log("open delim % close delim %", align.openDelimiter, align.closeDelimiter);
+				openDelimiter := find_delimiter_node(node, align.openDelimiter);
+				closeDelimiter := find_delimiter_node(node, align.closeDelimiter);
+				
+				openStartOffset := ts_node_start_byte(openDelimiter);
+				openCol := get_coordinate_from_offset(document, openStartOffset).col;
+				closeStartOffset := ts_node_start_byte(closeDelimiter);
+				closeCol := get_coordinate_from_offset(document, closeStartOffset).col;
+				log("open column % close column %", openCol, closeCol);
+				indentLevel = openCol + 1;
+				break;
+				
+				// TODO:
+				// deal with the case of the open node not being the last on a line (hanging indent)
+				// deal with the case of dupliate open nodes on the first line
+				// support avoid_last_matching_next for close delimiter
+			}
 		}
 
 		#if verboseLogging {
@@ -941,8 +977,31 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> s64 {
 		table_set(*processedLines, nodeStart.line, alreadyProcessed || isProcessed);
 	}
 	
+	// build the final indentation string
 	
-	return indentLevel;
+	builder : String_Builder;
+	builder.allocator = temp;
+	init_string_builder(*builder);
+
+	// if we're using tabs over spaces
+	if tabsOverSpaces {
+		tabsToInsert := cast(s64, floor(cast(float,indentLevel)/cast(float,tabSize)));
+		for 1..tabsToInsert {
+			append(*builder, "\t");
+		}
+		remainder := indentLevel % tabSize;
+		for 1..remainder {
+			append(*builder, " ");
+		}
+	}
+	else {
+		for 0..indentLevel {
+			append(*builder, " ");
+		}
+	}
+	
+
+	return builder_to_string(*builder,,temp);
 }
 
 new_line_below :: (using panel: *Panel, args: []string) {
@@ -954,11 +1013,9 @@ new_line_below :: (using panel: *Panel, args: []string) {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
-
-	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-	for 0..numIndents-1 {
-		insert_tab_character(panel, args);
-	}
+	
+	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+	insert_mode_insert_string(indentation);
 }
 
 new_line_above :: (using panel: *Panel, args: []string) {
@@ -979,10 +1036,8 @@ new_line_above :: (using panel: *Panel, args: []string) {
 		panel.cursor.head -= 2;
 	}
 
-	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-	for 0..numIndents-1 {
-		insert_tab_character(panel, args);
-	}
+	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+	insert_mode_insert_string(indentation);
 
 	panel.cursor.anchor = panel.cursor.head;
 }
@@ -1052,9 +1107,6 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 
 autoindent_line :: (using panel: *Panel, args: []string) {
 	// TODO: allow setting tabs or spaces, and tab width
-	// TODO: don't put any indentation in on blank lines
-	// TODO: don't _add_ indentation to blank lines (???)
-
 	begin_edit(document);
 	defer end_edit(document);
 
@@ -1067,11 +1119,8 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 	endLine := max(headCoord.line, anchorCoord.line);
 
 	for lineNumber: startLine..endLine {
-		numIndents := calculate_indentation_for_line(document, lineNumber);
-		
-		log("Indenting line: % with % indents", lineNumber, numIndents);
+		indentation := calculate_indentation_for_line(document, lineNumber);
 		lineContent := get_line_content(panel.document, lineNumber);
-		log("%", lineContent.text);
 		
 		// delete any existing indentation
 		deleteUpTo := -1;
@@ -1088,12 +1137,9 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 			delete(document, lineContent.startByteOffset, lineContent.text.count);
 		}
 	
-		// Calculate the correct indentation and insert it
-		for 0..numIndents-1 {
-			insert(document, lineContent.startByteOffset, "\t");
-		}
+		insert(document, lineContent.startByteOffset, indentation);
 	}
-
+	
 	diff := get_size(document) - docLength;
 	if cursor.anchor > cursor.head {
 		cursor.anchor += diff;
@@ -1374,10 +1420,8 @@ insert_mode_line_break :: (using panel: *Panel, args: []string) {
 	}
 	insert_mode_insert_string(textToInsert);
 
-	numIndents := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-	for 0..numIndents-1 {
-		insert_tab_character(panel, args);
-	}
+	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+	insert_mode_insert_string(indentation);
 }
 
 insert_tab_character :: (using panel: *Panel, args: []string) {
