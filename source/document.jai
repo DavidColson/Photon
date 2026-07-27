@@ -789,6 +789,11 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 			assert(character != #char "\r");
 		}
 	}
+		
+	// don't insert empty nodes
+	if text.count == 0 {
+		return;
+	}
 
 	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
 	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset);

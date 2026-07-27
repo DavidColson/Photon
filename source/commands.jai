@@ -724,7 +724,7 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 
 calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
 	tabsOverSpaces :: true;
-	verboseLogging :: true;
+	verboseLogging :: false;
 	// all the tables in here will be temporary unless otherwise specified
 	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
 	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
@@ -894,11 +894,9 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				childStartOffset := ts_node_start_byte(child);
 				childStart := get_coordinate_from_offset(doc, childStartOffset);
 				line := get_line_content(doc, childStart.line);
-				log("testLine %:%, %", childStart.line, childStart.col, line);
 				lineFromDelimiterOnward := slice(line.text, childStart.col+1, line.text.count - childStart.col);
 				
 				delimiterIsLastOnLine := true;
-				log("lineRemainder %", lineFromDelimiterOnward);
 				for lineFromDelimiterOnward {
 					if compare(slice(lineFromDelimiterOnward, it_index, delimiter.count), delimiter) || !is_space(it) {
 						delimiterIsLastOnLine = false;
@@ -965,7 +963,6 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 			if validStart {
 				
 				// we need to find the open and close delimiter nodes now
-				log("open delim % close delim %", align.openDelimiter, align.closeDelimiter);
 				openDelimiter, openIsLastOnLine := find_delimiter_node(document, node, align.openDelimiter);
 				closeDelimiter, closeIsLastOnLine := find_delimiter_node(document, node, align.closeDelimiter);
 				
@@ -977,14 +974,12 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				// this is a hanging indent, we treat this as though it's a normal indent.begin
 				if openIsLastOnLine {
 					if !(closeIsLastOnLine && close.line < lineNumber) {
-						log("hanging indent");
 						indentLevel += tabSize;
 					}
 				}
 				// in this case it's an aligned indent, and we will indent to align with the open delimiter
 				else {
 					if closeIsLastOnLine && close.line != open.line {
-						log("aligned indent");
 						// this is an absolute position, so set it and bail
 						indentLevel = open.col + 1;
 						break;
