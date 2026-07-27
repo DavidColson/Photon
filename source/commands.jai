@@ -1449,8 +1449,15 @@ insert_mode_line_break :: (using panel: *Panel, args: []string) {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
-
-	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+	
+	cursorLine := get_coordinate_from_offset(document, cursor.head).line;
+	indentation := calculate_indentation_for_line(document, cursorLine);
+	
+	// delete any existing whitespace on the newline before inserting the indentation
+	line := get_line_content(document, cursorLine);
+	trimmed := trim_left(line.text);
+	delete(document, line.startByteOffset, line.text.count - trimmed.count);
+	
 	insert_mode_insert_string(indentation);
 }
 
