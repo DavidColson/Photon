@@ -885,12 +885,27 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		log("Walk line:%", lineNumber);
 	}
 	
-	find_delimiter_node :: (node: TSNode, delimiter: string) -> TSNode, bool {
+	find_delimiter_node :: (doc: *Document, node: TSNode, delimiter: string) -> TSNode, bool {
+		// log("beginNode: %", get_node_type(node));
 		for 0..ts_node_child_count(node)-1 {
 			child := ts_node_child(node, it);
+			// log("child: %", get_node_type(child));
 			if get_node_type(child) == delimiter {
-				// TODO: figure out if this delimiter is the last node on the line
-				return child, true;
+				childStartOffset := ts_node_start_byte(child);
+				childStart := get_coordinate_from_offset(doc, childStartOffset);
+				line := get_line_content(doc, childStart.line);
+				log("testLine %:%, %", childStart.line, childStart.col, line);
+				lineFromDelimiterOnward := slice(line.text, childStart.col+1, line.text.count - childStart.col);
+				
+				delimiterIsLastOnLine := true;
+				log("lineRemainder %", lineFromDelimiterOnward);
+				for lineFromDelimiterOnward {
+					if compare(slice(lineFromDelimiterOnward, it_index, delimiter.count), delimiter) || !is_space(it) {
+						delimiterIsLastOnLine = false;
+						break;
+					}
+				}
+				return child, delimiterIsLastOnLine;
 			}
 		}
 		return TSNode.{}, false;
@@ -951,20 +966,35 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				
 				// we need to find the open and close delimiter nodes now
 				log("open delim % close delim %", align.openDelimiter, align.closeDelimiter);
-				openDelimiter := find_delimiter_node(node, align.openDelimiter);
-				closeDelimiter := find_delimiter_node(node, align.closeDelimiter);
+				openDelimiter, openIsLastOnLine := find_delimiter_node(document, node, align.openDelimiter);
+				closeDelimiter, closeIsLastOnLine := find_delimiter_node(document, node, align.closeDelimiter);
 				
 				openStartOffset := ts_node_start_byte(openDelimiter);
-				openCol := get_coordinate_from_offset(document, openStartOffset).col;
+				open := get_coordinate_from_offset(document, openStartOffset);
 				closeStartOffset := ts_node_start_byte(closeDelimiter);
-				closeCol := get_coordinate_from_offset(document, closeStartOffset).col;
-				log("open column % close column %", openCol, closeCol);
-				indentLevel = openCol + 1;
-				break;
+				close := get_coordinate_from_offset(document, closeStartOffset);
+				
+				// this is a hanging indent, we treat this as though it's a normal indent.begin
+				if openIsLastOnLine {
+					if !(closeIsLastOnLine && close.line < lineNumber) {
+						log("hanging indent");
+						indentLevel += tabSize;
+					}
+				}
+				// in this case it's an aligned indent, and we will indent to align with the open delimiter
+				else {
+					if closeIsLastOnLine && close.line != open.line {
+						log("aligned indent");
+						// this is an absolute position, so set it and bail
+						indentLevel = open.col + 1;
+						break;
+					}
+				}
 				
 				// TODO:
-				// deal with the case of the open node not being the last on a line (hanging indent)
-				// deal with the case of dupliate open nodes on the first line
+				// indent.align with enter gives different width to indent with auto-indent (c++)
+					// it doesn't actually, it's just cause there's an extra space already present
+				// support lua-match
 				// support avoid_last_matching_next for close delimiter
 			}
 		}
