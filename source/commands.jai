@@ -844,6 +844,10 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 		deleteUpTo := -1;
 		for lineContent.text {
 			if it != #char "\t" && it != #char " " {
+				existingIndentation := slice(lineContent.text, 0, it_index);
+				if existingIndentation == indentation {
+					continue lineNumber;
+				}
 				deleteUpTo = it_index;
 				delete(document, lineContent.startByteOffset, it_index);
 				break;
