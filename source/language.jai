@@ -37,6 +37,25 @@ Language :: struct {
 	indentQuery: Query;
 }
 
+IndentationMetadata :: struct {
+	immediate: bool;
+	startAtSameLine: bool;
+	avoidLastMatchingNext: bool;
+	openDelimiter: string;
+	closeDelimiter: string;
+}
+Indents :: struct {
+	treeHash: s64;
+	auto: Table(*void, IndentationMetadata);
+	begin: Table(*void, IndentationMetadata);
+	end: Table(*void, IndentationMetadata);
+	dedent: Table(*void, IndentationMetadata);
+	branch: Table(*void, IndentationMetadata);
+	ignore: Table(*void, IndentationMetadata);
+	align: Table(*void, IndentationMetadata);
+	zero: Table(*void, IndentationMetadata);
+}
+
 HighlightType :: enum {
 	NONE;
 	FUNCTION;
@@ -441,85 +460,73 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
 	tabsOverSpaces :: true;
 	verboseLogging :: true;
-	// all the tables in here will be temporary unless otherwise specified
-	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
-	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
-	push_allocator(temp);
 	
-	// lock(*document.reparseMutex);
-	// defer unlock(*document.reparseMutex);
-
 	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
 	if !supportsAutoIndentation
 		return "";
-
-
-	// Build our table of indentation data
-	Metadata :: struct {
-		immediate: bool;
-		startAtSameLine: bool;
-		avoidLastMatchingNext: bool;
-		openDelimiter: string;
-		closeDelimiter: string;
-	}
-	Indents :: struct {
-		auto: Table(*void, Metadata);
-		begin: Table(*void, Metadata);
-		end: Table(*void, Metadata);
-		dedent: Table(*void, Metadata);
-		branch: Table(*void, Metadata);
-		ignore: Table(*void, Metadata);
-		align: Table(*void, Metadata);
-		zero: Table(*void, Metadata);
-	}
-	indents: Indents;
-	
-	#if verboseLogging {
-		log("Query");
-	}
-
-	query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), ts_node_start_byte(ts_tree_root_node(document.tsTree)), ts_node_end_byte(ts_tree_root_node(document.tsTree)));
-	while true {
-		result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document);
-		if result == false then break;
-
-
-		captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
 		
-		#if verboseLogging {
-			nodeStartLine := ts_node_start_point(capture.node).row;
-			nodeEndLine := ts_node_end_point(capture.node).row;
-			log("Node: %::% (%,%) (%:%,%:%)--> % patternIndex:%", capture.node.id, to_string(ts_node_type(capture.node)), ts_node_start_byte(capture.node), ts_node_end_byte(capture.node), nodeStartLine, ts_node_start_point(capture.node).column, nodeEndLine, ts_node_end_point(capture.node).column, captureName, patternIndex);
-		}
+	lock(*document.reparseMutex);
+	defer unlock(*document.reparseMutex);
 
-		metadata: Metadata;
-		if metadataTable.count > 0 {
-			for metadataTable {
-				// log("key: % value: %", it_index, it);
-				if it_index == {
-					case "indent.immediate"; metadata.immediate = true;
-					case "indent.start_at_same_line"; metadata.startAtSameLine = true;
-					case "indent.avoid_last_matching_next"; metadata.avoidLastMatchingNext = true;
-					case "indent.open_delimiter"; metadata.openDelimiter = it;
-					case "indent.close_delimiter"; metadata.closeDelimiter = it;
-					case; continue;
+	// figure out if we need to requery the indentation of a file, if we do then we do it here
+	treeHash := get_hash(document.tree);
+	if treeHash != document.indents.treeHash {
+		if verboseLogging log("rehash of indents triggered");
+		
+		table_reset(*document.indents.auto); 
+		table_reset(*document.indents.begin); 
+		table_reset(*document.indents.end); 
+		table_reset(*document.indents.dedent); 
+		table_reset(*document.indents.branch); 
+		table_reset(*document.indents.ignore); 
+		table_reset(*document.indents.align); 
+		table_reset(*document.indents.zero); 
+	
+		rootNode := ts_tree_root_node(document.tsTree);
+		query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), ts_node_start_byte(rootNode), ts_node_end_byte(rootNode));
+		while true {
+			result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document,,temp);
+			if result == false then break;
+			
+			captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
+			
+			#if verboseLogging {
+				nodeStartLine := ts_node_start_point(capture.node).row;
+				nodeEndLine := ts_node_end_point(capture.node).row;
+				log("Node: %::% (%,%) (%:%,%:%)--> % patternIndex:%", capture.node.id, to_string(ts_node_type(capture.node)), ts_node_start_byte(capture.node), ts_node_end_byte(capture.node), nodeStartLine, ts_node_start_point(capture.node).column, nodeEndLine, ts_node_end_point(capture.node).column, captureName, patternIndex);
+			}
+			
+			metadata: IndentationMetadata;
+			if metadataTable.count > 0 {
+				for metadataTable {
+					if it_index == {
+						case "indent.immediate"; metadata.immediate = true;
+						case "indent.start_at_same_line"; metadata.startAtSameLine = true;
+						case "indent.avoid_last_matching_next"; metadata.avoidLastMatchingNext = true;
+						case "indent.open_delimiter"; metadata.openDelimiter = it;
+						case "indent.close_delimiter"; metadata.closeDelimiter = it;
+						case; continue;
+					}
 				}
 			}
-		}
-
-		if captureName == {
-			case "indent.auto"; table_set(*indents.auto, capture.node.id, metadata);
-			case "indent.begin"; table_set(*indents.begin, capture.node.id, metadata);
-			case "indent.end"; table_set(*indents.end, capture.node.id, metadata);
-			case "indent.dedent"; table_set(*indents.dedent, capture.node.id, metadata);
-			case "indent.branch"; table_set(*indents.branch, capture.node.id, metadata);
-			case "indent.ignore"; table_set(*indents.ignore, capture.node.id, metadata);
-			case "indent.align"; table_set(*indents.align, capture.node.id, metadata);
-			case "indent.zero"; table_set(*indents.zero, capture.node.id, metadata);
-			case; continue;
-		}
+			
+			if captureName == {
+				case "indent.auto"; table_set(*document.indents.auto, capture.node.id, metadata);
+				case "indent.begin"; table_set(*document.indents.begin, capture.node.id, metadata);
+				case "indent.end"; table_set(*document.indents.end, capture.node.id, metadata);
+				case "indent.dedent"; table_set(*document.indents.dedent, capture.node.id, metadata);
+				case "indent.branch"; table_set(*document.indents.branch, capture.node.id, metadata);
+				case "indent.ignore"; table_set(*document.indents.ignore, capture.node.id, metadata);
+				case "indent.align"; table_set(*document.indents.align, capture.node.id, metadata);
+				case "indent.zero"; table_set(*document.indents.zero, capture.node.id, metadata);
+				case; continue;
+			}
+		}	
+		document.indents.treeHash = treeHash;
 	}
-
+	
+	push_allocator(temp);
+	
 	// calculate the node that we want to start with for the indentation calculation
 	first_non_whitespace :: (text: string) -> s64 {
 		for text {
@@ -571,7 +578,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 			}
 		}
 
-		end := table_find(*indents.end, startNode.id);
+		end := table_find(*document.indents.end, startNode.id);
 		if !ts_node_is_null(startNode) && end {
 			offset := line.startByteOffset;
 			startNode = ts_tree_root_node(document.tsTree);
@@ -594,7 +601,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 
 
 
-	zeroFound := table_find(*indents.zero, startNode.id);
+	zeroFound := table_find(*document.indents.zero, startNode.id);
 	if !ts_node_is_null(startNode) && zeroFound {
 		return "";
 	}
@@ -648,12 +655,12 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		found, alreadyProcessed = table_find(*processedLines, nodeStart.line);
 		isProcessed := false;
 
-		branchFound, branch := table_find(*indents.branch, node.id); if verboseLogging && branchFound then log("indent.branch");
-		autoFound, auto := table_find(*indents.auto, node.id); if verboseLogging && autoFound then log("indent.auto");
-		dedentFound, dedent := table_find(*indents.dedent, node.id); if verboseLogging && dedentFound then log("indent.dedent");
-		beginFound,  begin := table_find(*indents.begin, node.id); if verboseLogging && beginFound then log("indent.begin");
-		ignoreFound, ignore := table_find(*indents.ignore, node.id); if verboseLogging && ignoreFound then log("indent.ignore");
-		alignFound, align := table_find(*indents.align, node.id); if verboseLogging && alignFound then log("indent.align");
+		branchFound, branch := table_find(*document.indents.branch, node.id); if verboseLogging && branchFound then log("indent.branch");
+		autoFound, auto := table_find(*document.indents.auto, node.id); if verboseLogging && autoFound then log("indent.auto");
+		dedentFound, dedent := table_find(*document.indents.dedent, node.id); if verboseLogging && dedentFound then log("indent.dedent");
+		beginFound,  begin := table_find(*document.indents.begin, node.id); if verboseLogging && beginFound then log("indent.begin");
+		ignoreFound, ignore := table_find(*document.indents.ignore, node.id); if verboseLogging && ignoreFound then log("indent.ignore");
+		alignFound, align := table_find(*document.indents.align, node.id); if verboseLogging && alignFound then log("indent.align");
 		
 		// if we encounter an indent.auto, then we fallback to copying the indentation from the previous line
 		if !beginFound && !alignFound && autoFound && nodeStart.line < lineNumber && lineNumber <= nodeEnd.line {

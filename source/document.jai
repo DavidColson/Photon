@@ -125,6 +125,7 @@ Document :: struct {
 	languageName: string;
 	language: *Language;
 	tsTree: *TSTree;
+	indents: Indents;
 	reparseMutex: Mutex;
 
 	// Undo
@@ -1799,11 +1800,11 @@ ts_parse_task :: (data: *void) {
 ts_parse_task_complete :: (data: *void) {
 	using taskData := cast(*TSParseTaskData, data);
 
-	// swap the ts trees
+	// swap the ts trees, necessary as document_copy_free will destroy the old tsTree
 	temp := doc.tsTree;
 	doc.tsTree = docCopy.tsTree;
 	docCopy.tsTree = temp;
-
+	
 	document_copy_free(taskData.docCopy);
 	unlock(*doc.reparseMutex);
 	
