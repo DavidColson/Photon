@@ -164,6 +164,40 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 		log("Failed to load query \"%\" for language \"%\"", queryName, language.name);
 		return query;
 	}
+		
+	// parse the file initially looking for inherits comments, and then paste the corresponding query text in 
+	// doesn't support multiple includes for now
+	foundInherits := find_index_from_left_fast(file, "; inherits:");
+	if foundInherits >= 0 {
+		rangeToRemove := 11;
+		targetLang := file;
+		targetLang.data += foundInherits + 11;
+		for targetLang {
+			if it == #char "\n" {
+				targetLang.count = it_index;
+				rangeToRemove += it_index;
+			}
+		}
+		targetLang = trim(targetLang); 
+		
+		// we don't currently support recursive includes, not sure that we need it, but maybe something to keep an eye on?
+		inheritsPath := tprint("%queries/%/%.scm", basePath, targetLang, queryName);
+		inheritsFile, inheritsSuccess := read_entire_file(inheritsPath,,temp);
+		if inheritsSuccess == false {
+			log("Failed to load query \"%\" from inherits \"%\"", queryName, targetLang);
+			return query;
+		}
+				
+		builder : String_Builder;
+		builder.allocator = temp;
+	    init_string_builder(*builder);
+	
+        append(*builder, file.data, foundInherits);
+        append(*builder, inheritsFile);
+        append(*builder, file.data+rangeToRemove, file.count - foundInherits - rangeToRemove);
+		
+		file = builder_to_string(*builder);
+	}
 
 	errorLocation: u32;
 	errorType: TSQueryError;
