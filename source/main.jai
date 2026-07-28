@@ -1843,11 +1843,11 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 		selectionX := 0;
 		selectionW := lineWidth;
 		if isFirstLine {
-			selectionX = xx generate_text_run(string.{rangeStart.col,line.text.data}, fontSize, font,,temp).width;
+			selectionX = xx generate_text_run(string.{min(rangeStart.col, line.text.count), line.text.data}, fontSize, font,,temp).width;
 			selectionW = lineWidth - selectionX;
 		}
 		if isLastLine {
-			selectionW = generate_text_run(string.{rangeEnd.col,line.text.data}, fontSize, font,,temp).width - selectionX;
+			selectionW = generate_text_run(string.{min(rangeEnd.col, line.text.count), line.text.data}, fontSize, font,,temp).width - selectionX;
 		}
 
 		submit_instance(.{
