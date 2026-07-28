@@ -724,11 +724,14 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 
 calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
 	tabsOverSpaces :: true;
-	verboseLogging :: false;
+	verboseLogging :: true;
 	// all the tables in here will be temporary unless otherwise specified
 	// TODO: this is some hairy code with regard to memory, lots of use of strings and tables
 	// once complete please check this with memory debugger to see if we're leaking, it should _all_ be temp memory
 	push_allocator(temp);
+	
+	// lock(*document.reparseMutex);
+	// defer unlock(*document.reparseMutex);
 
 	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
 	if !supportsAutoIndentation
@@ -821,7 +824,6 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 	}
 	
 	line := get_line_content(document, lineNumber);
-	log("visible content: %", line.text);
 	firstNonWhitespace := first_non_whitespace(line.text);
 	startNode := ts_tree_root_node(document.tsTree);
 
@@ -855,7 +857,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 
 		end := table_find(*indents.end, startNode.id);
 		if !ts_node_is_null(startNode) && end {
-			offset := line.startByteOffset + firstNonWhitespace;
+			offset := line.startByteOffset;
 			startNode = ts_tree_root_node(document.tsTree);
 			startNode = ts_node_descendant_for_byte_range(startNode, xx offset, xx (offset+1));
 		}
@@ -886,11 +888,13 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 	}
 	
 	find_delimiter_node :: (doc: *Document, node: TSNode, delimiter: string) -> TSNode, bool {
-		// log("beginNode: %", get_node_type(node));
+		if ts_node_child_count(node) == 0 {
+			return TSNode.{}, false;
+		}
+			
 		for 0..ts_node_child_count(node)-1 {
 			child := ts_node_child(node, it);
-			// log("child: %", get_node_type(child));
-			if get_node_type(child) == delimiter {
+			if !ts_node_is_null(child) && get_node_type(child) == delimiter {
 				childStartOffset := ts_node_start_byte(child);
 				childStart := get_coordinate_from_offset(doc, childStartOffset);
 				line := get_line_content(doc, childStart.line);
@@ -929,15 +933,31 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		isProcessed := false;
 
 		branchFound, branch := table_find(*indents.branch, node.id); if verboseLogging && branchFound then log("indent.branch");
+		autoFound, auto := table_find(*indents.auto, node.id); if verboseLogging && autoFound then log("indent.auto");
 		dedentFound, dedent := table_find(*indents.dedent, node.id); if verboseLogging && dedentFound then log("indent.dedent");
 		beginFound,  begin := table_find(*indents.begin, node.id); if verboseLogging && beginFound then log("indent.begin");
 		ignoreFound, ignore := table_find(*indents.ignore, node.id); if verboseLogging && ignoreFound then log("indent.ignore");
 		alignFound, align := table_find(*indents.align, node.id); if verboseLogging && alignFound then log("indent.align");
 		
-		if !beginFound && ignoreFound && nodeStart.line <= lineNumber && lineNumber <= nodeEnd.line {
-			return "";
+		// if we encounter an indent.auto, then we fallback to copying the indentation from the previous line
+		if !beginFound && !alignFound && autoFound && nodeStart.line < lineNumber && lineNumber <= nodeEnd.line {
+			prevLine := get_line_content(document, lineNumber-1);
+			for prevLine.text {
+				if it == #char "\t" then indentLevel += tabSize;
+				if it == #char " " then indentLevel += 1;
+				if !is_space(it) then break;
+			}
+			log("indent.auto triggered");
+			break;
 		}
 		
+		// indent.ignore just gives back no indentation
+		if !beginFound && ignoreFound && nodeStart.line <= lineNumber && lineNumber <= nodeEnd.line {
+			indentLevel = 0;
+			break;
+		}
+		
+		// indent.branch and indent.dedent reduce the indentation level by one
 		if !alreadyProcessed &&
 			( (branchFound && nodeStart.line == lineNumber) 
 			|| (dedentFound && nodeStart.line != lineNumber)) {
@@ -947,6 +967,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 
 		shouldProcess := !alreadyProcessed && !isProcessed;
 
+		// indent.begin is the primary contributor to indentation
 		if shouldProcess && beginFound {
 	        validRange := (nodeStart.line != nodeEnd.line) || begin.immediate;
 	        validStart := (nodeStart.line != lineNumber) || begin.startAtSameLine;
@@ -957,9 +978,12 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 	        }
 		}
 		
+		
+		// indent.align is the most complex case, we align by some opening delimiter
+		// usually you see this in parameter blocks of functions
+		isAbsoluteIndentation := false;
 		if shouldProcess && alignFound {
 	        validStart := (nodeStart.line != lineNumber);
-			
 			if validStart {
 				
 				// we need to find the open and close delimiter nodes now
@@ -979,18 +1003,36 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				}
 				// in this case it's an aligned indent, and we will indent to align with the open delimiter
 				else {
-					if closeIsLastOnLine && close.line != open.line {
+					if closeIsLastOnLine && close.line != open.line && close.line < lineNumber {
+						indentLevel = max(indentLevel - tabSize, 0);
+					}
+					else {
 						// this is an absolute position, so set it and bail
 						indentLevel = open.col + 1;
-						break;
+						isAbsoluteIndentation = true;
 					}
 				}
 				
-				// TODO:
-				// indent.align with enter gives different width to indent with auto-indent (c++)
-					// it doesn't actually, it's just cause there's an extra space already present
-				// support lua-match
-				// support avoid_last_matching_next for close delimiter
+				avoidLastMatchingNext := false;
+				if close.line != open.line && close.line == lineNumber {
+					avoidLastMatchingNext = align.avoidLastMatchingNext;
+				}
+				if avoidLastMatchingNext {
+					// we need the indentation of the line containing the open delimiter
+					openLine := get_line_content(document, open.line);
+					openLineIndentation := 0;
+					for openLine.text {
+						if it == #char "\t" then openLineIndentation += tabSize;
+						if it == #char " " then openLineIndentation += 1;
+						if !is_space(it) then break;
+					}
+					
+					if indentLevel <= openLineIndentation + tabSize {
+						indentLevel += tabSize;
+					}
+				}
+				
+	            isProcessed = true;
 			}
 		}
 
@@ -1000,10 +1042,11 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		node = ts_node_parent(node);
 
 		table_set(*processedLines, nodeStart.line, alreadyProcessed || isProcessed);
+		
+		if isAbsoluteIndentation then break;
 	}
 	
 	// build the final indentation string
-	
 	builder : String_Builder;
 	builder.allocator = temp;
 	init_string_builder(*builder);

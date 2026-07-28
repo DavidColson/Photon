@@ -125,6 +125,7 @@ Document :: struct {
 	languageName: string;
 	language: *Language;
 	tsTree: *TSTree;
+	reparseMutex: Mutex;
 
 	// Undo
 	undoStack: [..]UndoEntry;
@@ -301,6 +302,8 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 		doc.path = copy_string(get_absolute_path(path));
 	}
 	path_overwrite_separators(doc.path, #char "/");
+	
+	init(*doc.reparseMutex);
 
 	doc.handle = handle;
 	table_add(*openDocumentTable, doc.path, doc.handle); 
@@ -1750,6 +1753,7 @@ document_update_ts_tree :: (doc: *Document, async := true) {
 	task.docCopy = document_copy(doc);
 	task.forceReparse = false;
 	if async {
+		lock(*doc.reparseMutex);
 		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 	}
 	else {
@@ -1801,6 +1805,8 @@ ts_parse_task_complete :: (data: *void) {
 	docCopy.tsTree = temp;
 
 	document_copy_free(taskData.docCopy);
+	unlock(*doc.reparseMutex);
+	
 	free(taskData);
 }
 
