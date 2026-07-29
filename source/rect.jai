@@ -11,7 +11,7 @@ Rect :: struct {
 intersection :: (rectA: Rect, rectB: Rect) -> bool, Rect {
     r: Rect;
 
-    left := max(rectA.x, rectB.y);
+    left := max(rectA.x, rectB.x);
     right := min(rectA.x + rectA.w, rectB.x + rectB.w);
     top := max(rectA.y, rectB.y);
     bottom := min(rectA.y + rectA.h, rectB.y + rectB.h);
