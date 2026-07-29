@@ -209,8 +209,8 @@ move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	iter := make_iterator(document, cursor.head);
 	for iter {
 		cursor.head = iter.offset+1;
-		next := (iter.firstChar+1).*;
-		next = ifx next == #char "\r" then (iter.firstChar+2).* else next;
+		next := get_char_at(document, iter.offset+1);
+		next = ifx next == #char "\r" then get_char_at(document, iter.offset+2) else next;
 		prevCharCategory := categorize_char(it);
 		nextCharCategory := categorize_char(next);
 		if checkPosition(it, next, prevCharCategory, nextCharCategory) {
@@ -387,7 +387,7 @@ jump_to_before_char :: (using panel: *Panel, args: []string) {
 	iter := make_iterator(document, cursor.head+1);
 	for iter {
 		cursor.head = iter.offset;
-		next := (iter.firstChar+1).*;
+		next := get_char_at(document, iter.offset+1);
 		// @todo: assumes the args are single char, this may not always be true
 		if args[0][0] == next {
 			break;
