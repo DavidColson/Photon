@@ -589,15 +589,19 @@ change_selection :: (using panel: *Panel, args: []string) {
 	rangeEnd := max(cursor.head, cursor.anchor);
 	endChar := get_char_at(document, rangeEnd);
 	linewiseChange := endChar == #char "\n" || endChar == #char "\r";
-	
+
+	indentation: string;
+	if linewiseChange {
+		lineNumber := get_coordinate_from_offset(document, min(cursor.head, cursor.anchor)).line;
+		indentation = calculate_indentation_for_line(document, lineNumber);
+	}
+
 	enter_insert_mode_start(panel, args);
 
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
 
 	if linewiseChange {
-		// Calculate the correct indentation and insert it
-		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 		insert_mode_insert_string(indentation);
 
 		// reinsert a line ending
