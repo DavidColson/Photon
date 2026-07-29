@@ -124,7 +124,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 		panel_scroll_to_line(panel, currentLine-range);
 	}
 
-	// do horizontal scroll to cursor, implemented quite differently sadly
+	// do horizontal scroll to cursor, only adjust when the cursor has actually left the visible range
 	success, codeBox := find_box(ui_key("code"));
 	if success {
 		// cursors X location
@@ -132,18 +132,26 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 		lineContent := get_line_content(panel.document, cursorCoordinate.line,,temp);
 		lineContent.text.count = panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line);
 		cursorX := ifx lineContent.text.count == 0 then 0 else generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
-	
-		// the total range
-		longestLinePixelWidth := cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
-	
-		metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
-	
-		desiredScrollPos := 0.0;
-		if longestLinePixelWidth > 0 
-			desiredScrollPos = (cursorX/longestLinePixelWidth) * codeBox.viewBounds.x;
 
-		codeBox.viewOffsetTarget.x = desiredScrollPos;
-		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, codeBox.viewBounds.x, 0);
+		// @todo: should probably have a unified way of figuring out the visible box width
+		numDocumentLines := get_number_of_lines(panel.document);
+		gutterWidth := 0.0;
+		if lineNumbers {
+			gutterWidth = generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp).width;
+		}
+		visibleWidth := codeBox.rect.w - gutterWidth;
+
+		// reserve space for the cursor glyph itself, so its whole width stays in view, not just its left edge
+		metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
+
+		if cursorX < codeBox.viewOffset.x {
+			codeBox.viewOffsetTarget.x = cursorX;
+		}
+		else if cursorX > codeBox.viewOffset.x + visibleWidth - metrics.emWidth {
+			codeBox.viewOffsetTarget.x = cursorX - visibleWidth + metrics.emWidth;
+		}
+
+		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, 0, codeBox.viewBounds.x);
 	}
 }
 
