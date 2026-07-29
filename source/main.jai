@@ -1897,7 +1897,7 @@ document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change,
 		doc := document_get(handle);
 		if change.events & .MODIFIED || change.events & .MOVED_TO {
 			modtime, size, success := file_modtime_and_size(doc.path);
-			if modtime > doc.diskLastModtime {
+			if modtime != doc.diskLastModtime {
 				// reload file
 				if !document_is_unsaved(doc) {
 					document_load_from_disk(doc.handle);

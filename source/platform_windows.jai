@@ -30,7 +30,7 @@ platform_is_path_directory :: (path: string) -> bool {
 
 platform_path_hash :: (path: string) -> u32 {
 	lower := to_lower_copy(path,,temp);
-	path_overwrite_separators(path, #char "/");
+	path_overwrite_separators(lower, #char "/");
 	return get_hash(lower);
 }
 
