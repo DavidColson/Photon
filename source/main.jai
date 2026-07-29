@@ -295,6 +295,10 @@ update :: (deltaTime: float64) {
 	for uiState.events {
 		input_handler(it);
 	}
+	// input_handler may have just mutated document/editor state (e.g. inserted text) that hasn't
+	// been rendered yet this frame; request another frame so we don't go back to sleep and wait
+	// on the next OS message before showing it
+	if uiState.events.count > 0 then requestRedraw = true;
 	array_reset_keeping_memory(*uiState.events);
 
 	// update notifications
