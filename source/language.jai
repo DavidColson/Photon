@@ -16,6 +16,8 @@ Language :: struct {
 			ANY_OF;
 			EQ_KIND;
 			SET;
+			HAS_PARENT;
+			HAS_ANCESTOR;
 		}
 		type: Type;
 		not: bool;
@@ -353,6 +355,76 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 
 						predicateList, _ := find_or_add(*query.predicates, patternIndex);
 						array_add(predicateList, anyOfPredicate);
+					}
+					else if predicateName == "has-parent?" || predicateName == "not-has-parent?" {
+						hasParentPredicate: Language.Predicate;
+						hasParentPredicate.type = .HAS_PARENT;
+
+						if contains(predicateName, "not") {
+							hasParentPredicate.not = true;
+						}
+
+						i += 1;
+						if steps[i].type != .Capture {
+							log("Expected capture as first argument of has-parent predicate");
+							continue patternIndex;
+						}
+
+						hasParentPredicate.captureIndex1 = steps[i].value_id;
+
+						i += 1;
+						while steps[i].type != .Done {
+							if steps[i].type != .String {
+								log("Expected node type name as argument of has-parent predicate");
+								continue patternIndex;
+							}
+
+							candidate:string;
+							len: u32;
+							candidate.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
+							candidate.count = len;
+
+							i += 1;
+							array_add(*hasParentPredicate.strings, candidate);
+						}
+
+						predicateList, _ := find_or_add(*query.predicates, patternIndex);
+						array_add(predicateList, hasParentPredicate);
+					}
+					else if predicateName == "has-ancestor?" || predicateName == "not-has-ancestor?" {
+						hasAncestorPredicate: Language.Predicate;
+						hasAncestorPredicate.type = .HAS_ANCESTOR;
+
+						if contains(predicateName, "not") {
+							hasAncestorPredicate.not = true;
+						}
+
+						i += 1;
+						if steps[i].type != .Capture {
+							log("Expected capture as first argument of has-ancestor predicate");
+							continue patternIndex;
+						}
+
+						hasAncestorPredicate.captureIndex1 = steps[i].value_id;
+
+						i += 1;
+						while steps[i].type != .Done {
+							if steps[i].type != .String {
+								log("Expected node type name as argument of has-ancestor predicate");
+								continue patternIndex;
+							}
+
+							candidate:string;
+							len: u32;
+							candidate.data = ts_query_string_value_for_id(query.query, steps[i].value_id, *len);
+							candidate.count = len;
+
+							i += 1;
+							array_add(*hasAncestorPredicate.strings, candidate);
+						}
+
+						predicateList, _ := find_or_add(*query.predicates, patternIndex);
+						array_add(predicateList, hasAncestorPredicate);
 					}
 					else if predicateName == "eq?" || predicateName == "not-eq?" {
 						eqPredicate: Language.Predicate;
@@ -955,6 +1027,32 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 					captureText1 := get_capture_content(find_capture(tsMatch, predicate.captureIndex1), text,,temp);
 					captureText2 := get_capture_content(find_capture(tsMatch, predicate.captureIndex2), text,,temp);
 					test := ifx predicate.not then captureText1 != captureText2 else captureText1 == captureText2;
+					result = result && test;
+				case .HAS_PARENT;
+					node := find_capture(tsMatch, predicate.captureIndex1).node;
+					parent := ts_node_parent(node);
+					matched := false;
+					if !ts_node_is_null(parent) {
+						parentKind := get_node_type(parent);
+						for predicate.strings {
+							if parentKind == it then matched = true;
+						}
+					}
+					test := ifx predicate.not then !matched else matched;
+					result = result && test;
+				case .HAS_ANCESTOR;
+					node := find_capture(tsMatch, predicate.captureIndex1).node;
+					matched := false;
+					ancestor := ts_node_parent(node);
+					while !ts_node_is_null(ancestor) {
+						ancestorKind := get_node_type(ancestor);
+						for predicate.strings {
+							if ancestorKind == it then matched = true;
+						}
+						if matched then break;
+						ancestor = ts_node_parent(ancestor);
+					}
+					test := ifx predicate.not then !matched else matched;
 					result = result && test;
 				case .SET;
 					assert(predicate.strings.count == 1, "This is a set predicate, but no value is available to set in the predicate source");
