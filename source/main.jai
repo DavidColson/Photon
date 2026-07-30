@@ -652,10 +652,18 @@ build_ui_panel :: (panel: *Panel) {
 		spacer(.X, fixed(em(2.0)));
 
 		// file type
-		box(ui_key(panel.document.language.name), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		if panel.document.language {
+			box(ui_key(panel.document.language.name), .{
+				flags=.DRAW_TEXT,
+				layout=.{ width=text_content(), height=text_content() },
+			});
+		}
+		else {
+			box(ui_key(path_extension(panel.document.path)), .{
+				flags=.DRAW_TEXT,
+				layout=.{ width=text_content(), height=text_content() },
+			});
+		}
 
 		spacer(.X, fixed(em(2.0)));
 
