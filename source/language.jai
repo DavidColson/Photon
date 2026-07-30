@@ -78,6 +78,7 @@ staticLanguageData :: Language.[
 	.{name="cpp", extensions=.["cpp", "h", "hpp", "cc"], url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
 	.{name="c", extensions=.["c"], url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
 	.{name="python", extensions=.["py"], url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
+	.{name="lua", extensions=.["lua"], url="https://github.com/tree-sitter-grammars/tree-sitter-lua.git", revision="10fe0054734eec83049514ea2e718b2a56acd0c9"},
 ];
 
 LanguageFunc :: #type () -> *TSLanguage #c_call;
@@ -921,7 +922,11 @@ fetch_grammars :: () {
 build_grammars :: () {
 	// set up compile environment
 	vcPath, linkerPath := find_visual_studio_in_a_ridiculous_garbage_way();
-	compiler := join(linkerPath, "\\", "cl.exe");
+	// compiler := join(linkerPath, "\\", "cl.exe");
+	
+	// finding visualstudio linker path apparently doesn't work anymore. Just run this in a developer command prompt
+	// so cl.exe is just always accessible for now
+	compiler := "cl.exe";
 	windowsKit := find_windows_kit_root();
 	vcIncludePath := join(vcPath, "\\..\\..\\include");
 	windowsKitInclude := replace(windowsKit, "Lib", "Include");
@@ -959,7 +964,7 @@ build_grammars :: () {
 		array_add(*args, "/MACHINE:AMD64");
 		array_add(*args, tprint("/OUT:%.dll", it.name));
 		array_add(*args,
-			tprint("/libpath:%", vcPath),
+			// tprint("/libpath:%", vcPath), // removed because we can't find visual studio
 			tprint("/libpath:%\\um\\x64", windowsKit),
 			tprint("/libpath:%\\ucrt\\x64", windowsKit),
 		);
