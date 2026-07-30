@@ -526,16 +526,17 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 }
 	
 refresh_document_indentation_table :: (document: *Document) {
-	// figure out if we need to requery the indentation of a file, if we do then we do it here
-	treeHash := get_hash(document.tree);
+	// it's important we have up to date tree to use here, so we have to wait if one is in progress
+	while document.isParsing {
+		process_completed_tasks(*asyncWorker);
+		sleep_milliseconds(5);
+	}
+
+	// the hash uses both the text (we must refresh if the text changed) and 
+	// the treesitter tree, as the table is keyed by the node IDs
+	treeHash := get_hash(document.tsTree, get_hash(document.tree));
 	if treeHash != document.indents.treeHash {
-		// it's important we have up to date tree to use here, so we have to wait if one is in progress
-		while document.isParsing {
-			process_completed_tasks(*asyncWorker);
-			sleep_milliseconds(5);
-		}		
-		
-		table_reset(*document.indents.auto); 
+		table_reset(*document.indents.auto);
 		table_reset(*document.indents.begin); 
 		table_reset(*document.indents.end); 
 		table_reset(*document.indents.dedent); 
@@ -593,7 +594,7 @@ refresh_document_indentation_table :: (document: *Document) {
 				case "indent.zero"; table_set(*document.indents.zero, capture.node.id, metadata);
 				case; continue;
 			}
-		}	
+		}
 		document.indents.treeHash = treeHash;
 	}
 }
@@ -765,16 +766,14 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		
 		// indent.branch and indent.dedent reduce the indentation level by one
 		if !alreadyProcessed &&
-			( (branchFound && nodeStart.line == lineNumber) 
+			( (branchFound && nodeStart.line == lineNumber)
 			|| (dedentFound && nodeStart.line != lineNumber)) {
 			indentLevel -= tabSize;
 			isProcessed = true;
 		}
 
-		shouldProcess := !alreadyProcessed && !isProcessed;
-
 		// indent.begin is the primary contributor to indentation
-		if shouldProcess && beginFound {
+		if !alreadyProcessed && beginFound {
 	        validRange := (nodeStart.line != nodeEnd.line) || begin.immediate;
 	        validStart := (nodeStart.line != lineNumber) || begin.startAtSameLine;
 	
@@ -788,7 +787,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		// indent.align is the most complex case, we align by some opening delimiter
 		// usually you see this in parameter blocks of functions
 		isAbsoluteIndentation := false;
-		if shouldProcess && alignFound {
+		if !alreadyProcessed && alignFound {
 	        validStart := (nodeStart.line != lineNumber);
 			if validStart {
 				
@@ -873,7 +872,6 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 			append(*builder, " ");
 		}
 	}
-	
 
 	return builder_to_string(*builder,,temp);
 }

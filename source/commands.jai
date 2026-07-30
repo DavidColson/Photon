@@ -848,6 +848,9 @@ replace_indentation_for_line :: (doc: *Document, lineNumber: s64) -> s64 {
 
 	// line is either blank or empty
 	if deleteUpTo < 0 {
+		if lineContent.text == indentation {
+			return 0;
+		}
 		deleteUpTo = lineContent.text.count;
 		delete(doc, lineContent.startByteOffset, lineContent.text.count);
 	}
