@@ -73,7 +73,7 @@ EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
 // globals
 editorMode := EditorMode.NORMAL;
 focusedPanel : Panel;
-documentWatcher: File_Watcher(void);
+fileWatcher: File_Watcher(void);
 window: Window_Type;
 windowWidth  : s32 = 1920;
 windowHeight : s32 = 1080;
@@ -189,8 +189,8 @@ main :: () {
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
-	if !init(*documentWatcher, document_watcher_callback, watch_recursively = false) {
-		push_notification("Could not initialize the document watcher. Files won't be reloaded. This is likely a bug.");
+	if !init(*fileWatcher, file_watcher_callback, watch_recursively = true) {
+		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
 	}
 
 	focusedPanel.layoutRect.x = 0;
@@ -271,7 +271,8 @@ update :: (deltaTime: float64) {
 	}
 
 	project_update();
-	process_changes(*documentWatcher);
+	process_changes(*fileWatcher);
+	document_expire_stale_pending_renames();
 
 	// update the document incase it changed during the async tasks
 	focusedPanel.document = document_get(focusedPanel.docHandle);
@@ -1903,30 +1904,31 @@ do_backup_callback :: () {
 	}
 }
 
-document_watcher_callback:: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+file_watcher_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+	log("FileChange detected % %", change.full_path, change.events);
+
+	// unpaired move events are no-op here if the
+	// file isn't open as a document
+	// For project files it'll get handled below, we just
+	// delete and reload the project file, but for documents we handle it correctly so 
+	// nothing weird happens for the user, the filename will just change suddenly
+	if change.events & .MOVED_FROM {
+		if document_notify_moved_from(change.full_path) {
+			return;
+		}
+	}
+
+	if change.events & .MOVED_TO {
+		document_notify_moved_to(change.full_path);
+	}
+
+	// two different handlers for whether the file is open or not
 	found, handle := document_get_by_path(change.full_path);
 	if found {
-		log("FileChange detected % %", change.full_path, change.events);
-		doc := document_get(handle);
-		if change.events & .MODIFIED || change.events & .MOVED_TO {
-			modtime, size, success := file_modtime_and_size(doc.path);
-			if modtime != doc.diskLastModtime {
-				// reload file
-				if !document_is_unsaved(doc) {
-					document_load_from_disk(doc.handle);
-				}
-				else {
-					// @todo: when we have nicer UI this should give a popup or something more explicit
-					doc.undoStack[doc.undoStack.count-1].saved = false;
-					push_notification("File on disk changed, but you have unsaved edits");
-				}
-			}
-			// Even the file modtime has not changed, there could have been an attribute change
-			doc.diskReadOnly = platform_file_is_read_only(doc.path);
-		}
-		if change.events & .REMOVED {
-			doc.undoStack[doc.undoStack.count-1].saved = false;
-		}
+		document_handle_file_change(handle, change);
+	}
+	else {
+		project_handle_file_change(change);
 	}
 }
 

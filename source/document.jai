@@ -164,6 +164,14 @@ openDocumentTable: Table(string, DocumentHandle, given_compare_function=platform
 // @todo: make read only or something??
 nilDocument: Document;
 
+PendingDocumentRename :: struct {
+	handle: DocumentHandle;
+	oldPath: string;
+	time: float64;
+}
+pendingDocumentRenames: [..]PendingDocumentRename;
+PENDING_RENAME_TIMEOUT_SECONDS :: 0.75; // generous relative to File_Watcher's own 0.1s merge window
+
 tree_test :: () {
 	docHandle := document_get_or_open("build_shorter.jai");
 	doc := document_get(docHandle);
@@ -315,7 +323,7 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 	// setup file watcher
 	parentPath := path_strip_filename(doc.path);
 	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	add_directories(*documentWatcher, parentPath);
+	add_directories(*fileWatcher, parentPath);
 
 	return doc.handle;
 }
@@ -691,15 +699,16 @@ document_save :: (doc: *Document, path: string, backup := false) {
 
 		if !isBackup {
 			if doc.path != desiredPath {
-				free(doc.path); // this is bad for some reason?
-				doc.path = copy_string(desiredPath);
+				// keeps openDocumentTable, disk metadata and the watched directories in sync with the new path
+				document_update_path(doc.handle, desiredPath);
 			}
-
-			modtime, size, success := file_modtime_and_size(doc.path);
-			if success {
-				doc.diskLastModtime = modtime;
+			else {
+				modtime, size, success := file_modtime_and_size(doc.path);
+				if success {
+					doc.diskLastModtime = modtime;
+				}
+				doc.diskReadOnly = platform_file_is_read_only(doc.path);
 			}
-			doc.diskReadOnly = platform_file_is_read_only(doc.path);
 
 			push_notification("Document Saved");
 
@@ -749,6 +758,107 @@ document_get_by_path :: (path: string) -> bool, DocumentHandle {
 	defer unlock(*openDocumentLock);
 	success, locator := table_find(*openDocumentTable, path);
 	return success, locator;
+}
+
+document_update_path :: (handle: DocumentHandle, newPath: string) {
+	doc := document_get(handle);
+	if doc == *nilDocument return;
+
+	lock(*openDocumentLock);
+	table_remove(*openDocumentTable, doc.path);
+	free(doc.path);
+	doc.path = copy_string(newPath);
+	path_overwrite_separators(doc.path, #char "/");
+	table_add(*openDocumentTable, doc.path, handle);
+	unlock(*openDocumentLock);
+
+	modtime, size, success := file_modtime_and_size(doc.path);
+	if success then doc.diskLastModtime = modtime;
+	doc.diskReadOnly = platform_file_is_read_only(doc.path);
+
+	parentPath := path_strip_filename(doc.path);
+	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
+	add_directories(*fileWatcher, parentPath);
+}
+
+document_notify_moved_from :: (path: string) -> bool {
+	document_expire_stale_pending_renames();
+
+	found, handle := document_get_by_path(path);
+	if !found return false;
+
+	for * pendingDocumentRenames {
+		if platform_path_equal(it.oldPath, path) {
+			it.time = seconds_since_init();
+			return true;
+		}
+	}
+
+	entry: PendingDocumentRename;
+	entry.handle = handle;
+	entry.oldPath = copy_string(path);
+	entry.time = seconds_since_init();
+	array_add(*pendingDocumentRenames, entry);
+	return true;
+}
+
+document_notify_moved_to :: (path: string) -> bool {
+	document_expire_stale_pending_renames();
+
+	found, _ := document_get_by_path(path);
+	if found return true;
+
+	if pendingDocumentRenames.count > 0 {
+		entry := pendingDocumentRenames[0];
+		document_update_path(entry.handle, path);
+		free(entry.oldPath);
+		array_ordered_remove_by_index(*pendingDocumentRenames, 0);
+		return true;
+	}
+
+	return false;
+}
+
+document_expire_stale_pending_renames :: () {
+	now := seconds_since_init();
+	i := pendingDocumentRenames.count - 1;
+	while i >= 0 {
+		entry := *pendingDocumentRenames[i];
+		if now - entry.time > PENDING_RENAME_TIMEOUT_SECONDS {
+			doc := document_get(entry.handle);
+			if doc != *nilDocument && doc.undoStack.count > 0 {
+				doc.undoStack[doc.undoStack.count-1].saved = false;
+			}
+			free(entry.oldPath);
+			array_ordered_remove_by_index(*pendingDocumentRenames, i);
+		}
+		i -= 1;
+	}
+}
+
+document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
+	doc := document_get(handle);
+	modtime, size, exists := file_modtime_and_size(doc.path);
+	if exists {
+		// check if the file changed on disk, we do a != to cover cases like
+		// P4 updating the modtime to an older time when you revert
+		if modtime != doc.diskLastModtime {
+			// reload file
+			if !document_is_unsaved(doc) {
+				document_load_from_disk(doc.handle);
+			}
+			else {
+				// @todo: when we have nicer UI this should give a popup or something more explicit
+				doc.undoStack[doc.undoStack.count-1].saved = false;
+				push_notification("File on disk changed, but you have unsaved edits");
+			}
+		}
+		// Even if the file modtime has not changed, there could have been an attribute change
+		doc.diskReadOnly = platform_file_is_read_only(doc.path);
+	}
+	else if change.events & .REMOVED {
+		doc.undoStack[doc.undoStack.count-1].saved = false;
+	}
 }
 
 begin_edit :: (doc: *Document) {

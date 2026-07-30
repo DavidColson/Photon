@@ -12,8 +12,6 @@ Project :: struct {
 	ignore: [..]string;
 	allow: [..]string;
 
-	watcher: File_Watcher(void);
-
 	File :: struct {
 		fullName: string;
 		content: string;
@@ -201,11 +199,7 @@ project_begin_load :: () {
 	// note this task will read/edit the project without any protection
 	// it is assumed no other project processes happen while this occurs
 
-	if !init(*project.watcher, project_file_watch_callback, watch_recursively = true) {
-		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
-	}
-
-    add_directories(*project.watcher, ..project.folders);
+    add_directories(*fileWatcher, ..project.folders);
 
 	collect_project_files_task :: (data: *void) {
 		maybe_add_file_to_project_list :: (info: *File_Visit_Info, udata: *Project) {
@@ -286,9 +280,6 @@ project_update :: () {
 		requestRedraw = true;
 	}
 
-	// @todo: what happens if a file changes while we're still loading the project?
-	process_changes(*project.watcher);
-
 	// Update the searcher thread if active
 	searchWork := get_completed_work(*project.searchThreads);
 	currentSearchTerm := string.{ focusedPanel.projectSearcher.input.text.count, focusedPanel.projectSearcher.input.text.data };
@@ -311,15 +302,12 @@ project_update :: () {
 	}
 }
 
-#scope_file
-
-project_file_watch_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
+// Reacts to a file watcher change for a path that is not currently an open
+// document (the shared fileWatcher's routing callback in main.jai only calls
+// this once it has confirmed the path isn't an open document).
+project_handle_file_change :: (change: *File_Change) {
+	// @todo: what happens if a file changes while we're still loading the project?
 	if project.loadProgress != .COMPLETE then return;
-
-	log("FileChange detected % %", change.full_path, change.events);
-
-	// @todo: the file change may relate to an open document
-	// in that case forward the change event to the document callback function (when it's been made)
 
 	// is this actually a file we care about in the project?
 	if !should_ignore_file(change.full_path) {
