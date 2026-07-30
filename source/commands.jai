@@ -718,6 +718,48 @@ new_line_above :: (using panel: *Panel, args: []string) {
 	panel.cursor.anchor = panel.cursor.head;
 }
 
+join_selection :: (using panel: *Panel, args: []string) {
+	begin_edit(document);
+	defer end_edit(document);
+	
+	// What should happen here? 
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
+	
+	startLine := min(headCoord.line, anchorCoord.line);
+	endLine := max(headCoord.line, anchorCoord.line);
+	
+	delta := 0;
+	for 1..max(1,endLine-startLine) {
+		// we deal with the start line every time, cause each iteration removes one of the lines below
+		nextLine := get_line_content(document, startLine+1, true);
+		lineTrimmed := trim_left(nextLine.text);
+		bytesToRemove := nextLine.text.count - lineTrimmed.count;
+		deletionStart := nextLine.startByteOffset;
+		
+		
+		while true {
+			char := get_char_at(document, deletionStart-1);
+			if char == #char "\n" || char == #char "\r" {
+				bytesToRemove += 1;
+				deletionStart -= 1;
+				continue;
+			}
+			break;
+		}
+		delete(document, deletionStart, bytesToRemove);
+		insert(document, deletionStart, " ");
+		delta -= bytesToRemove - 1;
+	}
+	
+	if cursor.head < cursor.anchor {
+		cursor.anchor = cursor.anchor+delta;
+	}
+	else if cursor.head > cursor.anchor {
+		cursor.head = cursor.head+delta;
+	}
+}
+
 // TODO: should be defined alongside the language
 commentString :: "// ";
 

@@ -1178,7 +1178,7 @@ get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> 
 	prev: u8;
 	endOffset := 0;
 
-	for iterator {
+	for :raw_bytes iterator {
 		if !includeLineEndings && (it == #char "\n" || it == #char "\r") {
 			endOffset = offset + it_index;
 			break;
