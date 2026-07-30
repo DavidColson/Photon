@@ -301,6 +301,11 @@ update :: (deltaTime: float64) {
 	if uiState.events.count > 0 then requestRedraw = true;
 	array_reset_keeping_memory(*uiState.events);
 
+	if focusedPanel.cursor.head != focusedPanel.lastScrolledCursorHead {
+		panel_scroll_to_cursor(*focusedPanel);
+		focusedPanel.lastScrolledCursorHead = focusedPanel.cursor.head;
+	}
+
 	// update notifications
 
 	nNotificationsToRemove := 0;

@@ -3,10 +3,12 @@ Cursor :: struct {
 	head: s64;
 	anchor: s64;
 
-	// when users move up and down lines, this stores the 
-	// column that we should try stick to as we move up and down
-	// gets reset when the user actually moves left or right
-	virtualColumn: s64; 
+	// when users move up and down lines, this stores the
+	// column that we should try stick to as we move up and down.
+	// it is a cache so it doesn't have to be manually updated, see
+	// get_virtual_column() for more explanation
+	virtualColumn: s64;
+	virtualColumnHead: s64;
 }
 
 Panel :: struct {
@@ -21,6 +23,7 @@ Panel :: struct {
 
 	// cursors
 	cursor: Cursor;
+	lastScrolledCursorHead: s64;
 
 	// we key by the document path because documentHandle is not actually hashable
 	// TODO: make documentHandle be hashable and improve this
@@ -91,6 +94,8 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 			codeScrollInitialOffset = 0;
 		}
 	}
+
+	panel.lastScrolledCursorHead = panel.cursor.head;
 }
 
 panel_reset_dialogs :: (panel: *Panel) {

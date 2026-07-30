@@ -9,10 +9,7 @@ move_one_char_left :: (using panel: *Panel, args: []string) {
 
 	cursor.head -= 1;
 	cursor.head = clamp(cursor.head, lineStart, lineEnd);
-	
-	set_virtual_column(panel);
 	cursor.anchor = cursor.head;
-	panel_scroll_to_cursor(panel);
 }
 
 move_one_char_right :: (using panel: *Panel, args: []string) {
@@ -22,14 +19,30 @@ move_one_char_right :: (using panel: *Panel, args: []string) {
 
 	panel.cursor.head += 1;
 	panel.cursor.head = clamp(panel.cursor.head, lineStart, lineEnd);
-
-	set_virtual_column(panel);
 	cursor.anchor = cursor.head;
-	panel_scroll_to_cursor(panel);
 }
 
 chars_to_tabstop :: (column: s64) -> s64 {
 	return tabSize - column % tabSize;
+}
+
+// Converts a virtual (visual) column into a byte offset into lineContent's text,
+// accounting for tab stops. Clamped to the end of the line if the column is beyond it.
+byte_offset_for_virtual_column :: (lineContent: Document.LineContent, virtualColumn: s64) -> s64 {
+	columnCounter := 0;
+	for lineContent.text {
+		if it == #char "\t" {
+			columnCounter += chars_to_tabstop(columnCounter);
+		}
+		else {
+			columnCounter += 1;
+		}
+
+		if columnCounter > virtualColumn {
+			return it_index;
+		}
+	}
+	return lineContent.text.count;
 }
 
 move_one_line_down :: (using panel: *Panel, args: []string) {
@@ -38,93 +51,59 @@ move_one_line_down :: (using panel: *Panel, args: []string) {
 	newLine := min(cursorCoordinate.line + 1, numLines - 1);
 	newLineContent := get_line_content(panel.document, newLine);
 
-	// recalculate the cursor column to match the virtual column
-	columnCounter := 0;
-	targetByteOffset := newLineContent.text.count;
-	for newLineContent.text {
-		if it == #char "\t" {
-			columnCounter += chars_to_tabstop(columnCounter);
-		}
-		else {
-			columnCounter += 1;
-		}
-
-		if columnCounter > cursor.virtualColumn {
-			targetByteOffset = it_index;
-			break;
-		}
-	}
-
-	cursor.head = newLineContent.startByteOffset + targetByteOffset;
-
+	targetColumn := get_virtual_column(panel);
+	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
 	cursor.anchor = cursor.head;
-	panel_scroll_to_cursor(panel);
+
+	cursor.virtualColumn = targetColumn;
+	cursor.virtualColumnHead = cursor.head;
 }
 
 move_one_line_up :: (using panel: *Panel, args: []string) {
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 	newLine := max(cursorCoordinate.line - 1, 0);
 	newLineContent := get_line_content(panel.document, newLine);
-	
-	// recalculate the cursor column to match the virtual column
-	columnCounter := 0;
-	targetByteOffset := newLineContent.text.count;
-	for newLineContent.text {
-		if it == #char "\t" {
-			columnCounter += chars_to_tabstop(columnCounter);
-		}
-		else {
-			columnCounter += 1;
-		}
 
-		if columnCounter > cursor.virtualColumn {
-			targetByteOffset = it_index;
-			break;
-		}
-	}
-
-	cursor.head = newLineContent.startByteOffset + targetByteOffset;
-
+	targetColumn := get_virtual_column(panel);
+	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
 	cursor.anchor = cursor.head;
-	panel_scroll_to_cursor(panel);
+
+	cursor.virtualColumn = targetColumn;
+	cursor.virtualColumnHead = cursor.head;
 }
 
 move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
 	newLineContent := get_line_content(panel.document, line);
-	
-	// recalculate the cursor column to match the virtual column
-	columnCounter := 0;
-	targetByteOffset := newLineContent.text.count;
-	for newLineContent.text {
-		if it == #char "\t" {
-			columnCounter += chars_to_tabstop(columnCounter);
-		}
-		else {
-			columnCounter += 1;
-		}
 
-		if columnCounter > cursor.virtualColumn {
-			targetByteOffset = it_index;
-			break;
-		}
-	}
+	targetColumn := get_virtual_column(panel);
+	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
 
-	cursor.head = newLineContent.startByteOffset + targetByteOffset;
+	cursor.virtualColumn = targetColumn;
+	cursor.virtualColumnHead = cursor.head;
 }
 
-set_virtual_column :: (using panel: *Panel) {
-	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
-	newLineContent := get_line_content(document, cursorCoordinate.line);
-	cursor.virtualColumn = 0;
-	for newLineContent.text {
-		if it_index >= cursorCoordinate.col then break;
-		if it == #char "\t" {
-			cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-		}
+get_virtual_column :: (using panel: *Panel) -> s64 {
+	// We used to have every single piece of code manually update the virtual column anytime it
+	// changed the cursor in some relevant way, but this became very error prone and resulted in
+	// boilerplate code being left everywhere. So now the virtual column is lazy updated when
+	// it's required by storing the cursor head of where it was last recomputed.
+	// This getter will check if it needs updating and update it accordingly
+	if cursor.virtualColumnHead != cursor.head {
+		cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
+		newLineContent := get_line_content(document, cursorCoordinate.line);
+		cursor.virtualColumn = 0;
+		for newLineContent.text {
+			if it_index >= cursorCoordinate.col then break;
+			if it == #char "\t" {
+				cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
+			}
 		else {
-			cursor.virtualColumn += 1;
+				cursor.virtualColumn += 1;
+			}
 		}
+		cursor.virtualColumnHead = cursor.head;
 	}
+	return cursor.virtualColumn;
 }
 
 goto_document_start :: (using panel: *Panel, args: []string) {
@@ -149,17 +128,12 @@ goto_line_end :: (using panel: *Panel, args: []string) {
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	_, cursor.head = get_line_range(document, coordinate.line);
 	cursor.anchor = cursor.head;
-
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 goto_line_start :: (using panel: *Panel, args: []string) { 
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	cursor.head = get_line_start(document, coordinate.line);
 	cursor.anchor = cursor.head;
-	cursor.virtualColumn = 0;
-	panel_scroll_to_cursor(panel);
 }
 
 CharCategory :: enum {
@@ -228,8 +202,6 @@ move_word_forward :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	}
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	cursor.anchor = shift_offset_line_endings(document, cursor.anchor, .REVERSE);
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory, CharCategory) -> bool) {
@@ -253,8 +225,6 @@ move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	}
 	cursor.head = shift_offset_line_endings(document, cursor.head, .FORWARD);
 	cursor.anchor = shift_offset_line_endings(document, cursor.anchor, .FORWARD);
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 move_word_start :: (using panel: *Panel, args: []string) { 
@@ -264,7 +234,6 @@ move_word_start :: (using panel: *Panel, args: []string) {
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isWordBoundary && (nextIsLineEnding || !nextIsWhitespace);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_long_word_start :: (using panel: *Panel, args: []string) { 
@@ -279,7 +248,6 @@ move_long_word_start :: (using panel: *Panel, args: []string) {
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isLongWordBoundary && (nextIsLineEnding || !nextIsWhitespace);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_sub_word_start :: (using panel: *Panel, args: []string) { 
@@ -298,7 +266,6 @@ move_sub_word_start :: (using panel: *Panel, args: []string) {
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isSubWordBoundary && (nextIsLineEnding || !(nextIsWhitespace || next == #char "_"));
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_prev_word_start :: (using panel: *Panel, args: []string) { 
@@ -311,7 +278,6 @@ move_prev_word_start :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_word_end :: (using panel: *Panel, args: []string) { 
@@ -321,7 +287,6 @@ move_word_end :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_long_word_end :: (using panel: *Panel, args: []string) { 
@@ -335,7 +300,6 @@ move_long_word_end :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isLongWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 move_sub_word_end :: (using panel: *Panel, args: []string) { 
@@ -354,7 +318,6 @@ move_sub_word_end :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isSubWordBoundary && (!(prevIsWhitespace || prev == #char "_") || nextIsLineEnding);
 	});
-	panel_scroll_to_cursor(panel);
 }
 
 jump_to_char :: (using panel: *Panel, args: []string) { 
@@ -366,8 +329,6 @@ jump_to_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 jump_to_last_char :: (using panel: *Panel, args: []string) { 
@@ -379,8 +340,6 @@ jump_to_last_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 jump_to_before_char :: (using panel: *Panel, args: []string) { 
@@ -393,8 +352,6 @@ jump_to_before_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 jump_to_before_last_char :: (using panel: *Panel, args: []string) { 
@@ -407,8 +364,6 @@ jump_to_before_last_char :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
-	set_virtual_column(panel);
-	panel_scroll_to_cursor(panel);
 }
 
 extend_selection_to_lines :: (using panel: *Panel, args: []string) { 
@@ -434,7 +389,6 @@ extend_selection_to_lines :: (using panel: *Panel, args: []string) {
 	}
 
 	cursor.virtualColumn = S64_MAX;
-	panel_scroll_to_cursor(panel);
 }
 
 extend_selection_to_lines_above :: (using panel: *Panel, args: []string) { 
@@ -459,19 +413,16 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 	}
 
 	cursor.virtualColumn = 0;
-	panel_scroll_to_cursor(panel);
 }
 
 select_whole_document :: (using panel: *Panel, args: []string) {
 	cursor.anchor = 0;
 	cursor.head = get_size(document)-1;
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
-	panel_scroll_to_cursor(panel);
 }
 
 collapse_selection :: (using panel: *Panel, args: []string) {
 	cursor.anchor = cursor.head;
-	panel_scroll_to_cursor(panel);
 }
 
 // Normal Mode Changes
@@ -497,7 +448,6 @@ enter_insert_mode_start :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-	panel_scroll_to_cursor(panel);
 }
 
 enter_insert_mode_end :: (using panel: *Panel, args: []string) {
@@ -511,7 +461,6 @@ enter_insert_mode_end :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-	panel_scroll_to_cursor(panel);
 }
 
 enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
@@ -531,7 +480,6 @@ enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-	panel_scroll_to_cursor(panel);
 }
 
 enter_insert_mode_line_end :: (using panel: *Panel, args: []string) {
@@ -540,7 +488,6 @@ enter_insert_mode_line_end :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-	panel_scroll_to_cursor(panel);
 }
 
 select_register :: (using panel: *Panel, args: []string) { 
@@ -579,8 +526,6 @@ delete_selection :: (using panel: *Panel, args: []string) {
 	defer end_edit(document);
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
-
-	panel_scroll_to_cursor(panel);
 }
 
 change_selection :: (using panel: *Panel, args: []string) {
@@ -621,19 +566,16 @@ yank_selection :: (using panel: *Panel, args: []string) {
 
 	yank_range_to_register(document, rangeStart, rangeEnd);
 	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
-	panel_scroll_to_cursor(panel);
 }
 
 paste_after_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
 	cursor = paste(document, textToPaste, cursor, false);
-	panel_scroll_to_cursor(panel);
 }
 
 paste_before_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
 	cursor = paste(document, textToPaste, cursor, true);
-	panel_scroll_to_cursor(panel);
 }
 
 replace_selection :: (using panel: *Panel, args: []string) {
@@ -658,8 +600,6 @@ replace_selection :: (using panel: *Panel, args: []string) {
 	insert(document, min(cursor.head, cursor.anchor), builder_to_string(*builder,,temp));
 	cursor.head = head;
 	cursor.anchor = anchor;
-
-	panel_scroll_to_cursor(panel);
 }
 
 replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
@@ -682,8 +622,6 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 
 	cursor.anchor = insertLocation;
 	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
-
-	panel_scroll_to_cursor(panel);
 }
 
 paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore: bool) -> Cursor {
@@ -823,8 +761,6 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 		cursor.anchor += offset;
 		cursor.head += (endLine - startLine + 1)*offset;
 	}
-
-	panel_scroll_to_cursor(panel);
 }
 
 autoindent_line :: (using panel: *Panel, args: []string) {
@@ -873,8 +809,6 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 	else {
 		cursor.head += diff;
 	}
-	
-	panel_scroll_to_cursor(panel);
 }
 
 indent_line :: (using panel: *Panel, args: []string) {
@@ -900,8 +834,6 @@ indent_line :: (using panel: *Panel, args: []string) {
 		cursor.anchor += 1;
 		cursor.head += endLine - startLine + 1;
 	}
-
-	panel_scroll_to_cursor(panel);
 }
 
 unindent_line :: (using panel: *Panel, args: []string) {
@@ -941,8 +873,6 @@ unindent_line :: (using panel: *Panel, args: []string) {
 	else {
 		cursor.head -= bytesDeleted + 1;
 	}
-
-	panel_scroll_to_cursor(panel);
 }
 
 undo :: (using panel: *Panel, args: []string) {
@@ -977,7 +907,6 @@ undo :: (using panel: *Panel, args: []string) {
 	// when you commit the history you store that range
 	// which may or may not be the same as the initial edit offset
 	
-	panel_scroll_to_cursor(panel);
 }
 
 redo :: (using panel: *Panel, args: []string) {
@@ -986,7 +915,6 @@ redo :: (using panel: *Panel, args: []string) {
 		panel.cursor.head = result;
 		panel.cursor.anchor = panel.cursor.head;
 	}
-	panel_scroll_to_cursor(panel);
 }
 
 
@@ -1118,9 +1046,6 @@ insert_mode_insert_string :: (input: string) {
 	// move the cursor along
 	focusedPanel.cursor.head += input.count;
 
-	// @todo: update virtual column correctly
-	focusedPanel.cursor.virtualColumn = 0;
-
 	// update the anchor
 	if distanceToAnchor > 0 {
 		// anchor is ahead, we want to move it same as the head
@@ -1130,8 +1055,6 @@ insert_mode_insert_string :: (input: string) {
 		focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 	}
 	document_update_ts_tree(focusedPanel.document);
-
-	panel_scroll_to_cursor(*focusedPanel);
 }
 
 insert_mode_handle_text_input :: (char: Utf8_Char) {
@@ -1172,7 +1095,6 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 
 	delete(document, startOffset, change);
 	cursor.head -= change;
-	// @todo: update virtual column correctly
 
 	// update the anchor
 	if distanceToAnchor > 0 {
@@ -1182,8 +1104,6 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
-
-	panel_scroll_to_cursor(panel);
 }
 
 insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
@@ -1193,7 +1113,6 @@ insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
 	endOffset := shift_offset_line_endings(document, cursor.head + 1, .FORWARD);
 	change := endOffset-startOffset;
 	delete(document, startOffset, change);
-	// @todo: update virtual column correctly
 
 	// update the anchor
 	if distanceToAnchor > 0 {
@@ -1203,7 +1122,6 @@ insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
-	panel_scroll_to_cursor(panel);
 }
 
 
