@@ -29,14 +29,15 @@
 ((modify_block) @indent.end)
 ((place_directive) @indent.branch)
 
-; only indent the first statement after an if
+; only indent the first statement after an if. When there's an else too, it
+; needs to dedent back to the if's level to cancel this back out - but only
+; in this no-braces case, since that's the only case that indents at all
 (if_statement_condition_and_consequence
   consequence: (_
     ";" @indent.end) @_consequence
   (#not-match? @_consequence "\\{")
+  alternative: (else_clause)? @indent.branch
 ) @indent.begin
-
-(else_clause) @indent.branch
 
 ; This is a workaround. I can't get 'else if' indentation to work properly.
 (else_clause
