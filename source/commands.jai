@@ -570,12 +570,12 @@ yank_selection :: (using panel: *Panel, args: []string) {
 
 paste_after_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
-	cursor = paste(document, textToPaste, cursor, false);
+	paste(panel, textToPaste, false);
 }
 
 paste_before_selection :: (using panel: *Panel, args: []string) {
 	textToPaste := read_register(registers.selectedRegister);
-	cursor = paste(document, textToPaste, cursor, true);
+	paste(panel, textToPaste, true);
 }
 
 replace_selection :: (using panel: *Panel, args: []string) {
@@ -604,7 +604,6 @@ replace_selection :: (using panel: *Panel, args: []string) {
 
 replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 	begin_edit(document);
-	defer end_edit(document);
 
 	head := cursor.head;
 	anchor := cursor.anchor;
@@ -619,18 +618,32 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 	insertLocation := max(cursor.head, cursor.anchor);
 	insert(document, insertLocation, textToPaste);
 	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, textToPaste.count});
+	end_edit(document);
 
 	cursor.anchor = insertLocation;
 	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
+	
+	linewise := false;
+	for textToPaste {
+		if it == #char "\n" {
+			linewise = true;
+			break;
+		}
+	}
+	if linewise {
+		autoindent_selection(panel, .[]);
+	}
 }
 
-paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore: bool) -> Cursor {
+paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	begin_edit(document);
-	defer end_edit(document);
 
 	linewise := false;
 	for textToPaste {
-		if it == #char "\n" then linewise = true;
+		if it == #char "\n" {
+			linewise = true;
+			break;
+		}
 	}
 
 	insertLocation := 0;
@@ -658,10 +671,13 @@ paste :: (document: *Document, textToPaste: string, cursor: Cursor, pasteBefore:
 	}
 	
 	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count});
-	newCursor := cursor;
-	newCursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
-	newCursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
-	return newCursor;
+	cursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
+	cursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
+	end_edit(document);
+	
+	if linewise {
+		autoindent_selection(panel, .[]);
+	}
 }
 
 new_line_below :: (using panel: *Panel, args: []string) {
