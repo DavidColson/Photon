@@ -122,7 +122,6 @@ Document :: struct {
 	editOpen: bool;
 	isCopy: bool;
 
-	languageName: string;
 	language: *Language;
 	tsTree: *TSTree;
 	indents: Indents;
@@ -337,9 +336,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	load_from_disk_task :: (data: *void) {
 		taskData := cast(*TaskData, data);
 		doc := taskData.workingDocument;
-		// @todo: need a more sophisticated mapping to handle header files
-		doc.languageName = path_extension(doc.path);
-		_, lang := get_language(doc.languageName);
+		_, lang := get_language(path_extension(doc.path));
 		doc.language = lang;
 
 		doc.bufferMemory.alignment = 1; // important!! make this hard to miss
@@ -545,9 +542,7 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	
 	doc.path = copy_string(file.fullName);
 
-	// @todo: need a more sophisticated mapping to handle header files
-	doc.languageName = path_extension(doc.path);
-	_, lang := get_language(doc.languageName);
+	_, lang := get_language(path_extension(doc.path));
 	doc.language = lang;
 
 	doc.handle = docHandle;
@@ -1781,7 +1776,7 @@ ts_parse_task :: (data: *void) {
 	defer ts_parser_delete(parser);
 
 	if !ts_parser_set_language(parser , docCopy.language.treesitterLang) {
-		log("Language ABI mismatch: Language(%) is % and treesitter is %", docCopy.languageName, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(docCopy.language.treesitterLang));
+		log("Language ABI mismatch: Language(%) is % and treesitter is %", docCopy.language.name, TREE_SITTER_LANGUAGE_VERSION, ts_language_abi_version(docCopy.language.treesitterLang));
 	}
 
 	tsVerboseLogging := false;

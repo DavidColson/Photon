@@ -3,6 +3,7 @@ Language :: struct {
 	// But it's intended this lives the whole duration of the program
 	// So we do not free it
 	name: string;
+	extensions: []string;
 	url: string;
 	revision: string;
 	treesitterLang: *TSLanguage;
@@ -71,51 +72,42 @@ HighlightType :: enum {
 
 // should probably be in a config file or something?
 staticLanguageData :: Language.[
-	.{name="jai", url="https://github.com/constantitus/tree-sitter-jai.git", revision="e15938a94c931662aa3e38cc07dfb98cf7436a90"},
-	.{name="cpp", url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
-	.{name="c", url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
-	.{name="python", url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
+	.{name="jai", extensions=.["jai"], url="https://github.com/constantitus/tree-sitter-jai.git", revision="e15938a94c931662aa3e38cc07dfb98cf7436a90"},
+	.{name="cpp", extensions=.["cpp", "h", "hpp", "cc"], url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
+	.{name="c", extensions=.["c"], url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
+	.{name="python", extensions=.["py"], url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
 ];
 
 LanguageFunc :: #type () -> *TSLanguage #c_call;
 languages: Table(string, Language);
 languagesMutex: Mutex;
 
-get_language :: (_languageName: string) -> bool, *Language {
-	languageName := _languageName;
-	// TODO: proper remap table!!!
-	if equal(languageName, "h") {
-		languageName = "cpp";
-	} 
-	if equal(languageName, "py") {
-		languageName = "python";
-	} 
-
-	if languageName.count == 0 return false, null;
-
+get_language :: (fileExtension: string) -> bool, *Language {
 	staticLangData: Language;
 	supportsLang := false;
-	for staticLanguageData {
-		if it.name==languageName {
-			staticLangData = it;
-			supportsLang = true;
-			break;
+	for lang: staticLanguageData {
+		for lang.extensions {
+			if it == fileExtension {
+				staticLangData = lang;
+				supportsLang = true;
+				break;
+			}
 		}
 	}
-
+	
 	if supportsLang == false {
 		return false, null;
 	}
 
 	lock(*languagesMutex);
-	lang, added := find_or_add(*languages, languageName);
+	lang, added := find_or_add(*languages, staticLangData.name);
 	unlock(*languagesMutex);
 	if !added {
 		return true, lang;
 	}
 
 	basePath := get_app_base_path();
-	libPath := tprint("%grammars/%.dll", basePath, languageName);
+	libPath := tprint("%grammars/%.dll", basePath, staticLangData.name);
 	if !file_exists(libPath) {
 		return false, null;
 	}
@@ -127,7 +119,7 @@ get_language :: (_languageName: string) -> bool, *Language {
 	grammarLib := LoadLibraryA(temp_c_string(libPath));
 
 	// Load the treesitter language structure
-	functionName := tprint("tree_sitter_%", languageName);
+	functionName := tprint("tree_sitter_%", lang.name);
 	loadFunc := cast(LanguageFunc, GetProcAddress(grammarLib, temp_c_string(functionName)));
 	lang.treesitterLang = loadFunc();
 	
