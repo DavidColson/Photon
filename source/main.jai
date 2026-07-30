@@ -1574,7 +1574,7 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 		for box.textRun.instances {
 			byteOffset:u32 = xx box.textRun.byteOffsets[it_index];
 
-			if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
+			while currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
 				currentHighlightIndex += 1;
 			}
 
@@ -1725,7 +1725,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 			for run.instances {
 				byteOffset := line.startByteOffset + run.byteOffsets[it_index];
 
-				if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
+				while currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
 					currentHighlightIndex += 1;
 				}
 
