@@ -127,7 +127,7 @@ normalModeCommands :: Command.[
 	.{ "New line above selection", .["O"], 0, new_line_above },
 	.{ "Indent line", .[">"], 0, indent_line },
 	.{ "Unindent line", .["<"], 0, unindent_line },
-	.{ "Autoindent line", .["="], 0, autoindent_line },
+	.{ "Autoindent selection", .["="], 0, autoindent_selection },
 	.{ "Toggle comment", .["<space>c"], 0, toggle_comment },
 	.{ "Undo", .["u"], 0, undo },
 	.{ "Redo", .["U"], 0, redo },

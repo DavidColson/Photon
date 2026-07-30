@@ -762,8 +762,34 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 		cursor.head += (endLine - startLine + 1)*offset;
 	}
 }
+	
+replace_indentation_for_line :: (doc: *Document, lineNumber: s64) {
+	indentation := calculate_indentation_for_line(doc, lineNumber);
+	lineContent := get_line_content(doc, lineNumber);
+	
+	// delete any existing indentation
+	deleteUpTo := -1;
+	for lineContent.text {
+		if it != #char "\t" && it != #char " " {
+			existingIndentation := slice(lineContent.text, 0, it_index);
+			if existingIndentation == indentation {
+				return;
+			}
+			deleteUpTo = it_index;
+			delete(doc, lineContent.startByteOffset, it_index);
+			break;
+		}
+	}
+	
+	// line is either blank or empty
+	if deleteUpTo < 0 {
+		delete(doc, lineContent.startByteOffset, lineContent.text.count);
+	}
+	
+	insert(doc, lineContent.startByteOffset, indentation);
+}
 
-autoindent_line :: (using panel: *Panel, args: []string) {
+autoindent_selection :: (using panel: *Panel, args: []string) {
 	// TODO: allow setting tabs or spaces, and tab width
 	begin_edit(document);
 	defer end_edit(document);
@@ -777,29 +803,7 @@ autoindent_line :: (using panel: *Panel, args: []string) {
 	endLine := max(headCoord.line, anchorCoord.line);
 
 	for lineNumber: startLine..endLine {
-		indentation := calculate_indentation_for_line(document, lineNumber);
-		lineContent := get_line_content(panel.document, lineNumber);
-		
-		// delete any existing indentation
-		deleteUpTo := -1;
-		for lineContent.text {
-			if it != #char "\t" && it != #char " " {
-				existingIndentation := slice(lineContent.text, 0, it_index);
-				if existingIndentation == indentation {
-					continue lineNumber;
-				}
-				deleteUpTo = it_index;
-				delete(document, lineContent.startByteOffset, it_index);
-				break;
-			}
-		}
-		
-		// line is either blank or empty
-		if deleteUpTo < 0 {
-			delete(document, lineContent.startByteOffset, lineContent.text.count);
-		}
-	
-		insert(document, lineContent.startByteOffset, indentation);
+		replace_indentation_for_line(document, lineNumber);
 	}
 	
 	diff := get_size(document) - docLength;
@@ -1055,6 +1059,17 @@ insert_mode_insert_string :: (input: string) {
 		focusedPanel.cursor.anchor = focusedPanel.cursor.head;
 	}
 	document_update_ts_tree(focusedPanel.document);
+	
+	// If the last thing you typed likely closed an indentation region, reindent the line
+	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
+	// keypress, so for now we'll just guess
+	if input == "}" || input == ")" || input == "]" {
+		cursorCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.head);
+		replace_indentation_for_line(focusedPanel.document, cursorCoord.line);
+		
+		// TODO: put the cursor back just after the thing you just typed now that it's moved
+	}
+		
 }
 
 insert_mode_handle_text_input :: (char: Utf8_Char) {

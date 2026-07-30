@@ -456,22 +456,16 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 	}
 	return query;
 }
-
-calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
-	tabsOverSpaces :: true;
-	verboseLogging :: true;
 	
-	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
-	if !supportsAutoIndentation
-		return "";
-		
-	lock(*document.reparseMutex);
-	defer unlock(*document.reparseMutex);
-
+refresh_document_indentation_table :: (document: *Document) {
 	// figure out if we need to requery the indentation of a file, if we do then we do it here
 	treeHash := get_hash(document.tree);
 	if treeHash != document.indents.treeHash {
-		if verboseLogging log("rehash of indents triggered");
+		// it's important we have up to date tree to use here, so we have to wait if one is in progress
+		while document.isParsing {
+			process_completed_tasks(*asyncWorker);
+			sleep_milliseconds(5);
+		}		
 		
 		table_reset(*document.indents.auto); 
 		table_reset(*document.indents.begin); 
@@ -490,10 +484,20 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 			
 			captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
 			
-			#if verboseLogging {
+			#if false {
+				// additional logging if you want it
 				nodeStartLine := ts_node_start_point(capture.node).row;
 				nodeEndLine := ts_node_end_point(capture.node).row;
-				log("Node: %::% (%,%) (%:%,%:%)--> % patternIndex:%", capture.node.id, to_string(ts_node_type(capture.node)), ts_node_start_byte(capture.node), ts_node_end_byte(capture.node), nodeStartLine, ts_node_start_point(capture.node).column, nodeEndLine, ts_node_end_point(capture.node).column, captureName, patternIndex);
+				log("Node: %::% (%,%) (%:%,%:%)--> % patternIndex:%", 
+					capture.node.id,
+					to_string(ts_node_type(capture.node)),
+					ts_node_start_byte(capture.node), 
+					ts_node_end_byte(capture.node), 
+					nodeStartLine, 
+					ts_node_start_point(capture.node).column, 
+					nodeEndLine, 
+					ts_node_end_point(capture.node).column, 
+					captureName, patternIndex);
 			}
 			
 			metadata: IndentationMetadata;
@@ -524,6 +528,17 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		}	
 		document.indents.treeHash = treeHash;
 	}
+}
+
+calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
+	tabsOverSpaces :: true;
+	verboseLogging :: false;
+	
+	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
+	if !supportsAutoIndentation
+		return "";
+	
+	refresh_document_indentation_table(document);
 	
 	push_allocator(temp);
 	
