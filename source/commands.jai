@@ -763,30 +763,38 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 	}
 }
 	
-replace_indentation_for_line :: (doc: *Document, lineNumber: s64) {
+// returns the change in byte length of the line
+replace_indentation_for_line :: (doc: *Document, lineNumber: s64) -> s64 {
 	indentation := calculate_indentation_for_line(doc, lineNumber);
 	lineContent := get_line_content(doc, lineNumber);
-	
+
 	// delete any existing indentation
 	deleteUpTo := -1;
 	for lineContent.text {
 		if it != #char "\t" && it != #char " " {
 			existingIndentation := slice(lineContent.text, 0, it_index);
 			if existingIndentation == indentation {
-				return;
+				return 0;
 			}
 			deleteUpTo = it_index;
 			delete(doc, lineContent.startByteOffset, it_index);
 			break;
 		}
 	}
-	
+
 	// line is either blank or empty
 	if deleteUpTo < 0 {
+		deleteUpTo = lineContent.text.count;
 		delete(doc, lineContent.startByteOffset, lineContent.text.count);
 	}
-	
+
 	insert(doc, lineContent.startByteOffset, indentation);
+
+	return indentation.count - deleteUpTo;
+}
+
+cursor_offset_after_line_indent_change :: (doc: *Document, coord: Document.Coordinate, delta: s64) -> s64 {
+	return get_offset_from_coordinate(doc, .{coord.line, max(0, coord.col + delta)});
 }
 
 autoindent_selection :: (using panel: *Panel, args: []string) {
@@ -796,23 +804,20 @@ autoindent_selection :: (using panel: *Panel, args: []string) {
 
 	headCoord := get_coordinate_from_offset(document, cursor.head);
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-	
-	docLength := get_size(document);
 
 	startLine := min(headCoord.line, anchorCoord.line);
 	endLine := max(headCoord.line, anchorCoord.line);
 
+	headDelta := 0;
+	anchorDelta := 0;
 	for lineNumber: startLine..endLine {
-		replace_indentation_for_line(document, lineNumber);
+		delta := replace_indentation_for_line(document, lineNumber);
+		if lineNumber == headCoord.line then headDelta = delta;
+		if lineNumber == anchorCoord.line then anchorDelta = delta;
 	}
-	
-	diff := get_size(document) - docLength;
-	if cursor.anchor > cursor.head {
-		cursor.anchor += diff;
-	}
-	else {
-		cursor.head += diff;
-	}
+
+	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
+	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
 }
 
 indent_line :: (using panel: *Panel, args: []string) {
@@ -830,14 +835,8 @@ indent_line :: (using panel: *Panel, args: []string) {
 		insert(document, lineStartOffset, "\t");
 	}
 
-	if cursor.head < cursor.anchor {
-		cursor.head += 1;
-		cursor.anchor += endLine - startLine + 1;
-	}
-	else {
-		cursor.anchor += 1;
-		cursor.head += endLine - startLine + 1;
-	}
+	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, 1);
+	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, 1);
 }
 
 unindent_line :: (using panel: *Panel, args: []string) {
@@ -853,30 +852,20 @@ unindent_line :: (using panel: *Panel, args: []string) {
 	startLine := min(headCoord.line, anchorCoord.line);
 	endLine := max(headCoord.line, anchorCoord.line);
 
-	bytesDeleted := 0;
+	headDelta := 0;
+	anchorDelta := 0;
 	for startLine..endLine {
 		lineStartOffset := get_line_start(document, it);
 		if get_char_at(document, lineStartOffset) == #char "\t" {
 			delete(document, lineStartOffset, 1);
 
-			if it == headCoord.line {
-				cursor.head -= 1;
-			}
-			else if it == anchorCoord.line {
-				cursor.anchor -= 1;
-			}
-			else {
-				bytesDeleted += 1;
-			}
+			if it == headCoord.line then headDelta = -1;
+			if it == anchorCoord.line then anchorDelta = -1;
 		}
 	}
 
-	if cursor.head < cursor.anchor {
-		cursor.anchor -= bytesDeleted + 1;
-	}
-	else {
-		cursor.head -= bytesDeleted + 1;
-	}
+	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
+	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
 }
 
 undo :: (using panel: *Panel, args: []string) {
@@ -1064,10 +1053,13 @@ insert_mode_insert_string :: (input: string) {
 	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
 	// keypress, so for now we'll just guess
 	if input == "}" || input == ")" || input == "]" {
-		cursorCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.head);
-		replace_indentation_for_line(focusedPanel.document, cursorCoord.line);
-		
-		// TODO: put the cursor back just after the thing you just typed now that it's moved
+		headCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.head);
+		anchorCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.anchor);
+
+		delta := replace_indentation_for_line(focusedPanel.document, headCoord.line);
+
+		focusedPanel.cursor.head = cursor_offset_after_line_indent_change(focusedPanel.document, headCoord, delta);
+		focusedPanel.cursor.anchor = cursor_offset_after_line_indent_change(focusedPanel.document, anchorCoord, delta);
 	}
 		
 }
