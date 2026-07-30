@@ -140,6 +140,9 @@ get_language :: (fileExtension: string) -> bool, *Language {
 		if contains(captureName, "function") {
 			highlightType = .FUNCTION;
 		}
+		if contains(captureName, "constructor") {
+			highlightType = .FUNCTION;
+		}
 		if contains(captureName, "keyword") {
 			highlightType = .KEYWORD;
 		}
