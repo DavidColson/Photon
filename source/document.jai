@@ -873,6 +873,12 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	assert(doc.editOpen, "Cannot do deletion without starting an edit");
 	assert(!doc.isCopy, "You must not edit copies!!!");
 	assert(atOffset >= 0, "Don't delete before the document starts");
+
+	// don't delete empty ranges
+	if length <= 0 {
+		return;
+	}
+
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 
