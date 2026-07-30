@@ -95,17 +95,19 @@ normalModeCommands :: Command.[
 	.{ "Extend to last occurence of {char}", .["alt+shift+f{char}"], .REPEATABLE | .EXTEND, jump_to_last_char },
 	.{ "Extend to just before last occurence of {char}", .["alt+shift+t{char}"], .REPEATABLE | .EXTEND, jump_to_before_last_char },
 
-	.{ "Extend selection to full lines", .["x"], .REPEATABLE, extend_selection_to_lines },
-	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
-
-	.{ "Select whole document", .["%"], 0, select_whole_document },
-	.{ "Collapse selection", .[";"], 0, collapse_selection },
-
 	.{ "Page Up", .["ctrl+b", "<pageup>"], 0, page_up },
 	.{ "Page Down", .["ctrl+f", "<pagedown>"], 0, page_down },
 	.{ "Half Page Up", .["ctrl+u"], 0, half_page_up },
 	.{ "Half Page Down", .["ctrl+d"], 0, half_page_down },
 
+	// Selection manipulation
+	.{ "Extend selection to full lines", .["x"], .REPEATABLE, extend_selection_to_lines },
+	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
+	
+	.{ "Select whole document", .["%"], 0, select_whole_document },
+	.{ "Collapse selection", .[";"], 0, collapse_selection },
+	.{ "Flip selection", .["alt+;"], 0, flip_selection },
+		
 	// misc normal mode
 	.{ "Select register {char}", .["\"{char}"], 0, select_register },
 	.{ "Next search result", .["n"], 0, next_search_result },

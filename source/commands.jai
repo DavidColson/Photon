@@ -425,6 +425,12 @@ collapse_selection :: (using panel: *Panel, args: []string) {
 	cursor.anchor = cursor.head;
 }
 
+flip_selection :: (using panel: *Panel, args: []string) {
+	temp := cursor.head;
+	cursor.head = cursor.anchor;
+	cursor.anchor = temp;
+}
+
 // Normal Mode Changes
 // ------------------------------
 
