@@ -187,6 +187,7 @@ for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expa
 		`it := doc.handle;
 		`it_index := count;
 		count += 1;
+		#insert body;
 	}
 }
 
