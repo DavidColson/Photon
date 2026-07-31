@@ -366,53 +366,48 @@ jump_to_before_last_char :: (using panel: *Panel, args: []string) {
 	}
 }
 
-extend_selection_to_lines :: (using panel: *Panel, args: []string) { 
+extend_selection_to_lines :: (using panel: *Panel, args: []string) {
 	// flip the cursors if required
 	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.head {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
 		cursor.anchor = temp;
-		cursor.virtualColumn = S64_MAX;
 	}
 
-	// check if we already have whole lines selected, in which case we must select the next one
 	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-	if cursor.virtualColumn == S64_MAX && anchorCoord.col == 0 {
-		coord := get_coordinate_from_offset(document, cursor.head);
-		if coord.line == get_number_of_lines(document) return;
-		start,end := get_line_range(document, coord.line+1);
+	headCoord := get_coordinate_from_offset(document, cursor.head);
+	_, headLineEnd := get_line_range(document, headCoord.line);
+	if anchorCoord.col == 0 && cursor.head == headLineEnd {
+		if headCoord.line == get_number_of_lines(document) return;
+		start,end := get_line_range(document, headCoord.line+1);
 		cursor.head = end;
 	}
 	else {
 		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
 		cursor.anchor, cursor.head = get_line_range(document, coord.line);
 	}
-
-	cursor.virtualColumn = S64_MAX;
 }
 
-extend_selection_to_lines_above :: (using panel: *Panel, args: []string) { 
+extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 	// flip the cursors if required
 	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.anchor {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
 		cursor.anchor = temp;
-		cursor.virtualColumn = 0;
 	}
 
 	headCoord := get_coordinate_from_offset(document, cursor.head);
-	if cursor.virtualColumn == 0 && headCoord.col == 0 {
-		coord := get_coordinate_from_offset(document, cursor.head);
-		if coord.line == 0 return;
-		start,end := get_line_range(document, coord.line-1);
+	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
+	_, anchorLineEnd := get_line_range(document, anchorCoord.line);
+	if headCoord.col == 0 && cursor.anchor == anchorLineEnd {
+		if headCoord.line == 0 return;
+		start,end := get_line_range(document, headCoord.line-1);
 		cursor.head = start;
 	}
 	else {
 		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
 		cursor.head, cursor.anchor = get_line_range(document, coord.line);
 	}
-
-	cursor.virtualColumn = 0;
 }
 
 select_whole_document :: (using panel: *Panel, args: []string) {
