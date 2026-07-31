@@ -1407,14 +1407,15 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
-					fileLabel.textHighlights = entry.fuzzyMatches;
+					fileLabel.textHighlights = entry.fuzzyMatchesFile;
 
 					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.handle.locator.bucket_index, entry.handle.locator.slot_index);
 					pathLabel := box(key2, .{
-						flags=.DRAW_TEXT,
+						flags=.DRAW_TEXT_HIGHLIGHTS,
 						fontSize=em(0.7),
 						layout=.{ width=text_content(), height=text_content() },
 					});
+					pathLabel.textHighlights = entry.fuzzyMatchesPath;
 				}
 			}
 

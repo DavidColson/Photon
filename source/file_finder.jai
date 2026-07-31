@@ -6,7 +6,8 @@ FileFinder :: struct {
 		loaded : bool;
 		handle: DocumentHandle;
 		sortKey: s64;
-		fuzzyMatches: []Highlight;
+		fuzzyMatchesFile: []Highlight;
+		fuzzyMatchesPath: []Highlight;
 	}
 	fileList: [..]FileEntry;
 	selectedEntry:s32;
@@ -25,7 +26,7 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 		entry.filePath = document_get_path(doc);
 		entry.loaded = true;
 		entry.handle = doc;
-		entry.sortKey = 10;
+		entry.sortKey = 10 + calculate_recency_bonus(document_get_disk_last_modtime(doc));
 		fileFinder.numToDisplay += 1;
 	}
 
@@ -35,13 +36,31 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 			entry.filePath = file.fullName;
 			entry.loaded = false;
 			entry.handle = .{locator = file.locator};
-			entry.sortKey = 10;
+			entry.sortKey = 10 + calculate_recency_bonus(file.diskLastModtime);
 			fileFinder.numToDisplay += 1;
 		}
 	}
 
+	quick_sort(fileFinder.fileList, compare_entries);
+	
 	fileFinder.input.onEditCallback = file_finder_input_field_on_edit;
 	fileFinder.input.userData = *fileFinder;
+}
+
+calculate_recency_bonus :: (modtime: Apollo_Time) -> s64 {
+	fileAge := to_float64_seconds(current_time_consensus() - modtime);
+	// this is an exponential decay that ensures all files get some kind of recency bonus
+	// and the recency bonus decays out to zero for every file, so there is no "window"
+	// The 0.9998 value is picked such that files you've touched over the last 4-5 hours have meaningful values
+	// to sort, so you can expect a sensible ordering for your last day of work
+	normalized := clamp(pow(0.9998, fileAge), 0.0, 1.0);
+	return cast(s64, normalized * 4000);
+}
+
+compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
+	diff := e2.sortKey - e1.sortKey;
+	if diff != 0 return diff;
+	return memcmp(e1.filePath.data, e2.filePath.data, min(e1.filePath.count, e2.filePath.count));
 }
 
 file_finder_input_field_on_edit :: (userData: *void, input: string) {
@@ -53,14 +72,18 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		// @todo: at some point you probably want to search the whole path for matches
 		// need better UI to show the filepath
 		filePath := document_get_path(doc);
-		score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
+		scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
+		scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(filePath), input,,get_allocator(finder));
+		score := scoreFile + scorePath/5;
+		
 		if score > 0 {
 			entry := array_add(*finder.fileList);
 			entry.filePath = filePath;
 			entry.loaded = true;
 			entry.handle = doc;
-			entry.sortKey = score;
-			entry.fuzzyMatches = fuzzyMatches;
+			entry.sortKey = score + calculate_recency_bonus(document_get_disk_last_modtime(doc));
+			entry.fuzzyMatchesFile = fuzzyMatchesFile;
+			entry.fuzzyMatchesPath = fuzzyMatchesPath;
 			finder.numToDisplay += 1;
 		}
 	}
@@ -68,24 +91,23 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 	if project.loadProgress == .COMPLETE {
 		for * file: project.projectFiles {
 			filePath := file.fullName;
-			score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
+			scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
+			scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(filePath), input,,get_allocator(finder));
+			score := scoreFile + scorePath/5;
+			
 			if score > 0 {
 				entry := array_add(*finder.fileList);
 				entry.filePath = file.fullName;
 				entry.loaded = false;
 				entry.handle = .{locator = file.locator};
-				entry.sortKey = score;
-				entry.fuzzyMatches = fuzzyMatches;
+				entry.sortKey = score + calculate_recency_bonus(file.diskLastModtime);
+				entry.fuzzyMatchesFile = fuzzyMatchesFile;
+				entry.fuzzyMatchesPath = fuzzyMatchesPath;
 				finder.numToDisplay += 1;
 			}
 		}
 	}
 
-	compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
-		diff := e2.sortKey - e1.sortKey;
-		if diff != 0 return diff;
-		return memcmp(e1.filePath.data, e2.filePath.data, min(e1.filePath.count, e2.filePath.count));
-	}
 	quick_sort(finder.fileList, compare_entries);
 
 	maxItems := finder.fileList.count - 1;

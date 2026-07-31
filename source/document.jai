@@ -359,6 +359,11 @@ document_get_ts_tree :: (handle: DocumentHandle) -> *TSTree {
 	return doc.tsTree;
 }
 
+document_get_disk_last_modtime :: (handle: DocumentHandle) -> Apollo_Time {
+	doc := document_get(handle);
+	return doc.diskLastModtime;
+}
+
 document_debug_print_tree :: (handle: DocumentHandle) {
 	doc := document_get(handle);
 	pretty_print_tree(doc.tree);
