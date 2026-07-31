@@ -116,6 +116,7 @@ Document :: struct {
 	path: string;
 	diskLastModtime: Apollo_Time;
 	diskReadOnly: bool;
+	savePending: bool;
 	handle: DocumentHandle;
 	longestLine: s32;
 	longestLineLength: s32;
@@ -764,6 +765,7 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 		defer free(taskData);
 		defer free(desiredPath);
 		defer document_copy_free(taskData.document);
+		defer if !isBackup then doc.savePending = false;
 
 		if result == .FAILED_TO_MAKE_DIRECTORY {
 			push_notification("Failed to make directory for file save");
@@ -803,6 +805,8 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 			push_notification("Backup Saved");
 		}
 	}
+
+	if !backup then document_get(doc).savePending = true;
 
 	data := New(TaskData);
 	data.document = document_copy(doc);
@@ -918,6 +922,11 @@ document_expire_stale_pending_renames :: () {
 
 document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
 	doc := document_get(handle);
+
+	if doc.savePending {
+		return;
+	}
+
 	modtime, size, exists := file_modtime_and_size(doc.path);
 	if exists {
 		// check if the file changed on disk, we do a != to cover cases like
