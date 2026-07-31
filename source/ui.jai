@@ -46,6 +46,7 @@ UIBox :: struct {
 	dragPrevPos: Vector2;
 	// @todo: actually maintain the whole signal state from the previous frame for this
 	leftClickStateLastFrame: bool;
+	lastClickTime: float64;
 }
 
 UILayoutData :: struct {
@@ -61,13 +62,13 @@ UILayoutData :: struct {
 // @todo: this needs to be much better
 // Needs different mouse buttons, needs
 // transient states like "onpressed" to be implemented better than now
-// also needs "double click" events
 UISignal :: struct {
 	hoverEnter: bool;
 	hoverExit: bool;
 	hovering: bool;
 	pressed: bool;
 	released: bool;
+	doubleClicked: bool;
 	holding: bool;
 	dragDelta: Vector2;
 }
@@ -344,6 +345,15 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					signal.released = true;
 					box.leftClickStateLastFrame = false;
 					uiState.activeBoxKey = ui_key_nil;
+
+					now := seconds_since_init();
+					if now - box.lastClickTime <= style.doubleClickTimeSeconds {
+						signal.doubleClicked = true;
+						box.lastClickTime = 0; // consume the pair so a third rapid click starts fresh rather than chaining
+					}
+					else {
+						box.lastClickTime = now;
+					}
 					remove it;
 				}
 

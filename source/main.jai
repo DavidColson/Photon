@@ -54,6 +54,9 @@ style : struct {
 	// animations
 	scrollAnimRate := 14;
 
+	// input timing
+	doubleClickTimeSeconds := 0.4;
+
 	// Code colors
 	// Must match the order of HighlightType
 	codeDefault := #run hex_to_color_vec4("C3C7D0");
@@ -800,6 +803,12 @@ build_ui_panel :: (panel: *Panel) {
 			if signal.pressed {
 				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
 				panel.cursor.anchor = panel.cursor.head;
+			}
+			
+			if signal.doubleClicked {
+				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
+				move_prev_word_start(panel, .[]);
+				move_word_end(panel, .[]);
 			}
 
 			if signal.holding {
