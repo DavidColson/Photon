@@ -60,8 +60,9 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		}
 	}
 
+	tempDoc := doc;
 	panel.previousDocument = panel.document;
-	panel.document = doc;
+	panel.document = tempDoc;
 	panel.cursor = .{};
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;
