@@ -687,6 +687,8 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 }
 
 new_line_below :: (using panel: *Panel, args: []string) {
+	if cursor.head < cursor.anchor then flip_selection(panel, .[]);
+	
 	goto_line_end(panel, args);
 	enter_insert_mode_start(panel, args);
 
@@ -701,6 +703,8 @@ new_line_below :: (using panel: *Panel, args: []string) {
 }
 
 new_line_above :: (using panel: *Panel, args: []string) {
+	if cursor.head > cursor.anchor then flip_selection(panel, .[]);
+	
 	goto_line_start(panel, args);
 	panel.cursor.anchor = panel.cursor.head;
 	enter_insert_mode_start(panel, args);
