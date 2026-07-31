@@ -548,7 +548,7 @@ refresh_document_indentation_table :: (document: *Document) {
 		rootNode := ts_tree_root_node(document.tsTree);
 		query_start(*document.language.indentQuery, ts_tree_root_node(document.tsTree), ts_node_start_byte(rootNode), ts_node_end_byte(rootNode));
 		while true {
-			result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document,,temp);
+			result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document.handle,,temp);
 			if result == false then break;
 			
 			captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
@@ -599,23 +599,24 @@ refresh_document_indentation_table :: (document: *Document) {
 	}
 }
 
-calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> string {
+calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> string {
+	document := document_get(handle);
 	tabsOverSpaces :: true;
 	verboseLogging :: false;
-	
+
 	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
 	if !supportsAutoIndentation
 		return "";
-	
+
 	refresh_document_indentation_table(document);
-	
+
 	push_allocator(temp);
-	
+
 	// calculate the node that we want to start with for the indentation calculation
 	first_non_whitespace :: (text: string) -> s64 {
 		for text {
 			if !is_space(it) {
-				return it_index; 
+				return it_index;
 			}
 		}
 		return -1;
@@ -624,19 +625,19 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 	last_non_whitespace :: (text: string) -> s64 {
 		for < text {
 			if !is_space(it) {
-				return it_index; 
+				return it_index;
 			}
 		}
 		return -1;
 	}
-	
-	line := get_line_content(document, lineNumber);
+
+	line := get_line_content(handle, lineNumber);
 	firstNonWhitespace := first_non_whitespace(line.text);
 	startNode := ts_tree_root_node(document.tsTree);
 
 	if lineNumber > 0 && firstNonWhitespace < 0 {
 		// line is blank, so we look at the end of the previous line
-		prevLine := get_line_content(document, lineNumber - 1); 	// TODO: handle start of file
+		prevLine := get_line_content(handle, lineNumber - 1); 	// TODO: handle start of file
 		lastNonWhitespace := prevLine.startByteOffset + last_non_whitespace(prevLine.text);
 		
 		if lastNonWhitespace < 0 then return "";
@@ -698,13 +699,13 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		if ts_node_child_count(node) == 0 {
 			return TSNode.{}, false;
 		}
-			
+
 		for 0..ts_node_child_count(node)-1 {
 			child := ts_node_child(node, it);
 			if !ts_node_is_null(child) && get_node_type(child) == delimiter {
 				childStartOffset := ts_node_start_byte(child);
-				childStart := get_coordinate_from_offset(doc, childStartOffset);
-				line := get_line_content(doc, childStart.line);
+				childStart := get_coordinate_from_offset(doc.handle, childStartOffset);
+				line := get_line_content(doc.handle, childStart.line);
 				lineFromDelimiterOnward := slice(line.text, childStart.col+1, line.text.count - childStart.col);
 				
 				delimiterIsLastOnLine := true;
@@ -728,8 +729,8 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		nodeStartOffset := ts_node_start_byte(node);
 		nodeEndOffset := ts_node_end_byte(node);
 		
-		nodeStart := get_coordinate_from_offset(document, nodeStartOffset);
-		nodeEnd := get_coordinate_from_offset(document, nodeEndOffset);
+		nodeStart := get_coordinate_from_offset(handle, nodeStartOffset);
+		nodeEnd := get_coordinate_from_offset(handle, nodeEndOffset);
 
 		if verboseLogging {
 			log("Node: %::% (%,%) (%:%,%:%)", node.id, to_string(ts_node_type(node)), nodeStartOffset, nodeEndOffset, nodeStart.line, nodeStart.col, nodeEnd.line, nodeEnd.col);
@@ -748,7 +749,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 		
 		// if we encounter an indent.auto, then we fallback to copying the indentation from the previous line
 		if !beginFound && !alignFound && autoFound && nodeStart.line < lineNumber && lineNumber <= nodeEnd.line {
-			prevLine := get_line_content(document, lineNumber-1);
+			prevLine := get_line_content(handle, lineNumber-1);
 			for prevLine.text {
 				if it == #char "\t" then indentLevel += tabSize;
 				if it == #char " " then indentLevel += 1;
@@ -796,9 +797,9 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				closeDelimiter, closeIsLastOnLine := find_delimiter_node(document, node, align.closeDelimiter);
 				
 				openStartOffset := ts_node_start_byte(openDelimiter);
-				open := get_coordinate_from_offset(document, openStartOffset);
+				open := get_coordinate_from_offset(handle, openStartOffset);
 				closeStartOffset := ts_node_start_byte(closeDelimiter);
-				close := get_coordinate_from_offset(document, closeStartOffset);
+				close := get_coordinate_from_offset(handle, closeStartOffset);
 				
 				// this is a hanging indent, we treat this as though it's a normal indent.begin
 				if openIsLastOnLine {
@@ -824,7 +825,7 @@ calculate_indentation_for_line :: (document: *Document, lineNumber:s64) -> strin
 				}
 				if avoidLastMatchingNext {
 					// we need the indentation of the line containing the open delimiter
-					openLine := get_line_content(document, open.line);
+					openLine := get_line_content(handle, open.line);
 					openLineIndentation := 0;
 					for openLine.text {
 						if it == #char "\t" then openLineIndentation += tabSize;
@@ -990,7 +991,7 @@ query_start :: (query: *Language.Query, startNode: TSNode, startByte: s64, endBy
 // note the strings in the table are not allocated, they will point to the query predicate data
 query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCapture, patternIndex: s64, metadata: Table(string, string)
 #modify {
-	if T == *Document || T == string then return true;
+	if T == DocumentHandle || T == string then return true;
 	return false;
 } {
 
@@ -1095,7 +1096,7 @@ get_node_content :: (node: TSNode, doc: *Document) -> string {
 
 	// need to find the text corresponding to this node
 	text := alloc_string(endByte-startByte);
-	iter := make_iterator(doc, startByte);
+	iter := make_iterator(doc.handle, startByte);
 	for iter {
 		if it_index >= text.count break;
 		text[it_index] = it;
@@ -1104,7 +1105,8 @@ get_node_content :: (node: TSNode, doc: *Document) -> string {
 }
 
 // allocates memory for the returned string
-get_capture_content :: (capture: TSQueryCapture, doc: *Document) -> string {
+get_capture_content :: (capture: TSQueryCapture, handle: DocumentHandle) -> string {
+	doc := document_get(handle);
 	return get_node_content(capture.node, doc);
 }
 

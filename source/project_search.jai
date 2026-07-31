@@ -38,7 +38,7 @@ project_search_input_field_on_edit :: (userData: *void, input: string) {
 		add_work(*project.searchThreads, workItem, tprint("Search task project files %", workItem.bucketIndex));
 	}
 
-	for openDocuments.all_buckets {
+	for openDocuments.documents.all_buckets {
 		workItem := New(Project.SearchWork);
 		workItem.loaded = true;
 		workItem.bucketIndex  = it_index;

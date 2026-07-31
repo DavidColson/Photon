@@ -184,7 +184,7 @@ main :: () {
 	init_ui();
 	rebuild_key_map();
 	init_async(*asyncWorker);
-	init(*openDocumentLock);
+	init(*openDocuments.lock);
 	init(*languagesMutex);
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
@@ -273,9 +273,6 @@ update :: (deltaTime: float64) {
 	project_update();
 	process_changes(*fileWatcher);
 	document_expire_stale_pending_renames();
-
-	// update the document incase it changed during the async tasks
-	focusedPanel.document = document_get(focusedPanel.docHandle);
 
 	newDpiScale := platform_get_dpi_scale(window);
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
@@ -396,8 +393,8 @@ build_ui :: () {
 	// Draw the panel
 	// @todo: wrap this up somehow so zero handles resolve to null
 	// this is ugly as heck
-	if openDocuments.count != 0 {
-		slot := bucket_array_find_pointer(*openDocuments, focusedPanel.docHandle);
+	if openDocuments.documents.count != 0 {
+		slot := bucket_array_find_pointer(*openDocuments.documents, focusedPanel.document.locator);
 		if slot {
 			if slot.state == .INVALID {
 				build_ui_loading_panel(*focusedPanel);
@@ -517,7 +514,7 @@ build_ui_loading_panel :: (panel: *Panel) {
 		});
 		{
 			push_parent(loadingBox); defer pop_parent();
-			box(ui_key("Loading % ...", panel.document.path), .{
+			box(ui_key("Loading % ...", document_get_path(panel.document)), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
 			});
@@ -569,13 +566,13 @@ build_ui_panel :: (panel: *Panel) {
 		spacer(.X, fixed(em(0.5)));
 
 		// filename
-		fileLabel := box(ui_key(path_filename(panel.document.path)), .{
+		fileLabel := box(ui_key(path_filename(document_get_path(panel.document))), .{
 			flags=.DRAW_TEXT,
 			layout=.{ width=text_content(), height=text_content() },
 		});
 		if signal_from_box(fileLabel).hovering {
 			tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
-			box(ui_key(panel.document.path), .{
+			box(ui_key(document_get_path(panel.document)), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
 			});
@@ -583,7 +580,7 @@ build_ui_panel :: (panel: *Panel) {
 		}
 
 		// lock icon @todo: implement for real
-		if panel.document.diskReadOnly {
+		if document_is_read_only(panel.document) {
 			box(ui_key(style.iconLock), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
@@ -636,13 +633,14 @@ build_ui_panel :: (panel: *Panel) {
 
 		// line endings
 		lineEndingText := "[Mixed]";
-		if panel.document.lineEndings == .LF {
+		lineEndings := document_get_line_endings(panel.document);
+		if lineEndings == .LF {
 			lineEndingText = "LF";
 		}
-		else if panel.document.lineEndings == .CRLF {
+		else if lineEndings == .CRLF {
 			lineEndingText = "CRLF";
 		}
-		else if panel.document.lineEndings == .MIXED_MAJORITY_LF {
+		else if lineEndings == .MIXED_MAJORITY_LF {
 			lineEndingText = "[Mixed]";
 		}
 		box(ui_key(lineEndingText), .{
@@ -653,14 +651,15 @@ build_ui_panel :: (panel: *Panel) {
 		spacer(.X, fixed(em(2.0)));
 
 		// file type
-		if panel.document.language {
-			box(ui_key(panel.document.language.name), .{
+		language := document_get_language(panel.document);
+		if language {
+			box(ui_key(language.name), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
 			});
 		}
 		else {
-			box(ui_key(path_extension(panel.document.path)), .{
+			box(ui_key(path_extension(document_get_path(panel.document))), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=text_content(), height=text_content() },
 			});
@@ -748,7 +747,7 @@ build_ui_panel :: (panel: *Panel) {
 			}
 
 			// TODO: cache this calculation, it won't change much and it can be slow
-			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, panel.document.longestLine-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
+			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, document_get_longest_line(panel.document)-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
 			longestLinePixelWidth += metrics.emWidth; // add extra monospace width for cursor to sit on end of line
 
 			if longestLinePixelWidth > codeBox.rect.w {
@@ -769,7 +768,7 @@ build_ui_panel :: (panel: *Panel) {
 			signal := signal_from_box(codeBox);
 
 			// mouse cursor control
-			set_cursor_to_mouse_location :: (doc: *Document, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
+			set_cursor_to_mouse_location :: (doc: DocumentHandle, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
 				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
 		
 				x, y, success := get_mouse_pointer_position(window, false);
@@ -1394,14 +1393,14 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				{
 					push_parent(entryBox); defer pop_parent();
 
-					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.handle.bucket_index, entry.handle.slot_index);
+					key := ui_key("%##fileListEntryLabel%-%", path_filename(entry.filePath), entry.handle.locator.bucket_index, entry.handle.locator.slot_index);
 					fileLabel := box(key, .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					fileLabel.textHighlights = entry.fuzzyMatches;
 
-					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.handle.bucket_index, entry.handle.slot_index);
+					key2 := ui_key("%##fileListPathLabel%-%", entry.filePath, entry.handle.locator.bucket_index, entry.handle.locator.slot_index);
 					pathLabel := box(key2, .{
 						flags=.DRAW_TEXT,
 						fontSize=em(0.7),
@@ -1675,21 +1674,23 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// Draw code
-	if panel.document.language && panel.document.tsTree && panel.document.language.highlightsQuery.query {
+	language := document_get_language(panel.document);
+	tsTree := document_get_ts_tree(panel.document);
+	if language && tsTree && language.highlightsQuery.query {
 		rangeStartByte := linesOnScreen[0].startByteOffset;
 		rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
 
-		treeNode := ts_tree_root_node(panel.document.tsTree);
+		treeNode := ts_tree_root_node(tsTree);
 		treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
 
-		query_start(*panel.document.language.highlightsQuery, treeNode, rangeStartByte, rangeEndByte);
+		query_start(*language.highlightsQuery, treeNode, rangeStartByte, rangeEndByte);
 
 		highlights: [..]Highlight;
 		highlights.allocator = temp;
 
 		// collect all the highlights for the region of code we must render
 		while true {
-			result, capture := query_next(*panel.document.language.highlightsQuery, panel.document,,temp);
+			result, capture := query_next(*language.highlightsQuery, panel.document,,temp);
 			if result == false then break;
 
 			startByte := ts_node_start_byte(capture.node);
@@ -1698,7 +1699,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 			if type == "ERROR" then continue;
 
-			success, highlightType := table_find(*panel.document.language.captureToHighlight, capture.index);
+			success, highlightType := table_find(*language.captureToHighlight, capture.index);
 
 			if highlights.count > 0 {
 				if highlights[highlights.count-1].start == startByte {
@@ -1711,7 +1712,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 		}
 
 		if queuePrintHighlightDebug {
-			get_text_range :: (doc: *Document, start: s64, end: s64) -> string {
+			get_text_range :: (doc: DocumentHandle, start: s64, end: s64) -> string {
 				captureText := alloc_string(end-start,,temp);
 				iter := make_iterator(doc, start,,temp);
 				for iter {
@@ -1825,7 +1826,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 }
 
-draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontSize: int, textAreaX: float, textAreaY: float, linesOnScreen: []Document.LineContent, startVisibleLine: s64) {
+draw_document_range :: (doc: DocumentHandle, start: s64, end: s64, font: *Font, fontSize: int, textAreaX: float, textAreaY: float, linesOnScreen: []Document.LineContent, startVisibleLine: s64) {
 	metrics := get_font_metrics(font, fontSize);
 	rangeStart := get_coordinate_from_offset(doc, start);
 	rangeEnd := get_coordinate_from_offset(doc, end);
@@ -1882,14 +1883,7 @@ draw_document_range :: (doc: *Document, start: s64, end: s64, font: *Font, fontS
 }
 
 do_backup_callback :: () {
-	for * openDocuments {
-		doc: *Document;
-		if it.state == {
-			case .INVALID; continue;
-			case .A_VALID; doc = *it.docA;
-			case .B_VALID; doc = *it.docB;
-			case; continue;
-		}
+	for doc: openDocuments {
 		if document_is_unsaved(doc) {
 			builder : String_Builder;
 			builder.allocator = temp;
@@ -1897,7 +1891,7 @@ do_backup_callback :: () {
 
 			append(*builder, path_strip_filename(get_path_of_running_executable()));
 			append(*builder, "\\backups\\");
-			append(*builder, path_filename(doc.path));
+			append(*builder, path_filename(document_get_path(doc)));
 
 			document_save(doc, builder_to_string(*builder,,temp), true);
 		}
@@ -1923,9 +1917,9 @@ file_watcher_callback :: (watcher: *File_Watcher(void), change: *File_Change, us
 	}
 
 	// two different handlers for whether the file is open or not
-	found, handle := document_get_by_path(change.full_path);
+	found, doc := document_get_by_path(change.full_path);
 	if found {
-		document_handle_file_change(handle, change);
+		document_handle_file_change(doc, change);
 	}
 	else {
 		project_handle_file_change(change);

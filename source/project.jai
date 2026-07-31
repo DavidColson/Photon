@@ -382,8 +382,8 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 		// @todo: This actually iterates the real documents, which is pretty naughty tbh
 		// Ideally these would all be document copies made at the point of searching on the main thread
 		// something to sort out later
-		for openDocuments.all_buckets[searchWork.bucketIndex].data {
-			if !openDocuments.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
+		for openDocuments.documents.all_buckets[searchWork.bucketIndex].data {
+			if !openDocuments.documents.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
 
 			doc: *Document;
 			if it.state == {
@@ -397,11 +397,11 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 					continue;
 			}
 
-			hasMatches, results := search(doc, .NOCASE, 0, searchWork.searchTerm, false);
+			hasMatches, results := search(doc.handle, .NOCASE, 0, searchWork.searchTerm, false);
 
 			for result: results {
-				coordinate := get_coordinate_from_offset(doc, result.start);
-				line := get_line_content(doc, coordinate.line);
+				coordinate := get_coordinate_from_offset(doc.handle, result.start);
+				line := get_line_content(doc.handle, coordinate.line);
 
 				searchResult: Project.SearchResult; 
 				searchResult.matchLine = line.text;

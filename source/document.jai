@@ -155,11 +155,40 @@ DocumentSlot :: struct {
 	state: State;
 }
 
-DocumentHandle :: Bucket_Locator;
 
-openDocumentLock: Mutex;
-openDocuments: Bucket_Array(DocumentSlot, 128);
-openDocumentTable: Table(string, DocumentHandle, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
+// Handles are always what you should use when dealing with a document
+// Internally it will usually map to a document slot where we can give you the valid
+// document itself, or it will be a pointer to a copy, which you can do with as you
+// please, such as reading the copy for searching and so on. Mutating document functions will refuse
+// to operate on copies
+DocumentHandle :: struct {
+	locator: Bucket_Locator;
+	directCopy: *Document;
+}
+
+DocumentTable :: struct {
+	lock: Mutex;
+	documents: Bucket_Array(DocumentSlot, 128);
+	pathTable: Table(string, DocumentHandle, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
+}
+openDocuments: DocumentTable;
+
+// lets you iterate every currently open document, yielding a DocumentHandle for each
+for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expand {
+	count := 0;
+	for * slot: documents.documents {
+		doc: *Document;
+		if slot.state == {
+			case .INVALID; continue;
+			case .A_VALID; doc = *slot.docA;
+			case .B_VALID; doc = *slot.docB;
+			case; continue;
+		}
+		`it := doc.handle;
+		`it_index := count;
+		count += 1;
+	}
+}
 
 // @todo: make read only or something??
 nilDocument: Document;
@@ -178,36 +207,36 @@ tree_test :: () {
 
 	pretty_print_tree(doc.tree);
 
-	begin_edit(doc);
-	insert(doc, 100, "hello world");
-	insert(doc, 105, " my");
-	end_edit(doc);
+	begin_edit(docHandle);
+	insert(docHandle, 100, "hello world");
+	insert(docHandle, 105, " my");
+	end_edit(docHandle);
 	pretty_print_tree(doc.tree);
 
 	// trivial copies
-	copy := document_copy(doc);
+	copy := document_copy(docHandle);
 	log("size from view before edit: %", get_size(copy));
 
-	begin_edit(doc);
-	insert(doc, 110, "test ");
-	insert(doc, 200, "again more");
-	end_edit(doc);
+	begin_edit(docHandle);
+	insert(docHandle, 110, "test ");
+	insert(docHandle, 200, "again more");
+	end_edit(docHandle);
 
 	pretty_print_tree(doc.tree);
 
 	// copies again, but without edit
-	log("size of doc %, size of view %", get_size(doc), get_size(copy));
+	log("size of doc %, size of view %", get_size(docHandle), get_size(copy));
 	document_copy_free(copy);
 
 	// iterator
-	
-	iterator := make_iterator(doc, 0,,temp);
+
+	iterator := make_iterator(docHandle, 0,,temp);
 	for iterator {
 		print("%", string.{1, *it});
 	}
 
 	// reverse iteration
-	iterator = make_reverse_iterator(doc, 109,,temp);
+	iterator = make_reverse_iterator(docHandle, 109,,temp);
 	for iterator {
 		if it_index == 10 break;
 		print("%", string.{1, *it});
@@ -215,7 +244,7 @@ tree_test :: () {
 	print("\n");
 
 	// for comparison, the same region forward
-	iterator = make_iterator(doc, 100,,temp);
+	iterator = make_iterator(docHandle, 100,,temp);
 	for iterator {
 		if it_index == 10 break;
 		print("%", string.{1, *it});
@@ -223,49 +252,49 @@ tree_test :: () {
 	print("\n");
 
 	count := 0;
-	iterator = make_iterator(doc, 0,,temp);
+	iterator = make_iterator(docHandle, 0,,temp);
 	while iterator.node != null {
 		log("Index: %, nodeLen %", count, iterator.node.piece.length);
 		next_node(*iterator);
 		count += 1;
 	}
 
-	char1 := get_char_at(doc, 101);
-	char2 := get_char_at(doc, 113);
-	char3 := get_char_at(doc, 3);
+	char1 := get_char_at(docHandle, 101);
+	char2 := get_char_at(docHandle, 113);
+	char3 := get_char_at(docHandle, 3);
 	log("char1 %", string.{1, *char1});
 	log("char2 %", string.{1, *char2});
 	log("char3 %", string.{1, *char3});
 
-	log("num lines %", get_number_of_lines(doc));
+	log("num lines %", get_number_of_lines(docHandle));
 
 	// line starts
-	log("line start 0, %", get_line_start(doc, 0));
-	log("line start 1, %", get_line_start(doc, 1));
-	log("line start 2, %", get_line_start(doc, 2));
-	log("line start 3, %", get_line_start(doc, 3));
+	log("line start 0, %", get_line_start(docHandle, 0));
+	log("line start 1, %", get_line_start(docHandle, 1));
+	log("line start 2, %", get_line_start(docHandle, 2));
+	log("line start 3, %", get_line_start(docHandle, 3));
 
 	// line ranges
-	start, end := get_line_range(doc, 2, false);
+	start, end := get_line_range(docHandle, 2, false);
 	log("line range for line 2 %, %", start, end);
 
-	coord := get_coordinate_from_offset(doc, 100);
+	coord := get_coordinate_from_offset(docHandle, 100);
 	log("from offset 100 we get (%,%)", coord.line, coord.col);
 
 	// get content
 
-	log("second line: %", get_line_content(doc, 1));
-	log("at 100, 10 chars: %", get_content(doc, 100, 10));
+	log("second line: %", get_line_content(docHandle, 1));
+	log("at 100, 10 chars: %", get_content(docHandle, 100, 10));
 
 	// deletions
-	begin_edit(doc);
-	delete(doc, 130, 19);
-	end_edit(doc);
+	begin_edit(docHandle);
+	delete(docHandle, 130, 19);
+	end_edit(docHandle);
 
-	
+
 	pretty_print_tree(doc.tree);
 
-	iterator = make_iterator(doc, 0,,temp);
+	iterator = make_iterator(docHandle, 0,,temp);
 	for iterator {
 		print("%", string.{1, *it});
 	}
@@ -273,20 +302,68 @@ tree_test :: () {
 
 // Document API
 
-document_get :: (handle: DocumentHandle) -> *Document {
+document_get :: (doc: DocumentHandle) -> *Document {
 	// @TODO: really we need the zero handle to guaranteed resolve to null
-	if openDocuments.count == 0 then return *nilDocument;
-	slot := bucket_array_find_pointer(*openDocuments, handle);
-	if slot == null return *nilDocument;
+	// potentially the 0,0 bucket locator should be set to nil?
+	if doc.directCopy {
+		// this is a copy, return the pointer directly
+		return doc.directCopy;
+	}
+	else {
+		// this is a legit document, so lets get it's pointer out of the table
+		if openDocuments.documents.count == 0 then return *nilDocument;
+		slot := bucket_array_find_pointer(*openDocuments.documents, doc.locator);
+		if slot == null return *nilDocument;
 
-	if slot.state == .INVALID return *nilDocument;
-	if slot.state == .A_VALID return *slot.docA;
-	if slot.state == .B_VALID return *slot.docB;
+		if slot.state == .INVALID return *nilDocument;
+		if slot.state == .A_VALID return *slot.docA;
+		if slot.state == .B_VALID return *slot.docB;
+	}
 	return *nilDocument;
 }
 
+document_get_path :: (handle: DocumentHandle) -> string {
+	doc := document_get(handle);
+	return doc.path;
+}
+
+document_get_line_endings :: (handle: DocumentHandle) -> Document.LineEndingMode {
+	doc := document_get(handle);
+	return doc.lineEndings;
+}
+
+document_set_line_endings :: (handle: DocumentHandle, mode: Document.LineEndingMode) {
+	doc := document_get(handle);
+	doc.lineEndings = mode;
+}
+
+document_is_read_only :: (handle: DocumentHandle) -> bool {
+	doc := document_get(handle);
+	return doc.diskReadOnly;
+}
+
+document_get_language :: (handle: DocumentHandle) -> *Language {
+	doc := document_get(handle);
+	return doc.language;
+}
+
+document_get_longest_line :: (handle: DocumentHandle) -> s32 {
+	doc := document_get(handle);
+	return doc.longestLine;
+}
+
+document_get_ts_tree :: (handle: DocumentHandle) -> *TSTree {
+	doc := document_get(handle);
+	return doc.tsTree;
+}
+
+document_debug_print_tree :: (handle: DocumentHandle) {
+	doc := document_get(handle);
+	pretty_print_tree(doc.tree);
+}
+
 document_get_or_open :: (path: string, noLoad := false, async := true) -> DocumentHandle {
-	lock(*openDocumentLock);
+	lock(*openDocuments.lock);
 
 	// check if this file is already open
 	success, existingDocument := document_get_by_path(path);
@@ -300,7 +377,7 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 		return .{};
 	}
 
-	slot, handle := find_and_occupy_empty_slot(*openDocuments);
+	slot, locator := find_and_occupy_empty_slot(*openDocuments.documents);
 	doc := *slot.docA;
 
 	if is_absolute_path(path) {
@@ -310,11 +387,11 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 		doc.path = copy_string(get_absolute_path(path));
 	}
 	path_overwrite_separators(doc.path, #char "/");
-	
-	doc.handle = handle;
-	table_add(*openDocumentTable, doc.path, doc.handle); 
 
-	unlock(*openDocumentLock);
+	doc.handle = .{locator = locator};
+	table_add(*openDocuments.pathTable, doc.path, doc.handle);
+
+	unlock(*openDocuments.lock);
 
 	if !noLoad {
 		document_load_from_disk(doc.handle, async);
@@ -460,7 +537,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 		if result == .SUCCESS {
 			// once we're done we simply set the new document as valid
 			// and free the old one
-			slot := bucket_array_find_pointer(*openDocuments, taskData.handle);
+			slot := bucket_array_find_pointer(*openDocuments.documents, taskData.handle.locator);
 			if slot.state == {
 				case .INVALID;
 					slot.state = .A_VALID;
@@ -482,7 +559,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 			// retain the parsing state across a file reload
 		
 			calculate_longest_line(document_get(taskData.handle), async);
-			document_reparse_ts_tree(document_get(taskData.handle), async);
+			document_reparse_ts_tree(taskData.handle, async);
 
 			push_notification("Document Opened");
 		}
@@ -499,7 +576,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	data := New(TaskData); // freed by load_from_disk_complete
 	data.handle = docHandle;
 	data.async = async;
-	slot := bucket_array_find_pointer(*openDocuments, docHandle);
+	slot := bucket_array_find_pointer(*openDocuments.documents, docHandle.locator);
 	// we'll load into the document that's _not_ valid currently
 	oldSlot: *Document;
 	newSlot: *Document;
@@ -535,7 +612,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 }
 
 document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
-	slot := bucket_array_find_pointer(*openDocuments, docHandle);
+	slot := bucket_array_find_pointer(*openDocuments.documents, docHandle.locator);
 	doc: *Document;
 	if slot.state == {
 		case .INVALID;
@@ -625,7 +702,7 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	}
 
 	calculate_longest_line(doc);
-	document_reparse_ts_tree(doc);
+	document_reparse_ts_tree(doc.handle);
 
 	// unload the file from the project
 	// @todo: if you ever support closing documents, you must reload it back into the project
@@ -638,9 +715,9 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	push_notification("Document Loaded");
 }
 
-document_save :: (doc: *Document, path: string, backup := false) {
+document_save :: (doc: DocumentHandle, path: string, backup := false) {
 	TaskData :: struct {
-		document: *Document;
+		document: DocumentHandle;
 		result: Result;
 		desiredPath: string;
 		isBackup: bool;
@@ -653,7 +730,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 	}
 	save_task :: (data: *void) {
 		using taskData := cast(*TaskData, data);
-		doc := taskData.document;
+		doc := document_get(taskData.document);
 
 		directory_make_success := make_directory_if_it_does_not_exist(path_strip_filename(desiredPath), recursive = true);
 	    if !directory_make_success {
@@ -663,7 +740,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 
 		fileHandle, success := file_open(desiredPath, true, false);
 		if success {
-			iterator := make_iterator(doc, 0,,temp);
+			iterator := make_iterator(taskData.document, 0,,temp);
 			while iterator.node != null {
 				bufferIndex := iterator.node.piece.bufferIndex;
 				startOffset := buffer_cursor_to_offset(*doc.buffers[bufferIndex], iterator.node.piece.start);
@@ -682,7 +759,7 @@ document_save :: (doc: *Document, path: string, backup := false) {
 	}
 	save_task_complete :: (data: *void) {
 		using taskData := cast(*TaskData, data);
-		doc := document_get(taskData.document.handle);
+		doc := document_get(taskData.document);
 		defer free(taskData);
 		defer free(desiredPath);
 		defer document_copy_free(taskData.document);
@@ -734,7 +811,9 @@ document_save :: (doc: *Document, path: string, backup := false) {
 	push_task(*asyncWorker, data, save_task, save_task_complete);
 }
 
-document_is_unsaved :: (doc: *Document) -> bool {
+document_is_unsaved :: (handle: DocumentHandle) -> bool {
+	doc := document_get(handle);
+
 	// there is pending edits that have not been finished yet, definitely unsaved
 	if doc.editOpen {
 		return true;
@@ -754,23 +833,23 @@ document_is_unsaved :: (doc: *Document) -> bool {
 }
 
 document_get_by_path :: (path: string) -> bool, DocumentHandle {
-	lock(*openDocumentLock);
-	defer unlock(*openDocumentLock);
-	success, locator := table_find(*openDocumentTable, path);
-	return success, locator;
+	lock(*openDocuments.lock);
+	defer unlock(*openDocuments.lock);
+	success, doc := table_find(*openDocuments.pathTable, path);
+	return success, doc;
 }
 
 document_update_path :: (handle: DocumentHandle, newPath: string) {
 	doc := document_get(handle);
 	if doc == *nilDocument return;
 
-	lock(*openDocumentLock);
-	table_remove(*openDocumentTable, doc.path);
+	lock(*openDocuments.lock);
+	table_remove(*openDocuments.pathTable, doc.path);
 	free(doc.path);
 	doc.path = copy_string(newPath);
 	path_overwrite_separators(doc.path, #char "/");
-	table_add(*openDocumentTable, doc.path, handle);
-	unlock(*openDocumentLock);
+	table_add(*openDocuments.pathTable, doc.path, handle);
+	unlock(*openDocuments.lock);
 
 	modtime, size, success := file_modtime_and_size(doc.path);
 	if success then doc.diskLastModtime = modtime;
@@ -784,7 +863,7 @@ document_update_path :: (handle: DocumentHandle, newPath: string) {
 document_notify_moved_from :: (path: string) -> bool {
 	document_expire_stale_pending_renames();
 
-	found, handle := document_get_by_path(path);
+	found, doc := document_get_by_path(path);
 	if !found return false;
 
 	for * pendingDocumentRenames {
@@ -795,7 +874,7 @@ document_notify_moved_from :: (path: string) -> bool {
 	}
 
 	entry: PendingDocumentRename;
-	entry.handle = handle;
+	entry.handle = doc;
 	entry.oldPath = copy_string(path);
 	entry.time = seconds_since_init();
 	array_add(*pendingDocumentRenames, entry);
@@ -844,7 +923,7 @@ document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
 		// P4 updating the modtime to an older time when you revert
 		if modtime != doc.diskLastModtime {
 			// reload file
-			if !document_is_unsaved(doc) {
+			if !document_is_unsaved(handle) {
 				document_load_from_disk(doc.handle);
 			}
 			else {
@@ -861,7 +940,9 @@ document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
 	}
 }
 
-begin_edit :: (doc: *Document) {
+begin_edit :: (handle: DocumentHandle) {
+	assert(handle.directCopy == null, "You cannot edit copies!!!");
+	doc := document_get(handle);
 	assert(doc.editOpen == false, "Cannot begin edit on this document, another edit is in progress");
 	doc.editOpen = true;
 
@@ -874,29 +955,33 @@ begin_edit :: (doc: *Document) {
 	doc.currentEditTotalBytes = 0;
 }
 
-end_edit :: (doc: *Document) {
+end_edit :: (handle: DocumentHandle) {
+	assert(handle.directCopy == null, "You cannot edit copies!!!");
+	doc := document_get(handle);
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
 
 	// check if the tree even changed since the begin, if it did commit the change
 	if doc.tree != doc.undoStack[doc.undoStack.count-1].tree {
 		commit_history(doc);
-		document_update_ts_tree(doc);
+		document_update_ts_tree(handle);
 	}
 }
 
-insert :: (doc: *Document, atOffset: s64, text: string) {
+insert :: (handle: DocumentHandle, atOffset: s64, text: string) {
+	assert(handle.directCopy == null, "You cannot edit copies!!!");
+	doc := document_get(handle);
+
 	assert(doc.editOpen, "Cannot do insert without starting an edit");
-	assert(!doc.isCopy, "You must not edit copies!!!");
 
 	#if BUILD_TYPE == BuildType.DEBUG {
 		// Check to make sure we won't split a crlf
 		if atOffset > 0 {
-			character := get_char_at(doc, atOffset-1);
+			character := get_char_at(handle, atOffset-1);
 			assert(character != #char "\r");
 		}
 	}
-		
+
 	// don't insert empty nodes
 	if text.count == 0 {
 		return;
@@ -911,7 +996,7 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
 
-	if get_size(doc) == 0 {
+	if get_size(handle) == 0 {
 		rootPiece := make_piece(doc, text);
 		doc.tree = make_rb_tree(tree_allocator(doc), rootPiece);
 		return;
@@ -972,9 +1057,11 @@ insert :: (doc: *Document, atOffset: s64, text: string) {
 	doc.tree = tree;
 }
 
-delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false) {
+delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory := false) {
+	assert(handle.directCopy == null, "You cannot edit copies!!!");
+	doc := document_get(handle);
+
 	assert(doc.editOpen, "Cannot do deletion without starting an edit");
-	assert(!doc.isCopy, "You must not edit copies!!!");
 	assert(atOffset >= 0, "Don't delete before the document starts");
 
 	// don't delete empty ranges
@@ -989,8 +1076,8 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 		// the start of the range is not an LF
 		// and the end of the range is not a CR
 		if atOffset > 0 {
-			startChar := get_char_at(doc, atOffset);
-			endChar := get_char_at(doc, atOffset+length-1);
+			startChar := get_char_at(handle, atOffset);
+			endChar := get_char_at(handle, atOffset+length-1);
 			assert(!(startChar == #char "\n" || endChar == #char "\r"));
 		}
 	}
@@ -1002,8 +1089,8 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
 
 	// edge case, delete the entire document, or do nothing
-	if get_size(doc) - length <= 0 {
-		if get_size(doc) == 0 {
+	if get_size(handle) - length <= 0 {
+		if get_size(handle) == 0 {
 			return;
 		}
 		
@@ -1108,13 +1195,14 @@ delete :: (doc: *Document, atOffset: s64, length: s64, suppressHistory := false)
 	}
 }
 
-search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
-	startCoordinate := get_coordinate_from_offset(doc, fromOffset);
+search :: (handle: DocumentHandle, type: Document.SearchType, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
+	doc := document_get(handle);
+	startCoordinate := get_coordinate_from_offset(handle, fromOffset);
 
 	matched := false;
 	results : [..]Document.Range;
-	
-	iter := make_line_iterator(doc, startCoordinate.line);
+
+	iter := make_line_iterator(handle, startCoordinate.line);
 	currentNode := iter.node;
 	for outer: iter {
 		// first lets get our string to search
@@ -1193,10 +1281,11 @@ search :: (doc: *Document, type: Document.SearchType, fromOffset: s64, searchTer
 	return matched, results;
 }
 
-get_char_at :: (doc: *Document, offset: s64) -> u8 {
+get_char_at :: (handle: DocumentHandle, offset: s64) -> u8 {
+	doc := document_get(handle);
 	// get the literal char at the given offset
 	// log("size %", get_size(doc));
-	if offset >= get_size(doc) || offset < 0 then return #char " ";
+	if offset >= get_size(handle) || offset < 0 then return #char " ";
 
 	node, remainder, _ := node_at_offset(doc, doc.tree, offset);
 	bufferIndex := node.piece.bufferIndex;
@@ -1205,7 +1294,8 @@ get_char_at :: (doc: *Document, offset: s64) -> u8 {
 	return charPtr.*;
 }
 
-get_line_start :: (doc: *Document, line: s64) -> s64 {
+get_line_start :: (handle: DocumentHandle, line: s64) -> s64 {
+	doc := document_get(handle);
 	// get the document offset of a specific line (0 indexed) via binary search
 	node := doc.tree;
 	lineInSubtree := line;
@@ -1240,7 +1330,7 @@ get_line_start :: (doc: *Document, line: s64) -> s64 {
 	return 0;
 }
 
-get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s64, s64 {
+get_line_range :: (doc: DocumentHandle, line: s64, includeLineEndings := false) -> s64, s64 {
 	// find the start and end offsets of the given line, with or without line endings
 	lineStart := get_line_start(doc, line);
 	lineEnd := get_line_start(doc, line+1);
@@ -1258,14 +1348,15 @@ get_line_range :: (doc: *Document, line: s64, includeLineEndings := false) -> s6
 	return lineStart, lineEnd;
 }
 
-get_coordinate_from_offset :: (doc: *Document, offset: s64) -> Document.Coordinate {
+get_coordinate_from_offset :: (handle: DocumentHandle, offset: s64) -> Document.Coordinate {
+	doc := document_get(handle);
 	// get line, column from a given offset
 	node, remainder, nodeStart, line := node_at_offset(doc, doc.tree, offset);
-	lineStart := get_line_start(doc, line);
+	lineStart := get_line_start(handle, line);
 	return .{ line, offset-lineStart };
 }
 
-get_offset_from_coordinate :: (doc: *Document, coord: Document.Coordinate) -> s64 {
+get_offset_from_coordinate :: (doc: DocumentHandle, coord: Document.Coordinate) -> s64 {
 	// Note, if you provide a column that is off the length of the line, it will clamp
 	// decide at some point if that's desirable
 	lineStart, lineEnd := get_line_range(doc, coord.line);
@@ -1273,7 +1364,7 @@ get_offset_from_coordinate :: (doc: *Document, coord: Document.Coordinate) -> s6
 	return lineStart + column;
 }
 
-get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> Document.LineContent {
+get_line_content :: (doc: DocumentHandle, line: s64, includeLineEndings := false) -> Document.LineContent {
 	// allocates memory for returned string!!
 
 	offset := get_line_start(doc, line);
@@ -1299,7 +1390,7 @@ get_line_content :: (doc: *Document, line: s64, includeLineEndings := false) -> 
 	return .{ builder_to_string(*builder), offset, endOffset };
 }
 
-get_content :: (doc: *Document, offset: s64, count: s64) -> string {
+get_content :: (doc: DocumentHandle, offset: s64, count: s64) -> string {
 	// allocates memory for returned string!!
 
 	iterator := make_iterator(doc, offset,,temp);
@@ -1317,15 +1408,17 @@ get_content :: (doc: *Document, offset: s64, count: s64) -> string {
 	return builder_to_string(*builder);
 }
 
-get_number_of_lines :: (doc: *Document) -> s64 {
+get_number_of_lines :: (handle: DocumentHandle) -> s64 {
+	doc := document_get(handle);
 	return lf_count(doc.tree)+1; // plus one due to fence post problem
 }
 
-get_size :: (doc: *Document) -> s64 {
+get_size :: (handle: DocumentHandle) -> s64 {
+	doc := document_get(handle);
 	return length(doc.tree);
 }
 
-shift_offset_line_endings :: (doc: *Document, offset: s64, direction: Document.IterateDirection) -> s64 {
+shift_offset_line_endings :: (doc: DocumentHandle, offset: s64, direction: Document.IterateDirection) -> s64 {
 	// if offset is sat in between \r and \n, that is \r is the char behind it, then shift
 	// in the desired direction
 	if offset == 0 {
@@ -1355,8 +1448,9 @@ commit_history :: (doc: *Document) {
 	top.changeNewEndOffset = doc.currentEditOldEndOffset + doc.currentEditTotalBytes;
 }
 
-undo :: (doc: *Document) -> s64 {
-	assert(!doc.isCopy, "You must not edit copies!!!");
+undo :: (handle: DocumentHandle) -> s64 {
+	assert(handle.directCopy == null, "You must not edit copies!!!");
+	doc := document_get(handle);
 	if doc.undoStack.count == 1 {
 		push_notification("Undo history empty");
 		return -1;
@@ -1376,12 +1470,13 @@ undo :: (doc: *Document) -> s64 {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
-	document_update_ts_tree(doc);
+	document_update_ts_tree(handle);
 	return entry.changeStartOffset;
 }
 
-redo :: (doc: *Document) -> s64 {
-	assert(!doc.isCopy, "You must not edit copies!!!");
+redo :: (handle: DocumentHandle) -> s64 {
+	assert(handle.directCopy == null, "You must not edit copies!!!");
+	doc := document_get(handle);
 	if doc.redoStack.count == 0 {
 		push_notification("Redo history empty");
 		return -1;
@@ -1396,30 +1491,34 @@ redo :: (doc: *Document) -> s64 {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)};
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
-	document_update_ts_tree(doc);
+	document_update_ts_tree(handle);
 	return entry.changeStartOffset;
 }
 
-document_copy :: (doc: *Document) -> *Document {
-	assert(!doc.isCopy, "Don't make copies of copies");
+document_copy :: (handle: DocumentHandle) -> DocumentHandle {
+	assert(handle.directCopy == null, "Don't make copies of copies");
+	doc := document_get(handle);
 	copy := New(Document);
 	memcpy(copy, doc, size_of(Document));
 	if doc.tsTree {
 		copy.tsTree = ts_tree_copy(doc.tsTree);
 	}
+	// TODO: maybe don't need this anymore?
 	copy.isCopy = true;
-	return copy;
+	return .{directCopy = copy};
 }
- 
-document_copy_free :: (doc: *Document) {
-	assert(doc.isCopy, "Don't delete actual document");
+
+document_copy_free :: (handle: DocumentHandle) {
+	assert(handle.directCopy != null, "Don't delete actual document");
+	doc := document_get(handle);
 	ts_tree_delete(doc.tsTree);
 	free(doc);
 }
 
 // Tree iterators
 
-make_iterator :: (doc: *Document, startOffset: s64 = 0) -> Document.Iterator {
+make_iterator :: (handle: DocumentHandle, startOffset: s64 = 0) -> Document.Iterator {
+	doc := document_get(handle);
 	// starting at some non trivial offset will require doing a binary search in the tree for that offset
 	// and saving the node, as we have done with node_at
 	iter: Document.Iterator;
@@ -1431,11 +1530,12 @@ make_iterator :: (doc: *Document, startOffset: s64 = 0) -> Document.Iterator {
 	return iter;
 }
 
-make_reverse_iterator :: (document: *Document, startOffset: s64 = 0) -> Document.Iterator {
+make_reverse_iterator :: (handle: DocumentHandle, startOffset: s64 = 0) -> Document.Iterator {
+	doc := document_get(handle);
 	// starting at some non trivial offset will require doing a binary search in the tree for that offset
 	// and saving the node, as we have done with node_at
 	iter: Document.Iterator;
-	iter.doc = document;
+	iter.doc = doc;
 	iter.stack.allocator = context.allocator;
 	iter.direction = .REVERSE;
 
@@ -1443,13 +1543,14 @@ make_reverse_iterator :: (document: *Document, startOffset: s64 = 0) -> Document
 	return iter;
 }
 
-make_line_iterator :: (document: *Document, startLine: s64 = 0, endLine: s64 = -1) -> Document.LineIterator {
+make_line_iterator :: (handle: DocumentHandle, startLine: s64 = 0, endLine: s64 = -1) -> Document.LineIterator {
+	doc := document_get(handle);
 	iter: Document.LineIterator;
-	iter.doc = document;
+	iter.doc = doc;
 	iter.stack.allocator = context.allocator;
 	iter.lineBuffer.allocator = context.allocator;
 	iter.direction = .FORWARD;
-	iter.endLine = ifx endLine > 0 then endLine else get_number_of_lines(document);
+	iter.endLine = ifx endLine > 0 then endLine else get_number_of_lines(handle);
 
 	jump_to_line(*iter, startLine);
 	return iter;
@@ -1839,12 +1940,13 @@ document_parse_read :: (payload: *void, byteOffset: u32, position: TSPoint, byte
 	}
 }
 
-document_reparse_ts_tree :: (doc: *Document, async := true) {
+document_reparse_ts_tree :: (handle: DocumentHandle, async := true) {
+	doc := document_get(handle);
 	if doc.language == null then return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
-	task.docCopy = document_copy(doc);
+	task.docCopy = document_copy(handle).directCopy;
 	task.forceReparse = true;
 	if async {
 		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
@@ -1855,12 +1957,13 @@ document_reparse_ts_tree :: (doc: *Document, async := true) {
 	}
 }
 
-document_update_ts_tree :: (doc: *Document, async := true) {
+document_update_ts_tree :: (handle: DocumentHandle, async := true) {
+	doc := document_get(handle);
 	if doc.language == null then return;
 
 	task := New(TSParseTaskData);
 	task.doc = doc;
-	task.docCopy = document_copy(doc);
+	task.docCopy = document_copy(handle).directCopy;
 	task.forceReparse = false;
 	if async {
 		doc.isParsing = true;
@@ -1913,10 +2016,10 @@ ts_parse_task_complete :: (data: *void) {
 	temp := doc.tsTree;
 	doc.tsTree = docCopy.tsTree;
 	docCopy.tsTree = temp;
-	
-	document_copy_free(taskData.docCopy);
+
+	document_copy_free(.{directCopy = taskData.docCopy});
 	doc.isParsing = false;
-	
+
 	free(taskData);
 }
 
@@ -1977,12 +2080,12 @@ node_at_offset :: (doc: *Document, node: *Document.Node, offset: s64) -> node: *
 	return null, 0, 0, 0;
 }
 
-document_handle_hash :: (handle: DocumentHandle) -> u32 {
-	return cast,trunc(u32) inline fnv1a_hash(*handle, size_of(DocumentHandle));
+document_handle_hash :: (doc: DocumentHandle) -> u32 {
+	return cast,trunc(u32) inline fnv1a_hash(*doc, size_of(DocumentHandle));
 }
 
-document_handle_compare :: (handleA: DocumentHandle, handleB: DocumentHandle) -> bool {
-	return handleA.bucket_index == handleB.bucket_index && handleA.slot_index == handleB.slot_index;
+document_handle_compare :: (docA: DocumentHandle, docB: DocumentHandle) -> bool {
+	return docA.locator.bucket_index == docB.locator.bucket_index && docA.locator.slot_index == docB.locator.slot_index && docA.directCopy == docB.directCopy;
 }
 
 #scope_file
@@ -2372,7 +2475,7 @@ fuse :: (left: *Document.Node, right: *Document.Node) -> *Document.Node {
 calculate_longest_line :: (doc: *Document, async := true) {
 	TaskData :: struct {
 		document: *Document;
-		documentCopy: *Document;
+		documentCopy: DocumentHandle;
 		longestLine: s32;
 		longestLineLength: s32;
 	}
@@ -2404,7 +2507,7 @@ calculate_longest_line :: (doc: *Document, async := true) {
 
 	taskData := New(TaskData);
 	taskData.document = doc;
-	taskData.documentCopy = document_copy(doc);
+	taskData.documentCopy = document_copy(doc.handle);
 	if async {
 		push_task(*asyncWorker, taskData, task, task_done);
 	}

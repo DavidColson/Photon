@@ -12,10 +12,7 @@ Cursor :: struct {
 }
 
 Panel :: struct {
-	docHandle: DocumentHandle;
-	// this will be updated every frame using the handle
-	// Never copy and store this pointer, it can change underneath you
-	document: *Document;
+	document: DocumentHandle;
 	previousDocument: DocumentHandle;
 
 	layoutRect: Rect;
@@ -53,26 +50,25 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	// Save the scroll offset of the old document so we can come back to it
 	success, codeBox := find_box(ui_key("code"));
 	if success {
-		location := table_find_pointer(*panel.documentLocations, panel.docHandle);
+		location := table_find_pointer(*panel.documentLocations, panel.document);
 		if location {
 			location.scrollOffset = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
 			location.cursor = panel.cursor;
 		}
 		else {
-			table_add(*panel.documentLocations, panel.docHandle, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
+			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
 		}
 	}
 
-	panel.previousDocument = panel.docHandle;
-	panel.docHandle = doc;
-	panel.document = document_get(doc); // note this may be null at time of query if document isn't loaded yet
+	panel.previousDocument = panel.document;
+	panel.document = doc;
 	panel.cursor = .{};
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;
 	panel.cursor.virtualColumn = 0;
 
 	// Restore a saved scroll offset if one exists
-	location := table_find_pointer(*panel.documentLocations, panel.docHandle);
+	location := table_find_pointer(*panel.documentLocations, panel.document);
 	if success {
 		if location {
 			codeBox.viewOffset = location.scrollOffset;

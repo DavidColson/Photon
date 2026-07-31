@@ -20,18 +20,11 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	editorMode = .DIALOG;
 
 	// Collect open documents
-	for * slot: openDocuments {
-		doc: *Document;
-		if slot.state == {
-			case .INVALID; continue;
-			case .A_VALID; doc = *slot.docA;
-			case .B_VALID; doc = *slot.docB;
-			case; continue;
-		}
+	for doc: openDocuments {
 		entry := array_add(*fileFinder.fileList);
-		entry.filePath = doc.path;
+		entry.filePath = document_get_path(doc);
 		entry.loaded = true;
-		entry.handle = doc.handle;
+		entry.handle = doc;
 		entry.sortKey = 10;
 		fileFinder.numToDisplay += 1;
 	}
@@ -41,7 +34,7 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 			entry := array_add(*fileFinder.fileList);
 			entry.filePath = file.fullName;
 			entry.loaded = false;
-			entry.handle = file.locator;
+			entry.handle = .{locator = file.locator};
 			entry.sortKey = 10;
 			fileFinder.numToDisplay += 1;
 		}
@@ -56,24 +49,16 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);
 
-	// @todo: should make an actual custom for expansion for this
-	for * slot: openDocuments {
-		doc: *Document;
-		if slot.state == {
-			case .INVALID; continue;
-			case .A_VALID; doc = *slot.docA;
-			case .B_VALID; doc = *slot.docB;
-			case; continue;
-		}
+	for doc: openDocuments {
 		// @todo: at some point you probably want to search the whole path for matches
 		// need better UI to show the filepath
-		filePath := doc.path;
+		filePath := document_get_path(doc);
 		score, fuzzyMatches := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 		if score > 0 {
 			entry := array_add(*finder.fileList);
-			entry.filePath = doc.path;
+			entry.filePath = filePath;
 			entry.loaded = true;
-			entry.handle = doc.handle;
+			entry.handle = doc;
 			entry.sortKey = score;
 			entry.fuzzyMatches = fuzzyMatches;
 			finder.numToDisplay += 1;
@@ -88,7 +73,7 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 				entry := array_add(*finder.fileList);
 				entry.filePath = file.fullName;
 				entry.loaded = false;
-				entry.handle = file.locator;
+				entry.handle = .{locator = file.locator};
 				entry.sortKey = score;
 				entry.fuzzyMatches = fuzzyMatches;
 				finder.numToDisplay += 1;
@@ -129,7 +114,7 @@ file_finder_select_file :: (panel: *Panel, args: []string) {
 	}
 	else {
 		doc := document_get_or_open(finder.fileList[finder.selectedEntry].filePath, noLoad = true);
-		projectFile:= bucket_array_find_pointer(*project.projectFiles, entry.handle);
+		projectFile:= bucket_array_find_pointer(*project.projectFiles, entry.handle.locator);
 		document_load_from_project(doc, projectFile);
 		panel_set_active_document(panel, doc);
 	}

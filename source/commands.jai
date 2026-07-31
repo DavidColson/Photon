@@ -500,7 +500,7 @@ select_register :: (using panel: *Panel, args: []string) {
 	registers.selectedRegister = args[0][0];
 }
 
-delete_cursor_range :: (doc: *Document, locationA: s64, locationB:s64) -> s64 {
+delete_cursor_range :: (doc: DocumentHandle, locationA: s64, locationB:s64) -> s64 {
 	start := min(locationA, locationB);
 	end := max(locationA, locationB);
 
@@ -510,7 +510,7 @@ delete_cursor_range :: (doc: *Document, locationA: s64, locationB:s64) -> s64 {
 	return start;
 }
 
-yank_range_to_register :: (doc: *Document, locationA: s64, locationB:s64) {
+yank_range_to_register :: (doc: DocumentHandle, locationA: s64, locationB:s64) {
 	start := min(locationA, locationB);
 	end := max(locationA, locationB);
 
@@ -557,7 +557,7 @@ change_selection :: (using panel: *Panel, args: []string) {
 
 		// reinsert a line ending
 		textToInsert := "\r\n";
-		if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 			textToInsert = "\n";
 		}
 		insert_mode_insert_string(textToInsert);
@@ -623,7 +623,7 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 	// insert into document
 	insertLocation := max(cursor.head, cursor.anchor);
 	insert(document, insertLocation, textToPaste);
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, textToPaste.count});
+	change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, textToPaste.count});
 	end_edit(document);
 
 	cursor.anchor = insertLocation;
@@ -676,7 +676,7 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 		insert(document, insertLocation, textToPaste);
 	}
 	
-	change := normalize_line_endings_common(document, document.lineEndings, .{insertLocation, insertLocation + textToPaste.count});
+	change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, insertLocation + textToPaste.count});
 	cursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
 	cursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
 	end_edit(document);
@@ -691,7 +691,7 @@ new_line_below :: (using panel: *Panel, args: []string) {
 	enter_insert_mode_start(panel, args);
 
 	textToInsert := "\r\n";
-	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
@@ -706,12 +706,12 @@ new_line_above :: (using panel: *Panel, args: []string) {
 	enter_insert_mode_start(panel, args);
 
 	textToInsert := "\r\n";
-	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
 
-	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		panel.cursor.head -= 1;
 	}
 	else {
@@ -828,7 +828,7 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 }
 	
 // returns the change in byte length of the line
-replace_indentation_for_line :: (doc: *Document, lineNumber: s64) -> s64 {
+replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
 	indentation := calculate_indentation_for_line(doc, lineNumber);
 	lineContent := get_line_content(doc, lineNumber);
 
@@ -860,7 +860,7 @@ replace_indentation_for_line :: (doc: *Document, lineNumber: s64) -> s64 {
 	return indentation.count - deleteUpTo;
 }
 
-cursor_offset_after_line_indent_change :: (doc: *Document, coord: Document.Coordinate, delta: s64) -> s64 {
+cursor_offset_after_line_indent_change :: (doc: DocumentHandle, coord: Document.Coordinate, delta: s64) -> s64 {
 	return get_offset_from_coordinate(doc, .{coord.line, max(0, coord.col + delta)});
 }
 
@@ -1138,7 +1138,7 @@ insert_mode_handle_text_input :: (char: Utf8_Char) {
 
 insert_mode_line_break :: (using panel: *Panel, args: []string) {
 	textToInsert := "\r\n";
-	if panel.document.lineEndings == .LF || panel.document.lineEndings == .MIXED_MAJORITY_LF {
+	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		textToInsert = "\n";
 	}
 	insert_mode_insert_string(textToInsert);
@@ -1375,7 +1375,7 @@ open_file_in_working_dir :: (panel: *Panel, args: []string) {
 }
 
 save_file :: (panel: *Panel, args: []string) {
-	document_save(panel.document, panel.document.path);
+	document_save(panel.document, document_get_path(panel.document));
 }
 
 save_file_as :: (panel: *Panel, args: []string) {
@@ -1384,13 +1384,13 @@ save_file_as :: (panel: *Panel, args: []string) {
 }
 
 p4_checkout_file :: (panel: *Panel, args: []string) {
-	result, output, error := run_command("p4", "edit", panel.document.path, capture_and_return_output=true);
+	result, output, error := run_command("p4", "edit", document_get_path(panel.document), capture_and_return_output=true);
 	log("%", output);
 }
 
 print_piece_chain_debug :: (using panel: *Panel, args: []string) {
 	log("Tree Nodes: ");
-	pretty_print_tree(document.tree);
+	document_debug_print_tree(document);
 	log("\nDocument: ");
 	iterator := make_iterator(document, 0);
 
@@ -1432,7 +1432,7 @@ toggle_render_line_endings :: (panel: *Panel, args: []string) {
 	fontCode.drawLineEndings = !fontCode.drawLineEndings;
 }
 
-normalize_line_endings_common :: (document: *Document, targetEndings: Document.LineEndingMode, range: Document.Range) -> s64 {
+normalize_line_endings_common :: (document: DocumentHandle, targetEndings: Document.LineEndingMode, range: Document.Range) -> s64 {
 	// this function needs to peak ahead, which requires it to binary query the tree for every single character checked
 	// probably can make it faster, but it's fine for now
 	// you could take the strategy of going line by line, rather than char by char
@@ -1449,7 +1449,7 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 			}
 			if iterator.offset == end then break;
 		}
-		document.lineEndings = .LF;
+		document_set_line_endings(document, .LF);
 	}
 	else if targetEndings == .CRLF {
 		for :raw_bytes iterator {
@@ -1462,7 +1462,7 @@ normalize_line_endings_common :: (document: *Document, targetEndings: Document.L
 			}
 			if iterator.offset == end then break;
 		}
-		document.lineEndings = .CRLF;
+		document_set_line_endings(document, .CRLF);
 	}
 
 	return end - range.end;
