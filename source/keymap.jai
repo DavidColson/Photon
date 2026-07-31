@@ -110,13 +110,14 @@ normalModeCommands :: Command.[
 		
 	// misc normal mode
 	.{ "Select register {char}", .["\"{char}"], 0, select_register },
-	.{ "Next search result", .["n"], 0, next_search_result },
-	.{ "Previous search result", .["N"], 0, previous_search_result },
 	.{ "Jump to last open document", .["gp"], 0, jump_to_last_open_document },
 
 	// search
 	.{ "Search Document", .["/"], 0, start_document_search },
-
+	.{ "Next search result", .["n"], 0, next_search_result },
+	.{ "Previous search result", .["N"], 0, previous_search_result },
+	.{ "Search selection", .["*"], 0, search_selection },
+	
 	// changes
 	.{ "Delete selection", .["d"], 0, delete_selection },
 	.{ "Change selection", .["c"], 0, change_selection },

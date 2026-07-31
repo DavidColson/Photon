@@ -985,7 +985,7 @@ start_document_search :: (using panel: *Panel, args: []string) {
 	// show search bar
 	editorMode = .DIALOG;
 	panel.activeDialog = .SEARCH;
-	panel.currentSearchTerm = string.{};
+	write_register("/", "");
 	panel.searchInput.onEditCallback = document_search_on_edit;
 	panel.searchInput.userData = cast(*void) panel;
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
@@ -998,7 +998,7 @@ confirm_document_search :: (using panel: *Panel, args: []string) {
 		panel.cursor.head = panel.results[0].end-1;
 	}
 	editorMode = .NORMAL;
-	panel.currentSearchTerm = string.{panel.searchInput.text.count, panel.searchInput.text.data};
+	write_register("/", .{panel.searchInput.text.count, panel.searchInput.text.data});
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
 	panel_reset_dialogs(panel);
 }
@@ -1018,11 +1018,12 @@ next_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(panel.cursor.head, panel.cursor.anchor), panel.currentSearchTerm);
+	searchTerm := read_register("/");
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(panel.cursor.head, panel.cursor.anchor), searchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, panel.currentSearchTerm);
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, searchTerm);
 	}
 
 	if panel.hasMatches {
@@ -1041,7 +1042,8 @@ previous_search_result :: (using panel: *Panel, args: []string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, panel.currentSearchTerm, stopAtFirstResult=false);
+	searchTerm := read_register("/");
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, searchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -1066,6 +1068,21 @@ previous_search_result :: (using panel: *Panel, args: []string) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2); 
 		}
 	}
+}
+
+search_selection :: (using panel: *Panel, args: []string) {
+	start := min(cursor.head, cursor.anchor);
+	end := max(cursor.head, cursor.anchor);
+	
+	text: [..]u8;
+	iterator := make_iterator(document, start);
+	for :raw_bytes iterator {
+		array_add(*text, it,,temp);
+		if it != #char "\r" && iterator.offset >= end then break;
+	}
+	textStr := string.{text.count, text.data};
+	write_register("/", textStr);
+	push_notification("Selection copied to search register");
 }
 
 document_search_on_edit :: (userData: *void, input: string) {

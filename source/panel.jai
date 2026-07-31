@@ -40,7 +40,6 @@ Panel :: struct {
 	// search state (this is too a dialog, may want to group it up)
 	searchInput: InputField;
 	currentRegex: Regexp;
-	currentSearchTerm: string;
 	hasMatches := false;
 	previousScrollLine := 0;
 	results: [..]Document.Range;
