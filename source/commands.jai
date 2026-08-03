@@ -418,7 +418,7 @@ expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
 		
 	range := cursor_to_range(cursor);
 	rootNode := ts_tree_root_node(document_get_ts_tree(document));
-	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx range.end);
+	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
 	
 	startByte := ts_node_start_byte(node);
 	endByte := ts_node_end_byte(node)-1;
@@ -464,11 +464,43 @@ shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
 	else {
 		range := cursor_to_range(cursor);
 		rootNode := ts_tree_root_node(document_get_ts_tree(document));
-		node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx range.end);
+		node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
 		node = ts_node_child(node, 0);
 		if !ts_node_is_null(node) {
 			cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 		}
+	}
+}
+
+select_next_sibling :: (using panel: *Panel, args: []string) {
+	if !document_supports_treesitter(document) {
+		push_notification("Not supported in this language");
+		return;
+	}
+	
+	range := cursor_to_range(cursor);
+	rootNode := ts_tree_root_node(document_get_ts_tree(document));
+	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
+	node = ts_node_next_sibling(node);
+	
+	if !ts_node_is_null(node) {
+		cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
+	}
+}
+
+select_prev_sibling :: (using panel: *Panel, args: []string) {
+	if !document_supports_treesitter(document) {
+		push_notification("Not supported in this language");
+		return;
+	}
+	
+	range := cursor_to_range(cursor);
+	rootNode := ts_tree_root_node(document_get_ts_tree(document));
+	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
+	node = ts_node_prev_sibling(node);
+	
+	if !ts_node_is_null(node) {
+		cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 	}
 }
 

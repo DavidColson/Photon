@@ -105,6 +105,8 @@ normalModeCommands :: Command.[
 	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
 	.{ "Expand selection to parent syntax", .["alt+o"], .REPEATABLE, expand_selection_by_syntax },
 	.{ "Shrink selection by syntax", .["alt+i"], .REPEATABLE, shrink_selection_by_syntax },
+	.{ "Select next syntax node", .["alt+n"], .REPEATABLE, select_next_sibling },
+	.{ "Select previous syntax node", .["alt+p"], .REPEATABLE, select_prev_sibling },
 	
 	.{ "Select whole document", .["%"], 0, select_whole_document },
 	.{ "Collapse selection", .[";"], 0, collapse_selection },
