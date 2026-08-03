@@ -15,6 +15,7 @@ Project :: struct {
 	File :: struct {
 		fullName: string;
 		content: string;
+		lock: Mutex;
 		locator: Bucket_Locator;
 		diskLastModtime: Apollo_Time;
 		lineEndingMode: Document.LineEndingMode;
@@ -55,8 +56,6 @@ Project :: struct {
 	searchThreads: Thread_Group;
 }
 
-testMutex: Mutex;
-
 project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
@@ -76,8 +75,6 @@ ProjectFileSections :: enum {
 project_parser :: (projectFileName: string) -> bool, Project {
 	handler: Text_File_Handler;
 	defer deinit(*handler);
-
-	init(*testMutex);
 
 	// currently we create the project itself and set it up in here
 	// is this a good idea? Not sure lets see how it goes
@@ -221,6 +218,7 @@ project_begin_load :: () {
 
 			// If we're keeping a file, copy it's full_name with our allocator and store
 			file := Project.File.{ fullName = copy_string(info.full_name,, project_allocator()) };
+			init(*file.lock);
 			locator, entry := bucket_array_add(*project.projectFiles, file);
 			entry.locator = locator;
 			table_add(*project.projectFileTable, file.fullName, locator);
@@ -306,7 +304,6 @@ project_update :: () {
 // document (the shared fileWatcher's routing callback in main.jai only calls
 // this once it has confirmed the path isn't an open document).
 project_handle_file_change :: (change: *File_Change) {
-	// @todo: what happens if a file changes while we're still loading the project?
 	if project.loadProgress != .COMPLETE then return;
 
 	// is this actually a file we care about in the project?
@@ -325,6 +322,7 @@ project_handle_file_change :: (change: *File_Change) {
 				if success {
 					file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
 					free_file(file);
+					destroy(*file.lock);
 					bucket_array_remove(*project.projectFiles, fileLocator);
 					table_remove(*project.projectFileTable, change.full_path);
 				}
@@ -332,6 +330,7 @@ project_handle_file_change :: (change: *File_Change) {
 			}
 			if change.events & .ADDED || change.events & .MOVED_TO {
 				newFile := Project.File.{ fullName = copy_string(change.full_path,, project_allocator()) };
+				init(*newFile.lock);
 				locator, entry := bucket_array_add(*project.projectFiles, newFile);
 				entry.locator = locator;
 				table_add(*project.projectFileTable, newFile.fullName, locator);
@@ -488,7 +487,9 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
 	file := cast(*Project.File, work);
 
-	// @todo: mutex/atomic or some kind of protection
+	lock(*file.lock);
+	defer unlock(*file.lock);
+	
 	free_file(file);
 
 	tempArray := *project.lineStartTempArrays[thread.worker_info.worker_index];
