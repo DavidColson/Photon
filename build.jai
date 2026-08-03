@@ -6,6 +6,7 @@
 Compiler :: #import "Compiler";
 #import "Windows_Resources";
 #import "Metaprogram_Plugins";
+#import "Hash_Table";
 
 #if OS == .WINDOWS {
     Windows_Resources :: #import "Windows_Resources";
@@ -24,9 +25,74 @@ BUILD_DEBUG_DIR :: "build/debug";
 BUILD_OPTIMIZED_DEBUG_DIR :: "build/optimized";
 BUILD_SHIPPING_DIR :: "build/shipping";
 
+console_commands : [..]*Code_Procedure_Header;
+console_variables: [..]*Code_Declaration;
+console_commands_generated := false;
+
+collect_commands_and_cvars :: (message: *Message) {
+	if message.kind == {
+	case .TYPECHECKED;
+		typechecked := cast(*Message_Typechecked)message;
+		for typechecked.procedure_headers {
+			expr := it.expression;
+			is_console_command: bool;
+			for expr.notes {
+				if it.text == "Command" {
+					is_console_command = true;
+					break;
+				}
+			}
+			if is_console_command  array_add(*console_commands, expr);
+		}
+		for typechecked.declarations {
+			expr := it.expression;
+			is_console_variable: bool;
+			for expr.notes {
+				if it.text == "CVar" {
+					is_console_variable = true;
+					break;
+				}
+			}
+			if is_console_variable  array_add(*console_variables, expr);
+		}
+	}
+}
+
+generate_console_commands :: (w: Workspace) {
+	builder: String_Builder;
+	init_string_builder(*builder);
+	
+	append(*builder, #string END
+		register_commands_and_cvars :: () {
+		END);
+	
+	append(*builder, "    // Cvars\n");
+	for console_variables {
+	if it.flags & .IS_CONSTANT {
+			log_error("A constant declaration cannot be a CVar.");
+			continue;
+		}
+		append(*builder, tprint("    register_cvar(\"%1\", *%1);\n", it.name));
+	}
+	
+	append(*builder, "    // Commands\n");
+	for console_commands {
+	command_name := it.name;
+	if begins_with(command_name, "command_")  advance(*command_name, 8);
+	
+	append(*builder, tprint("    register_command(\"%\", %);\n", command_name, it.name));
+	}
+	
+	append(*builder, "};\n");
+	
+	code := builder_to_string(*builder);
+	add_build_string(code, w);
+	// log("%\n", code, flags=.VERY_VERBOSE_ONLY);
+}
+
 Build :: ()
 {
-	w := compiler_create_workspace();
+	w := compiler_create_workspace("Photon");
 
 	// @todo, create build output when it does not exist
 	target_options := get_build_options(w);
@@ -92,8 +158,47 @@ Build :: ()
 	// wait for compilation to finish so we can edit the exe
 	while true {
 		message := Compiler.compiler_wait_for_message();
+		
         for plugins if it.message it.message(it, message);
-		if message.kind == .COMPLETE break;
+		collect_commands_and_cvars(message);
+		
+		if message.kind == {
+		case .TYPECHECKED;
+			typechecked := cast(*Message_Typechecked) message;
+			for proc: typechecked.procedure_bodies {
+				// proc.block
+				
+				// log("notes: %", proc.expression.header.notes);
+				
+				for note: proc.expression.header.notes {
+					if equal(note.text, "command") {
+						log("found command with name '%'", proc.expression.header.name);
+						// proc.expression.block is the function block we are here for 
+						// So somehow we need to find the declaration that contains the config
+					}
+				}
+			}
+			// for decl: typechecked.declarations {
+				// for note: decl.expression.notes {
+					// if equal(note.text, "command") {
+						// log("found command with name '%'", decl.expression.name);
+						// log("%", decl.expression.kind);
+					// }
+				// }
+			// }
+			
+		case .PHASE;
+			phase := cast(*Message_Phase) message;
+			if phase.phase == .TYPECHECKED_ALL_WE_CAN {
+				// this is the point we'd do our generation ofthe command tables
+				if !console_commands_generated {
+					generate_console_commands(w);
+					console_commands_generated = true;
+				}
+			}
+		case .COMPLETE;
+			break;
+		}
 	}
 	Compiler.compiler_end_intercept(w);
 

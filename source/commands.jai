@@ -472,6 +472,29 @@ shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
 	}
 }
 
+CommandConfig :: struct {
+	keybinding: []string;
+	flags: CommandFlags;
+}
+
+sample_command :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		keybinding = .["alt+t"],
+		flags = .REPEATABLE
+	};
+	
+	log("Executed my simple command");
+} @command
+
+sample_command_2 :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		keybinding = .["alt+r"],
+		flags = .REPEATABLE
+	};
+	
+	log("Executed my simple command 2");
+} @command
+
 select_next_sibling :: (using panel: *Panel, args: []string) {
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");

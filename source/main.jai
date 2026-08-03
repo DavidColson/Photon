@@ -2416,6 +2416,7 @@ Input :: #import "Input";
 #load "project.jai";
 #load "project_search.jai";
 #load "language.jai";
+#load "cvarexample.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";
