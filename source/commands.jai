@@ -411,6 +411,11 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 }
 
 expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
+	if !document.language || !document.tsTree {
+		push_notification("Not supported in this language");
+		return;
+	}
+		
 	range := cursor_to_range(cursor);
 	rootNode := ts_tree_root_node(document_get_ts_tree(document));
 	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx range.end);
@@ -439,6 +444,11 @@ expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
 }
 
 shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
+	if !document.language || !document.tsTree {
+		push_notification("Not supported in this language");
+		return;
+	}
+	
 	// is there anything in the selectionsHistory?
 	if syntaxSelectionsHistory.count > 0 {
 		top := pop(*syntaxSelectionsHistory);
@@ -726,7 +736,7 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	cursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
 	end_edit(document);
 	
-	if linewise {
+	if linewise && document.language && document.tsTree {
 		autoindent_selection(panel, .[]);
 	}
 }
@@ -1185,7 +1195,7 @@ insert_mode_insert_string :: (input: string) {
 	// If the last thing you typed likely closed an indentation region, reindent the line
 	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
 	// keypress, so for now we'll just guess
-	if input == "}" || input == ")" || input == "]" {
+	if focusedPanel.document.language && focusedPanel.document.tsTree && (input == "}" || input == ")" || input == "]") {
 		headCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.head);
 		anchorCoord := get_coordinate_from_offset(focusedPanel.document, focusedPanel.cursor.anchor);
 
