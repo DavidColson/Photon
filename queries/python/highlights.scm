@@ -4,7 +4,7 @@
 (identifier) @variable
 
 ; Reset highlighting in f-string interpolations
-(interpolation) @none @nospell
+(interpolation) @none
 
 ; Identifier naming conventions
 ((identifier) @type
@@ -65,11 +65,11 @@
 
 (float) @number.float
 
-(comment) @comment @spell
+(comment) @comment
 
 ((module
   .
-  (comment) @keyword.directive @nospell)
+  (comment) @keyword.directive)
   (#match? @keyword.directive "^#!/"))
 
 (string) @string
@@ -82,7 +82,7 @@
 ; doc-strings
 (expression_statement
   (string
-    (string_content) @spell) @string.documentation)
+    (string_content)) @string.documentation)
 
 ; Tokens
 [
