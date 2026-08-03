@@ -21,9 +21,12 @@ Panel :: struct {
 	// cursors
 	cursor: Cursor;
 	lastScrolledCursorHead: s64;
+	
+	// for restoring selections with shrink_selection
+	// TODO: when we have multicursors this will need to be an array of an array of cursors
+	// Probably we will refactor an array of cursors into a single "selection" object similar to helix
+	syntaxSelectionsHistory: [..]Cursor;
 
-	// we key by the document path because documentHandle is not actually hashable
-	// TODO: make documentHandle be hashable and improve this
 	DocumentPanelLocation :: struct {
 		scrollOffset: Vector2;
 		cursor: Cursor;
@@ -204,4 +207,26 @@ panel_get_page_size :: (panel: *Panel) -> s64 {
 		return cast(s64) (box.rect.h / metrics.lineSpacing);
 	}
 	return 0;
+}
+
+cursor_to_range :: (cursor: Cursor) -> Document.Range {
+	range: Document.Range;
+	range.start = min(cursor.head, cursor.anchor);
+	range.end = max(cursor.head, cursor.anchor);
+	return range;
+}
+
+// this will copy the direction of the given cursor, as well as any other properties, such as the virtual column 
+range_to_cursor :: (cursor: Cursor, range: Document.Range) -> Cursor {
+	new := cursor;
+	
+	if cursor.head < cursor.anchor {
+		new.head = range.start;
+		new.anchor = range.end;
+	}
+	else {
+		new.anchor = range.start;
+		new.head = range.end;
+	}
+	return new;
 }

@@ -410,6 +410,58 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 	}
 }
 
+expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
+	range := cursor_to_range(cursor);
+	rootNode := ts_tree_root_node(document_get_ts_tree(document));
+	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx range.end);
+	
+	startByte := ts_node_start_byte(node);
+	endByte := ts_node_end_byte(node)-1;
+	
+	while startByte == range.start && endByte == range.end {
+		parent := ts_node_parent(node);
+		if !ts_node_is_null(parent) {
+			node = parent;
+			startByte = ts_node_start_byte(node);
+			endByte = ts_node_end_byte(node)-1;
+		}
+		else {
+			break;
+		}
+	}
+	
+	// if the selection has changed, store it in the history so it can be restroed with shrink_selections below
+	if range.start != startByte || range.end != endByte {
+		array_add(*syntaxSelectionsHistory, cursor);
+	}
+	
+	cursor = range_to_cursor(cursor, .{startByte, endByte});
+}
+
+shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
+	// is there anything in the selectionsHistory?
+	if syntaxSelectionsHistory.count > 0 {
+		top := pop(*syntaxSelectionsHistory);
+		range := cursor_to_range(top);
+		rangeCurrent := cursor_to_range(cursor);
+		if rangeCurrent.start <= range.start && rangeCurrent.end >= range.end {
+			cursor = top;
+		}
+		else {
+			array_reset(*syntaxSelectionsHistory);
+		}
+	}
+	else {
+		range := cursor_to_range(cursor);
+		rootNode := ts_tree_root_node(document_get_ts_tree(document));
+		node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx range.end);
+		node = ts_node_child(node, 0);
+		if !ts_node_is_null(node) {
+			cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
+		}
+	}
+}
+
 select_whole_document :: (using panel: *Panel, args: []string) {
 	cursor.anchor = 0;
 	cursor.head = get_size(document)-1;
@@ -562,10 +614,8 @@ change_selection :: (using panel: *Panel, args: []string) {
 }
 
 yank_selection :: (using panel: *Panel, args: []string) {
-	rangeStart := min(cursor.head, cursor.anchor);
-	rangeEnd := max(cursor.head, cursor.anchor);
-
-	yank_range_to_register(document, rangeStart, rangeEnd);
+	range := cursor_to_range(cursor);
+	yank_range_to_register(document, range.start, range.end);
 	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
 }
 

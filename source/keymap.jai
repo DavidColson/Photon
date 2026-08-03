@@ -103,6 +103,8 @@ normalModeCommands :: Command.[
 	// Selection manipulation
 	.{ "Extend selection to full lines", .["x"], .REPEATABLE, extend_selection_to_lines },
 	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
+	.{ "Expand selection to parent syntax", .["alt+o"], .REPEATABLE, expand_selection_by_syntax },
+	.{ "Shrink selection by syntax", .["alt+i"], .REPEATABLE, shrink_selection_by_syntax },
 	
 	.{ "Select whole document", .["%"], 0, select_whole_document },
 	.{ "Collapse selection", .[";"], 0, collapse_selection },
