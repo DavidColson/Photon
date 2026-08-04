@@ -477,22 +477,52 @@ CommandConfig :: struct {
 	flags: CommandFlags;
 }
 
-sample_command :: (using panel: *Panel) {
+testFontSize: s32; @option
+testLineNumbers: bool; @option
+
+sample_simple_command :: (using panel: *Panel) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+t"],
 		flags = .REPEATABLE
 	};
 	
-	log("Executed my simple command");
+	log("Simple Command");
 } @command
 
-sample_command_2 :: (using panel: *Panel) {
+sample_goto_line :: (using panel: *Panel, number: s64) {
+	CONFIG :: CommandConfig.{
+		keybinding = .["alt+t"],
+		flags = .REPEATABLE
+	};
+	
+	log("goto line %", number);
+} @command
+
+sample_jump_to_char :: (using panel: *Panel, character: u8) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+r"],
 		flags = .REPEATABLE
 	};
 	
-	log("Executed my simple command 2");
+	log("jump to char %", character);
+} @command
+
+sample_normalize_line_endings :: (using panel: *Panel, mode: Document.LineEndingMode) {
+	CONFIG :: CommandConfig.{
+		keybinding = .["alt+r"],
+		flags = .REPEATABLE
+	};
+	
+	log("Normalize endings %", mode);
+} @command
+
+sample_set_title :: (using panel: *Panel, title: string) {
+	CONFIG :: CommandConfig.{
+		keybinding = .["alt+r"],
+		flags = .REPEATABLE
+	};
+	
+	log("Set title to %", title);
 } @command
 
 select_next_sibling :: (using panel: *Panel, args: []string) {

@@ -23,27 +23,6 @@
     // Varargs are possible with the condition that the variable argument is the last one
     my_command :: (vararg: .. int) { .. } @Command
     > my_command, 10, 20, 30     // Can be as many as you want
-
-
-    // UNIMPLEMENTED IDEAS
-    // More advanced features could have been added, but I wanted to keep this simple.
-    // Here are a few ideas which I have not implemented but are definitely doable:
-
-    // Named_arguments
-    > echo message = "Hello world\n"
-
-    // Array arguments
-    my_command :: (a: []int) { .. } @Command
-    > my_command [1, 2, 3, 4]   // Just like varargs, you can have as many as you want
-
-    // Struct arguments
-    My_Struct :: struct { a: int; b: int; c: int; }
-    my_command :: (s: My_Struct) { .. } @Command
-    > my_command {1, 2, 3}      // Just like in CVars, args can be skipped/omitted
-
-    // Arithmetic expressions as arguments (I wouldn't want it, but it's possible)
-    print_int :: (format_string: string, the_int: int) { .. } @Command
-    > print_int "2 * (2 + 3) is %", 1 * (2 + 3) // expression can be evaluated as an int or a float
 */
 
 #import "Compiler";
@@ -52,29 +31,28 @@ Command2 :: struct {
     Argument_Input :: struct {
         name: string;
         type: *Type_Info;
-        default_value_or_null: *void;
     }
     args: []Argument_Input;
-    proc: (args: []*void);
+    proc: (panel: *Panel, args: []*void);
     flags: enum {
         LAST_ARG_IS_VARARGS :: 0x1;
     };
 }
 
-CVar :: struct {
+Option :: struct {
     data: *void;
     type: *Type_Info;
 }
 
-command_table: Table(string, Command2);
-cvar_table:    Table(string, CVar);
+commandTable: Table(string, Command2);
+optionsTable:    Table(string, Option);
 
 
 commands_init :: () {
-    register_commands_and_cvars(); // Inserted by the metaprogram
+    register_commands_and_options(); // Inserted by the metaprogram
 }
 
-run_console_command :: (input: string) {
+run_console_command :: (panel: *Panel, input: string) {
     in := input;
 
     // Eat leading spaces
@@ -96,7 +74,7 @@ run_console_command :: (input: string) {
 
     // We only check for commands if left doesn't contain dots.
     if left.count == 1 {
-        command := table_find_pointer(*command_table, left[0]);
+        command := table_find_pointer(*commandTable, left[0]);
         if command {
             args_out := NewArray(command.args.count, *void,, temp);
             for command.args {
@@ -137,22 +115,18 @@ run_console_command :: (input: string) {
                         return;
                     }
                 } else {
-                    if it.default_value_or_null {
-                        args_out[it_index] = it.default_value_or_null;
-                    } else {
-                        log_error("In command %, no value provided for argument % \"%\"",
-                                  left[0], it_index, it.name);
-                        return;
-                    }
+					log_error("In command %, no value provided for argument % \"%\"",
+						left[0], it_index, it.name);
+					return;
                 }
             }
-            command.proc(args_out);
+            command.proc(panel, args_out);
             return;
         }
     }
 
     // No command found - try cvars
-    found, cvar := table_find(*cvar_table, left[0]);
+    found, cvar := table_find(*optionsTable, left[0]);
     if !found {
         log_error("Unknown command or cvar \"%\"", left[0]);
         return;
@@ -367,102 +341,6 @@ parse_escape :: inline (c: u8) -> u8 {
     return c;
 }
 
-
-register_cvar :: (name: string, cvar: *$T) #expand {
-    table_add(*cvar_table, name, .{cvar, type_info(T)});
-}
-
-register_command :: (name: string, proc: $T) #expand {
-    #insert -> string {
-        #import "Compiler";
-        ident := cast(*Code_Ident) compiler_get_nodes(proc);
-        assert(ident.kind == .IDENT);
-        header := cast(*Code_Procedure_Header) ident.resolved_declaration.expression;
-        assert(header.kind == .PROCEDURE_HEADER);
-
-        builder: String_Builder;
-
-        // Check for default argument values
-        for arg, arg_index: header.arguments {
-            if arg.expression {
-                arg_size := arg.type_inst.result.runtime_size;
-                assert(arg_size > 0);
-
-                append(*builder, tprint("        arg%_default := #run -> []u8 {\n", arg_index));
-                append(*builder,        "            value: ");
-                print_type_instantiation(*builder, arg.type_inst);
-                append(*builder,        " = ");
-                print_expression(*builder, arg.expression);
-                append(*builder,        ";\n");
-                append(*builder, tprint("            return add_global_data(.{%, xx *value}, .READ_ONLY);\n", arg_size));
-                append(*builder,        "        }\n");
-            }
-        }
-
-        // Print the command procedure
-        append(*builder,        "        proc :: (args: []*void) {\n");
-        append(*builder, tprint("            assert(args.count == %);\n", header.arguments.count));
-
-        append(*builder, tprint("            %(\n", header.name));
-        last_arg_is_varargs: bool;
-        for arg, arg_index: header.arguments {
-            append(*builder,    "                ");
-            if arg.type_inst.inst_flags & .VARARGS {
-                append(*builder, ".. "); // Expand varargs
-            }
-            append(*builder,    "(.*) cast(*");
-            arg_type := arg.type_inst;
-            if arg.type_inst.inst_flags & .VARARGS {
-                append(*builder, "[]"); // Varargs is an array
-                arg_type = arg_type.array_element_type;
-                if arg_index == header.arguments.count - 1  last_arg_is_varargs = true;
-            }
-            print_type_instantiation(*builder, arg_type);
-            append(*builder, tprint(") args[%],\n", arg_index));
-        }
-        append(*builder,        "            );\n");
-        append(*builder,        "        }\n");
-
-        // Print the command itself
-        append(*builder,        "        command := Command2.{\n");
-        append(*builder,        "            .[\n");
-        for arg, arg_index: header.arguments {
-            append(*builder, "                ");
-            append(*builder, tprint(".{\"%\", type_info(", arg.name));
-            // Varargs is an array
-            arg_type := arg.type_inst;
-            if arg.type_inst.inst_flags & .VARARGS {
-                append(*builder, "[]"); // Varargs is an array
-                arg_type = arg_type.array_element_type;
-            }
-            print_type_instantiation(*builder, arg_type);
-            append(*builder, "), ");
-            if arg.expression {
-                // Has default value
-                append(*builder, tprint("arg%_default.data", arg_index));
-            } else {
-                append(*builder,        "null");
-            }
-            append(*builder,    "},\n");
-        }
-        append(*builder,        "            ],\n");
-        append(*builder,        "            proc,\n");
-
-        // Flags
-        append(*builder,        "            (xx 0)"); // In case we have more flags going on
-        if last_arg_is_varargs  append(*builder, " | .LAST_ARG_IS_VARARGS\n");
-        append(*builder,        "\n");
-
-        append(*builder,        "        };\n");
-
-        append(*builder, tprint("        table_add(*command_table, \"%\", command);\n", name));
-
-        result := builder_to_string(*builder);
-        // log("%", result);
-        return result;
-    }
-}
-
 // From modules/Reflection, but modified. Changle the name if you have imported Reflection outside of it.
 set_value_from_string2 :: (any: Any, text: string) -> bool {
     #import "Reflection";
@@ -547,56 +425,4 @@ set_value_from_string2 :: (any: Any, text: string) -> bool {
     return true;
 }
 
-// From modules/Program_Print's #scope_file
-print_type_instantiation :: (builder: *String_Builder, inst: *Code_Type_Instantiation) {
-    if inst.inst_flags & .TYPE_DIRECTIVE {
-        print_to_builder(builder, "#type");
-        if inst.inst_flags & .TYPE_DIRECTIVE_DISTINCT {
-            print_to_builder(builder, ",distinct");
-        }
-        if inst.inst_flags & .TYPE_DIRECTIVE_ISA {
-            print_to_builder(builder, ",isa");
-        }
-
-        print_to_builder(builder, " ");
-        if inst.type_directive_target print_type_instantiation(builder, inst.type_directive_target);
-        return;
-    }
-
-    if inst.pointer_to {
-        append(builder, "*");
-        print_type_instantiation(builder, inst.pointer_to);
-        return;
-    }
-
-    if inst.array_element_type {
-        if inst.inst_flags & .VARARGS {
-            append(builder, ".. ");
-        } else if inst.inst_flags & .RESIZABLE {
-            append(builder, "[..] ");
-        } else if inst.array_dimension {
-            append(builder, "[");
-            print_expression(builder, inst.array_dimension);
-            append(builder, "] ");
-        } else {
-            append(builder, "[] ");
-        }
-
-        print_type_instantiation(builder, inst.array_element_type);
-        return;
-    }
-
-    if inst.type_valued_expression {
-        print_expression(builder, inst.type_valued_expression);
-
-        if inst.must_implement {
-            append(builder, "/");
-            if inst.inst_flags & .INTERFACE  append(builder, "interface ");
-            print_expression(builder, inst.must_implement);
-        }
-    } else {
-        log_error("**************************** @Incomplete: Don't know how to print type instantiation at %:%. It looks like: %\n", get_filename(inst), inst.l0, inst.*);
-        append(builder, "/* @Incomplete: Don't know how to print this type instantiation. */");
-    }
-}
 

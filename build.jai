@@ -7,6 +7,7 @@ Compiler :: #import "Compiler";
 #import "Windows_Resources";
 #import "Metaprogram_Plugins";
 #import "Hash_Table";
+#import "Program_Print";
 
 #if OS == .WINDOWS {
     Windows_Resources :: #import "Windows_Resources";
@@ -24,71 +25,6 @@ BuildType :: enum u8
 BUILD_DEBUG_DIR :: "build/debug";
 BUILD_OPTIMIZED_DEBUG_DIR :: "build/optimized";
 BUILD_SHIPPING_DIR :: "build/shipping";
-
-console_commands : [..]*Code_Procedure_Header;
-console_variables: [..]*Code_Declaration;
-console_commands_generated := false;
-
-collect_commands_and_cvars :: (message: *Message) {
-	if message.kind == {
-	case .TYPECHECKED;
-		typechecked := cast(*Message_Typechecked)message;
-		for typechecked.procedure_headers {
-			expr := it.expression;
-			is_console_command: bool;
-			for expr.notes {
-				if it.text == "Command" {
-					is_console_command = true;
-					break;
-				}
-			}
-			if is_console_command  array_add(*console_commands, expr);
-		}
-		for typechecked.declarations {
-			expr := it.expression;
-			is_console_variable: bool;
-			for expr.notes {
-				if it.text == "CVar" {
-					is_console_variable = true;
-					break;
-				}
-			}
-			if is_console_variable  array_add(*console_variables, expr);
-		}
-	}
-}
-
-generate_console_commands :: (w: Workspace) {
-	builder: String_Builder;
-	init_string_builder(*builder);
-	
-	append(*builder, #string END
-		register_commands_and_cvars :: () {
-		END);
-	
-	append(*builder, "    // Cvars\n");
-	for console_variables {
-	if it.flags & .IS_CONSTANT {
-			log_error("A constant declaration cannot be a CVar.");
-			continue;
-		}
-		append(*builder, tprint("    register_cvar(\"%1\", *%1);\n", it.name));
-	}
-	
-	append(*builder, "    // Commands\n");
-	for console_commands {
-	command_name := it.name;
-	if begins_with(command_name, "command_")  advance(*command_name, 8);
-	
-	append(*builder, tprint("    register_command(\"%\", %);\n", command_name, it.name));
-	}
-	
-	append(*builder, "};\n");
-	
-	code := builder_to_string(*builder);
-	add_build_string(code, w);
-	// log("%\n", code, flags=.VERY_VERBOSE_ONLY);
-}
 
 Build :: ()
 {
@@ -154,57 +90,15 @@ Build :: ()
     
     for plugins      if it.add_source it.add_source(it);
     add_build_file("source/main.jai", w);
+	
+	compiler_message_handler(w, *plugins);
     
-	// wait for compilation to finish so we can edit the exe
-	while true {
-		message := Compiler.compiler_wait_for_message();
-		
-        for plugins if it.message it.message(it, message);
-		collect_commands_and_cvars(message);
-		
-		if message.kind == {
-		case .TYPECHECKED;
-			typechecked := cast(*Message_Typechecked) message;
-			for proc: typechecked.procedure_bodies {
-				// proc.block
-				
-				// log("notes: %", proc.expression.header.notes);
-				
-				for note: proc.expression.header.notes {
-					if equal(note.text, "command") {
-						log("found command with name '%'", proc.expression.header.name);
-						// proc.expression.block is the function block we are here for 
-						// So somehow we need to find the declaration that contains the config
-					}
-				}
-			}
-			// for decl: typechecked.declarations {
-				// for note: decl.expression.notes {
-					// if equal(note.text, "command") {
-						// log("found command with name '%'", decl.expression.name);
-						// log("%", decl.expression.kind);
-					// }
-				// }
-			// }
-			
-		case .PHASE;
-			phase := cast(*Message_Phase) message;
-			if phase.phase == .TYPECHECKED_ALL_WE_CAN {
-				// this is the point we'd do our generation ofthe command tables
-				if !console_commands_generated {
-					generate_console_commands(w);
-					console_commands_generated = true;
-				}
-			}
-		case .COMPLETE;
-			break;
-		}
-	}
 	Compiler.compiler_end_intercept(w);
 
 	for plugins if it.finish   it.finish  (it);
 	for plugins if it.shutdown it.shutdown(it);
 
+	// Compilation is finished now
 	// Edit the exe and do any other bits we need
 	build_opts := get_build_options(w);
 	exe_name := sprint("%/%.exe", build_opts.output_path, target_options.output_executable_name);
@@ -241,6 +135,147 @@ Build :: ()
 
 		copy_directory("queries", tprint("%/queries", BUILD_SHIPPING_DIR));
 	}
+}
+
+compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
+	commands : [..]*Code_Procedure_Header;
+	options: [..]*Code_Declaration;
+	commandsGenerated := false;
+	
+	while true {
+		message := Compiler.compiler_wait_for_message();
+		
+		for (.*)plugins if it.message it.message(it, message);
+		
+		if message.kind == {
+		case .TYPECHECKED;
+			typechecked := cast(*Message_Typechecked)message;
+			for typechecked.procedure_headers {
+				expr := it.expression;
+				for expr.notes {
+					if it.text == "command" {
+						array_add(*commands, expr);
+					}
+				}
+			}
+			for typechecked.declarations {
+				expr := it.expression;
+				for expr.notes {
+					if it.text == "option" {
+						array_add(*options, expr);
+					}
+				}
+			}
+			
+		case .PHASE;
+			phase := cast(*Message_Phase) message;
+			if phase.phase == .TYPECHECKED_ALL_WE_CAN {
+				if !commandsGenerated {
+					generate_command_data(w, *options, *commands);
+					commandsGenerated = true;
+				}
+			}
+		case .COMPLETE;
+			break;
+		}
+	}
+}
+
+generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, commands: *[..]*Code_Procedure_Header)  {
+	builder: String_Builder;
+	init_string_builder(*builder);
+	
+	append(*builder, "register_commands_and_options :: () {\n");
+	
+	// TODO: this breaks the syntax tree somehow
+	// append(*builder, "    // Cvars\n");
+	
+	// generation options
+	// TODO: check the type of the argument and error if invalid
+	for (.*)options {
+		if it.flags & .IS_CONSTANT {
+			log_error("A constant declaration cannot be an option.");
+			continue;
+		}
+		append(*builder, tprint("	table_add(*optionsTable, \"%1\", .{*%1, type_info(", it.name));
+		print_expression(*builder, it.type_inst);
+		append(*builder, ")});\n");
+	}
+	
+	// TODO: this breaks the syntax tree
+	// append(*builder, "    // Commands\n");
+	
+	
+	for header: (.*)commands {
+		// start a local scope for each command so we can reuse identifiers
+		append(*builder, tprint("    {\n"));
+		
+		append(*builder,        "        wrapper :: (panel: *Panel, args: []*void) {\n");
+		append(*builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
+		
+		append(*builder, tprint("            %(\n", header.name));
+		for arg, argIndex: header.arguments {
+			append(*builder,    "                ");
+			
+			argTypeInfo := arg.type_inst.result;
+			
+			if argIndex == 0 {
+				// We want to verify the first argument of all commands is actually a panel
+				firstArgIsPanel := false;
+				if argTypeInfo.type == .POINTER {
+					pointer := cast(*Type_Info_Pointer)argTypeInfo;
+					if pointer.pointer_to.type == .STRUCT {
+						structInfo := cast(*Type_Info_Struct) pointer.pointer_to;
+						if structInfo.name == "Panel" {
+							firstArgIsPanel = true;
+						}
+					}
+				}
+				if !firstArgIsPanel then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The first argument of a command must be of type \"*Panel\"");
+				append(*builder, "panel,\n");
+			}
+			else {
+				append(*builder,    "(.*) cast(*");
+				
+				// TODO: verify it's one of the possible supported arg types
+				
+				arg_type := arg.type_inst;
+				print_expression(*builder, arg.type_inst);
+				append(*builder, tprint(") args[%],\n", argIndex-1));
+			}
+		}
+		append(*builder,        "            );\n");
+		append(*builder,        "        }\n");
+		
+		// Print the command structure itself
+		// with all our metadata we require
+		append(*builder,        "        command := Command2.{\n");
+		append(*builder,        "            .[\n");
+		for arg, argIndex: header.arguments {
+			if argIndex == 0 then continue;
+			append(*builder, "                ");
+			append(*builder, tprint(".{\"%\", type_info(", arg.name));
+			arg_type := arg.type_inst;
+			print_expression(*builder, arg_type);
+			append(*builder, ")},\n");
+		}
+		append(*builder,        "            ],\n");
+		append(*builder,        "            wrapper,\n");
+		
+		// Flags
+		append(*builder,        "            (xx 0)"); // In case we have more flags going on
+		append(*builder,        "\n");
+		
+		append(*builder,        "        };\n");
+		
+		append(*builder, tprint("        table_add(*commandTable, \"%\", command);\n", header.name));						
+		append(*builder, tprint("    }\n"));
+	}
+	
+	append(*builder, "};\n");
+	
+	code := builder_to_string(*builder);
+	add_build_string(code, w);
 }
 
 #run,stallable Build();
