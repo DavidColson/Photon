@@ -185,7 +185,7 @@ main :: () {
 	init_font_cache();
 	load_fonts();
 	init_ui();
-	rebuild_key_map();
+	initialize_commands_and_keymap();
 	init_async(*asyncWorker);
 	init(*openDocuments.lock);
 	init(*languagesMutex);

@@ -27,29 +27,12 @@
 
 #import "Compiler";
 
-Command2 :: struct {
-    Argument_Input :: struct {
-        name: string;
-        type: *Type_Info;
-    }
-    args: []Argument_Input;
-    proc: (panel: *Panel, args: []*void);
-	config: CommandConfig;
-}
-
-Option :: struct {
-    data: *void;
-    type: *Type_Info;
-}
-
-commandTable: Table(string, Command2);
-optionsTable:    Table(string, Option);
-
 
 commands_init :: () {
-    register_commands_and_options(); // Inserted by the metaprogram
 }
 
+// to remove
+commandTable: Table(string, Command2);
 run_console_command :: (panel: *Panel, input: string) {
     in := input;
 
@@ -91,7 +74,7 @@ run_console_command :: (panel: *Panel, input: string) {
 					return;
                 }
             }
-            command.proc(panel, args_out);
+            command.wrapper(panel, args_out);
             return;
         }
     }

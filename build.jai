@@ -138,7 +138,9 @@ Build :: ()
 }
 
 compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
-	commands : [..]*Code_Procedure_Header;
+	normalModeCommands : [..]*Code_Procedure_Header;
+	insertModeCommands : [..]*Code_Procedure_Header;
+	dialogModeCommands : [..]*Code_Procedure_Header;
 	options: [..]*Code_Declaration;
 	commandsGenerated := false;
 	
@@ -153,8 +155,14 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 			for typechecked.procedure_headers {
 				expr := it.expression;
 				for expr.notes {
-					if it.text == "command" {
-						array_add(*commands, expr);
+					if it.text == "command_normal" {
+						array_add(*normalModeCommands, expr);
+					}
+					if it.text == "command_insert" {
+						array_add(*insertModeCommands, expr);
+					}
+					if it.text == "command_dialog" {
+						array_add(*dialogModeCommands, expr);
 					}
 				}
 			}
@@ -171,7 +179,49 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 			phase := cast(*Message_Phase) message;
 			if phase.phase == .TYPECHECKED_ALL_WE_CAN {
 				if !commandsGenerated {
-					generate_command_data(w, *options, *commands);
+					
+					builder: String_Builder;
+					init_string_builder(*builder);
+					
+					append(*builder, "register_options :: () {\n");
+					
+					// generation options
+					// TODO: check the type of the argument and error if invalid
+					for options {
+						if it.flags & .IS_CONSTANT {
+							log_error("A constant declaration cannot be an option.");
+							continue;
+						}
+						append(*builder, tprint("	table_add(*optionsTable, \"%1\", .{*%1, type_info(", it.name));
+						print_expression(*builder, it.type_inst);
+						append(*builder, ")});\n");
+					}
+					
+					append(*builder, "};\n");
+					
+					
+					// this will be static data
+					append(*builder, "normalModeCommands2 :: Command2.[\n");
+					generate_command_data(*builder, *normalModeCommands);
+					append(*builder, "];\n");
+					append(*builder, "insertModeCommands2 :: Command2.[\n");
+					generate_command_data(*builder, *insertModeCommands);
+					append(*builder, "];\n");
+					append(*builder, "dialogModeCommands2 :: Command2.[\n");
+					generate_command_data(*builder, *dialogModeCommands);
+					append(*builder, "];\n");
+					
+					// make all commands list
+					append(*builder, "allCommands2 :: []Command2.[\n");
+					append(*builder, "    normalModeCommands2,\n");
+					append(*builder, "    insertModeCommands2,\n");
+					append(*builder, "    dialogModeCommands2,\n");
+					append(*builder, "];\n");
+					
+					
+					
+					code := builder_to_string(*builder);
+					add_build_string(code, w);
 					commandsGenerated = true;
 				}
 			}
@@ -181,30 +231,9 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 	}
 }
 
-generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, commands: *[..]*Code_Procedure_Header)  {
-	builder: String_Builder;
-	init_string_builder(*builder);
-	
-	append(*builder, "register_commands_and_options :: () {\n");
-	
+generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedure_Header)  {
 	// TODO: this breaks the syntax tree somehow
 	// append(*builder, "    // Cvars\n");
-	
-	// generation options
-	// TODO: check the type of the argument and error if invalid
-	for (.*)options {
-		if it.flags & .IS_CONSTANT {
-			log_error("A constant declaration cannot be an option.");
-			continue;
-		}
-		append(*builder, tprint("	table_add(*optionsTable, \"%1\", .{*%1, type_info(", it.name));
-		print_expression(*builder, it.type_inst);
-		append(*builder, ")});\n");
-	}
-	
-	// TODO: this breaks the syntax tree
-	// append(*builder, "    // Commands\n");
-	
 	
 	node_to_string :: (type: *Code_Node) -> string {
 		push_allocator(temp);
@@ -215,15 +244,28 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 	}
 	
 	for header: (.*)commands {
-		// start a local scope for each command so we can reuse identifiers
-		append(*builder, tprint("    {\n"));
+		append(builder, "    .{\n");
+		append(builder, tprint("       \"%\",\n", header.name));
 		
-		append(*builder,        "        wrapper :: (panel: *Panel, args: []*void) {\n");
-		append(*builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
-		
-		append(*builder, tprint("            %(\n", header.name));
+		// generate the list of args
+		append(builder, "        .[\n");
 		for arg, argIndex: header.arguments {
-			append(*builder,    "                ");
+			if argIndex == 0 then continue;
+			append(builder, "            ");
+			append(builder, tprint(".{\"%\", type_info(", arg.name));
+			arg_type := arg.type_inst;
+			print_expression(builder, arg_type);
+			append(builder, ")},\n");
+		}
+		append(builder, "        ],\n");
+		
+		// generate the wrapper function
+		append(builder, "        (panel: *Panel, args: []*void) {\n");
+		append(builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
+		
+		append(builder, tprint("            %(\n", header.name));
+		for arg, argIndex: header.arguments {
+			append(builder, "                ");
 			
 			argTypeInfo := arg.type_inst.result;
 			
@@ -240,41 +282,27 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 					}
 				}
 				if !firstArgIsPanel then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The first argument of a command must be of type \"*Panel\"");
-				append(*builder, "panel,\n");
+				append(builder, "panel,\n");
 			}
 			else {
-				append(*builder,    "cast(*");
+				append(builder,    "cast(*");
 				
 				if argTypeInfo.type != .INTEGER &&
-					argTypeInfo.type != .FLOAT &&
-					argTypeInfo.type != .BOOL &&
-					argTypeInfo.type != .ENUM &&
-					argTypeInfo.type != .STRING {
+				argTypeInfo.type != .FLOAT &&
+				argTypeInfo.type != .BOOL &&
+				argTypeInfo.type != .ENUM &&
+				argTypeInfo.type != .STRING {
 					compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "Unsupported argument type in command");
 				}
 				
-				print_expression(*builder, arg.type_inst);
-				append(*builder, tprint(", args[%]).*,\n", argIndex-1));
+				print_expression(builder, arg.type_inst);
+				append(builder, tprint(", args[%]).*,\n", argIndex-1));
 			}
 		}
-		append(*builder,        "            );\n");
-		append(*builder,        "        }\n");
+		append(builder, "            );\n");
+		append(builder, "        },\n");
 		
-		// Print the command structure itself
-		// with all our metadata we require
-		append(*builder,        "        command := Command2.{\n");
-		append(*builder,        "            .[\n");
-		for arg, argIndex: header.arguments {
-			if argIndex == 0 then continue;
-			append(*builder, "                ");
-			append(*builder, tprint(".{\"%\", type_info(", arg.name));
-			arg_type := arg.type_inst;
-			print_expression(*builder, arg_type);
-			append(*builder, ")},\n");
-		}
-		append(*builder,        "            ],\n");
-		append(*builder,        "            wrapper,\n");
-		
+		// Pull out and place the config structure
 		body := header.body_or_null;
 		block := body.block;
 		for statement: block.statements {
@@ -283,24 +311,16 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 				declaration := cast(*Code_Declaration, statement);
 				if declaration.flags & .IS_CONSTANT && declaration.name == "CONFIG" {
 					log("Found CONFIG with name %\n%", declaration.name, node_to_string(declaration));
-					append(*builder,        "            ");
-					print_expression(*builder, declaration.expression);
+					append(builder,        "        ");
+					print_expression(builder, declaration.expression);
 				}
 			}
 		}
 		
-		append(*builder,        "\n");
-		
-		append(*builder,        "        };\n");
-		
-		append(*builder, tprint("        table_add(*commandTable, \"%\", command);\n", header.name));						
-		append(*builder, tprint("    }\n"));
+		append(builder, "\n");
+		append(builder, "    },\n");
 	}
 	
-	append(*builder, "};\n");
-	
-	code := builder_to_string(*builder);
-	add_build_string(code, w);
 }
 
 #run,stallable Build();

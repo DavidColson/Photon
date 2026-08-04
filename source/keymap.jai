@@ -16,6 +16,32 @@ Command :: struct {
 	execute: (*Panel, []string);
 }
 
+CommandConfig :: struct {
+	prettyName: string;
+	keybinding: []string;
+	category: string;
+	flags: CommandFlags;
+}
+
+Command2 :: struct {
+	name: string;
+	Argument_Input :: struct {
+		name: string;
+		type: *Type_Info;
+	}
+	args: []Argument_Input;
+	wrapper: (panel: *Panel, args: []*void);
+	using config: CommandConfig;
+}
+
+Option :: struct {
+	data: *void;
+	type: *Type_Info;
+}
+
+optionsTable:    Table(string, Option);
+
+
 KeyMap :: struct {
 	memory : Flat_Pool;
 	allocator: Allocator;
@@ -193,7 +219,15 @@ allCommands :: []Command.[
 	dialogModeCommands
 ];
 
-rebuild_key_map :: ()  {
+initialize_commands_and_keymap :: ()  {
+	register_options(); // created by the metaprogram to fill out all our command metadata
+	
+	execute_command(*focusedPanel, normalModeCommands2[1], .["321"]);
+	execute_command(*focusedPanel, dialogModeCommands2[0], .["MIXED_MAJORITY_LF"]);
+	
+	// found, command = table_find(*commandTable, "sample_goto_line");
+	// execute_command(*focusedPanel, , .["321"]);
+	
 	keyMap.allocator = Allocator.{proc = flat_pool_allocator_proc, data = *keyMap.memory};
 	keyMap.pendingKeyString.allocator = keyMap.allocator;
 
@@ -311,6 +345,45 @@ rebuild_key_map :: ()  {
 	build_key_map_for_mode(dialogModeCommands, .DIALOG);
 
 	keyMap.pendingKeyNode = *keyMap.root[editorMode];
+}
+
+execute_command :: (panel: *Panel, command: Command2, args: []string) {
+	// Our input here is the command that was invoked either via a keybinding or via 
+	// an entry in the command palette
+	// and then a list of string arguments that the user typed into the command palette
+	
+	// our goal is to parse the arguments into the actual type required
+	// and then invoke the command's wrapper
+	
+	// parse the given arguments into actual data values
+	argsOut := NewArray(command.args.count, *void,, temp);
+	for command.args {
+		if it_index < args.count && args[it_index] {
+			size := it.type.runtime_size;
+			argsOut[it_index] = talloc(size);
+			success := set_value_from_string(Any.{it.type, argsOut[it_index]}, args[it_index]);
+			if !success {
+				// log_error("In command %, failed to convert argument % \"%\" to type %",
+					// left[0], it_index, it.name, it.type.type);
+				return;
+			}
+		} else {
+			// log_error("In command %, no value provided for argument % \"%\"",
+				// left[0], it_index, it.name);
+			return;
+		}
+	}
+	
+	command.wrapper(panel, argsOut);
+}
+
+set_option :: () {
+	// TODO: this should take a string name of the option plus a string expression to set it to
+	// It can lookup the option in the options table, and then parse and set the value
+	// Likely the primary use case for this will be config files
+	// so it would just amount to pulling the strings out of the config file and calling this function 
+	
+	// maybe we will make a set/get command as well which can do a similar thing with autocomplete
 }
 
 input_handler :: (event: Input.Event) {

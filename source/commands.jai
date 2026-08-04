@@ -472,53 +472,52 @@ shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
 	}
 }
 
-CommandConfig :: struct {
-	keybinding: []string;
-	category: string;
-	flags: CommandFlags;
-}
 
 testFontSize: s32; @option
 testLineNumbers: bool; @option
 
 sample_simple_command :: (using panel: *Panel) {
 	CONFIG :: CommandConfig.{
+		prettyName = "A Simple Command",
 		keybinding = .["alt+t"],
 		flags = .REPEATABLE
 	};
 	
 	log("Simple Command");
-} @command
+} @command_normal
 
 sample_goto_line :: (using panel: *Panel, number: s64) {
 	CONFIG :: CommandConfig.{
+		prettyName = "Go to Line",
 		keybinding = .["alt+t"],
 		category = "motions",
 		flags = .REPEATABLE
 	};
 	
 	log("goto line %", number);
-} @command
+} @command_normal
 
 sample_jump_to_char :: (using panel: *Panel, character: u8) {
 	CONFIG :: CommandConfig.{
+		prettyName = "Jump to a Character",
 		keybinding = .["alt+r"],
 		category = "motions",
 		flags = .REPEATABLE
 	};
 	
 	log("jump to char %", character);
-} @command
+} @command_insert
 
 sample_normalize_line_endings :: (using panel: *Panel, mode: Document.LineEndingMode) {
 	CONFIG :: CommandConfig.{
+		prettyName = "Normalize Line Endings",
 		keybinding = .["alt+r"],
 		category = "changes",
 		flags = .REPEATABLE
 	};
 	
 	log("Normalize endings %", mode);
-} @command
+} @command_dialog
 
 sample_set_title :: (using panel: *Panel, title: string) {
 	CONFIG :: CommandConfig.{
