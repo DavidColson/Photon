@@ -206,6 +206,14 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 	// append(*builder, "    // Commands\n");
 	
 	
+	node_to_string :: (type: *Code_Node) -> string {
+		push_allocator(temp);
+		builder: String_Builder;
+		init_string_builder(*builder);
+		print_expression(*builder, type);
+		return builder_to_string(*builder);
+	}
+	
 	for header: (.*)commands {
 		// start a local scope for each command so we can reuse identifiers
 		append(*builder, tprint("    {\n"));
@@ -235,13 +243,18 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 				append(*builder, "panel,\n");
 			}
 			else {
-				append(*builder,    "(.*) cast(*");
+				append(*builder,    "cast(*");
 				
-				// TODO: verify it's one of the possible supported arg types
+				if argTypeInfo.type != .INTEGER &&
+					argTypeInfo.type != .FLOAT &&
+					argTypeInfo.type != .BOOL &&
+					argTypeInfo.type != .ENUM &&
+					argTypeInfo.type != .STRING {
+					compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "Unsupported argument type in command");
+				}
 				
-				arg_type := arg.type_inst;
 				print_expression(*builder, arg.type_inst);
-				append(*builder, tprint(") args[%],\n", argIndex-1));
+				append(*builder, tprint(", args[%]).*,\n", argIndex-1));
 			}
 		}
 		append(*builder,        "            );\n");
@@ -262,8 +275,20 @@ generate_command_data :: (w: Workspace, options: *[..]*Code_Declaration, command
 		append(*builder,        "            ],\n");
 		append(*builder,        "            wrapper,\n");
 		
-		// Flags
-		append(*builder,        "            (xx 0)"); // In case we have more flags going on
+		body := header.body_or_null;
+		block := body.block;
+		for statement: block.statements {
+			// we expect some of these to be declarations
+			if statement.kind == .DECLARATION {
+				declaration := cast(*Code_Declaration, statement);
+				if declaration.flags & .IS_CONSTANT && declaration.name == "CONFIG" {
+					log("Found CONFIG with name %\n%", declaration.name, node_to_string(declaration));
+					append(*builder,        "            ");
+					print_expression(*builder, declaration.expression);
+				}
+			}
+		}
+		
 		append(*builder,        "\n");
 		
 		append(*builder,        "        };\n");

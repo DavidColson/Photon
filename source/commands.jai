@@ -474,6 +474,7 @@ shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
 
 CommandConfig :: struct {
 	keybinding: []string;
+	category: string;
 	flags: CommandFlags;
 }
 
@@ -492,6 +493,7 @@ sample_simple_command :: (using panel: *Panel) {
 sample_goto_line :: (using panel: *Panel, number: s64) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+t"],
+		category = "motions",
 		flags = .REPEATABLE
 	};
 	
@@ -501,6 +503,7 @@ sample_goto_line :: (using panel: *Panel, number: s64) {
 sample_jump_to_char :: (using panel: *Panel, character: u8) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+r"],
+		category = "motions",
 		flags = .REPEATABLE
 	};
 	
@@ -510,6 +513,7 @@ sample_jump_to_char :: (using panel: *Panel, character: u8) {
 sample_normalize_line_endings :: (using panel: *Panel, mode: Document.LineEndingMode) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+r"],
+		category = "changes",
 		flags = .REPEATABLE
 	};
 	
@@ -519,6 +523,7 @@ sample_normalize_line_endings :: (using panel: *Panel, mode: Document.LineEnding
 sample_set_title :: (using panel: *Panel, title: string) {
 	CONFIG :: CommandConfig.{
 		keybinding = .["alt+r"],
+		category = "misc",
 		flags = .REPEATABLE
 	};
 	

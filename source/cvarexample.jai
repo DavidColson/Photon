@@ -34,9 +34,7 @@ Command2 :: struct {
     }
     args: []Argument_Input;
     proc: (panel: *Panel, args: []*void);
-    flags: enum {
-        LAST_ARG_IS_VARARGS :: 0x1;
-    };
+	config: CommandConfig;
 }
 
 Option :: struct {
@@ -79,33 +77,6 @@ run_console_command :: (panel: *Panel, input: string) {
             args_out := NewArray(command.args.count, *void,, temp);
             for command.args {
                 if it_index < args.count && args[it_index] {
-                    if it_index == command.args.count - 1 && command.flags & .LAST_ARG_IS_VARARGS {
-                        assert(it.type.type == .ARRAY);
-                        element_type := (cast(*Type_Info_Array) it.type).element_type;
-
-                        // Process varargs
-                        args_left := args.count - it_index;
-                        out_data := cast(*u8) talloc(args_left * element_type.runtime_size);
-
-                        for i: 0..args_left - 1 {
-                            the_element := out_data + i * element_type.runtime_size;
-                            the_arg := args[it_index + i];
-                            success := set_value_from_string2(Any.{element_type, the_element}, the_arg);
-                            if !success {
-                                log_error("In command %, failed to convert argument % \"%\" to type %",
-                                          left[0], it_index, it.name, element_type.type);
-                                return;
-                            }
-                        }
-
-                        out_arg := cast(*[]void) talloc(size_of([]void));
-                        out_arg.count = args_left;
-                        out_arg.data  = out_data;
-                        args_out[it_index] = out_arg;
-
-                        break; // We are done
-                    }
-
                     size := it.type.runtime_size;
                     args_out[it_index] = talloc(size);
                     success := set_value_from_string2(Any.{it.type, args_out[it_index]}, args[it_index]);
