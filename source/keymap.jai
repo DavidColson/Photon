@@ -1,4 +1,5 @@
 
+
 KeyMappingDesc :: struct {
 	keys: string = "";
 }
@@ -9,13 +10,6 @@ CommandFlags :: enum_flags u8 {
 	EXTEND;
 }
 
-Command :: struct {
-	name: string;
-	mappings: []string;
-	flags: CommandFlags;
-	execute: (*Panel, []string);
-}
-
 CommandConfig :: struct {
 	prettyName: string;
 	keybinding: []string;
@@ -23,7 +17,7 @@ CommandConfig :: struct {
 	flags: CommandFlags;
 }
 
-Command2 :: struct {
+Command :: struct {
 	name: string;
 	Argument_Input :: struct {
 		name: string;
@@ -39,16 +33,13 @@ Option :: struct {
 	type: *Type_Info;
 }
 
-optionsTable:    Table(string, Option);
-
-
 KeyMap :: struct {
 	memory : Flat_Pool;
 	allocator: Allocator;
 	root: [EDITOR_MODE_NUM]KeyMapNode;
 	pendingKeyNode: *KeyMapNode;
 	pendingKeyString: [..]u8;
-	pendingArgs: [..]string;
+	pendingArgs: [..]u8;
 	pendingCount: s32;
 	textInputCount: u16;
 }
@@ -59,171 +50,20 @@ KeyMapNode :: struct {
 	nArgs: s32;
 }
 
+optionsTable:    Table(string, Option);
+normalModeCommands: [..]Command;
+insertModeCommands: [..]Command;
+dialogModeCommands: [..]Command;
+allCommands: [3][..]Command;
+
 // global keymap
 keyMap: KeyMap;
-
-// keymapping syntax
-// special keys will be <backspace>, <esc> etc
-// modifiers will be ctrl+b, W, alt+g, ctrl+<tab>a
-// for shift you can do shift+b or B, but if you use ctrl or alt, then you can't use a capital
-// because of how text input works :(
-// @todo: consider making certain commands only available in certain modes
-// such as command picker and filesystem nav commands. They won't show up in the command picker
-// if they can't be selected, filter them out when doing fuzzy filtering
-
-normalModeCommands :: Command.[
-	.{ "Quit", .["Q"], 0, quit },
-	.{ "Save File", .["ctrl+s"], 0, save_file },
-	.{ "Save File As", .["ctrl+shift+s"], 0, save_file_as },
-	.{ "P4 Checkout File", .[], 0, p4_checkout_file },
-
-	// movements
-	.{ "Move one char left", .["h", "<left>"], .REPEATABLE, move_one_char_left },
-	.{ "Move one char right", .["l", "<right>"], .REPEATABLE, move_one_char_right },
-	.{ "Move one line down", .["j", "<down>"], .REPEATABLE, move_one_line_down },
-	.{ "Move one line up", .["k", "<up>"], .REPEATABLE, move_one_line_up },
-	.{ "Extend one char left", .["H"], .REPEATABLE | .EXTEND, move_one_char_left },
-	.{ "Extend one char right", .["L"], .REPEATABLE | .EXTEND, move_one_char_right },
-	.{ "Extend one line down", .["J"], .REPEATABLE | .EXTEND, move_one_line_down },
-	.{ "Extend one line up", .["K"], .REPEATABLE | .EXTEND, move_one_line_up },
-
-	.{ "Goto document start", .["gk"], 0, goto_document_start },
-	.{ "Goto document end", .["gj"], 0, goto_document_end },
-	.{ "Goto line start", .["gh"], 0, goto_line_start },
-	.{ "Goto line end", .["gl"], 0, goto_line_end },
-	.{ "Extend to document start", .["Gk"], .EXTEND, goto_document_start },
-	.{ "Extend to document end", .["Gj"], .EXTEND, goto_document_end },
-	.{ "Extend to line start", .["Gh", "alt+h"], .EXTEND, goto_line_start },
-	.{ "Extend to line end", .["Gl", "alt+l"], .EXTEND, goto_line_end },
-
-	.{ "Move to next word start", .["w"], .REPEATABLE, move_word_start },
-	.{ "Move to next word end", .["e"], .REPEATABLE, move_word_end },
-	.{ "Move to prev word start", .["b"], .REPEATABLE, move_prev_word_start },
-	.{ "Extend to next word start", .["W"], .REPEATABLE | .EXTEND, move_word_start },
-	.{ "Extend to next word end", .["E"], .REPEATABLE | .EXTEND, move_word_end },
-	.{ "Extend to prev word start", .["B"], .REPEATABLE | .EXTEND, move_prev_word_start },
-
-	.{ "Move to next long word start", .["alt+w"], .REPEATABLE, move_long_word_start },
-	.{ "Move to next long word end", .["alt+e"], .REPEATABLE, move_long_word_end },
-	.{ "Move to next sub word start", .["ctrl+w"], .REPEATABLE, move_sub_word_start },
-	.{ "Move to next sub word end", .["ctrl+e"], .REPEATABLE, move_sub_word_end },
-	.{ "Extend to next long word start", .["alt+shift+w"], .REPEATABLE | .EXTEND, move_long_word_start },
-	.{ "Extend to next long word end", .["alt+shift+e"], .REPEATABLE | .EXTEND, move_long_word_end },
-	.{ "Extend to next sub word start", .["ctrl+shift+w"], .REPEATABLE | .EXTEND, move_sub_word_start },
-	.{ "Extend to next sub word end", .["ctrl+shift+e"], .REPEATABLE | .EXTEND, move_sub_word_end },
-
-	.{ "Jump to first occurence of {char}", .["f{char}"], .REPEATABLE, jump_to_char },
-	.{ "Jump to just before first occurence of {char}", .["t{char}"], .REPEATABLE, jump_to_before_char },
-	.{ "Jump to last occurence of {char}", .["alt+f{char}"], .REPEATABLE, jump_to_last_char },
-	.{ "Jump to just before last occurence of {char}", .["alt+t{char}"], .REPEATABLE, jump_to_before_last_char },
-	.{ "Extend to first occurence of {char}", .["F{char}"], .REPEATABLE | .EXTEND, jump_to_char },
-	.{ "Extend to just before first occurence of {char}", .["T{char}"], .REPEATABLE | .EXTEND, jump_to_before_char },
-	.{ "Extend to last occurence of {char}", .["alt+shift+f{char}"], .REPEATABLE | .EXTEND, jump_to_last_char },
-	.{ "Extend to just before last occurence of {char}", .["alt+shift+t{char}"], .REPEATABLE | .EXTEND, jump_to_before_last_char },
-
-	.{ "Page Up", .["ctrl+b", "<pageup>"], 0, page_up },
-	.{ "Page Down", .["ctrl+f", "<pagedown>"], 0, page_down },
-	.{ "Half Page Up", .["ctrl+u"], 0, half_page_up },
-	.{ "Half Page Down", .["ctrl+d"], 0, half_page_down },
-
-	// Selection manipulation
-	.{ "Extend selection to full lines", .["x"], .REPEATABLE, extend_selection_to_lines },
-	.{ "Extend selection to lines above", .["X"], .REPEATABLE, extend_selection_to_lines_above },
-	.{ "Expand selection to parent syntax", .["alt+o"], .REPEATABLE, expand_selection_by_syntax },
-	.{ "Shrink selection by syntax", .["alt+i"], .REPEATABLE, shrink_selection_by_syntax },
-	.{ "Select next syntax node", .["alt+n"], .REPEATABLE, select_next_sibling },
-	.{ "Select previous syntax node", .["alt+p"], .REPEATABLE, select_prev_sibling },
-	
-	.{ "Select whole document", .["%"], 0, select_whole_document },
-	.{ "Collapse selection", .[";"], 0, collapse_selection },
-	.{ "Flip selection", .["alt+;"], 0, flip_selection },
-		
-	// misc normal mode
-	.{ "Select register {char}", .["\"{char}"], 0, select_register },
-	.{ "Jump to last open document", .["gp"], 0, jump_to_last_open_document },
-
-	// search
-	.{ "Search Document", .["/"], 0, start_document_search },
-	.{ "Next search result", .["n"], 0, next_search_result },
-	.{ "Previous search result", .["N"], 0, previous_search_result },
-	.{ "Search selection", .["*"], 0, search_selection },
-	
-	// changes
-	.{ "Delete selection", .["d"], 0, delete_selection },
-	.{ "Change selection", .["c"], 0, change_selection },
-	.{ "Yank selection", .["y"], 0, yank_selection },
-	.{ "Paste after selection", .["p"], 0, paste_after_selection },
-	.{ "Paste before selection", .["P"], 0, paste_before_selection },
-	.{ "Replace selection with {char}", .["r{char}"], 0, replace_selection },
-	.{ "Replace selection with yanked", .["R"], 0, replace_selection_with_yanked },
-	.{ "New line below selection", .["o"], 0, new_line_below },
-	.{ "New line above selection", .["O"], 0, new_line_above },
-	.{ "Indent line", .[">"], 0, indent_line },
-	.{ "Unindent line", .["<"], 0, unindent_line },
-	.{ "Autoindent selection", .["="], 0, autoindent_selection },
-	.{ "Join selection", .["alt+j"], 0, join_selection },
-	.{ "Toggle comment", .["<space>c"], 0, toggle_comment },
-	.{ "Undo", .["u"], 0, undo },
-	.{ "Redo", .["U"], 0, redo },
-	.{ "Visualize Undos", .[], 0, visualize_undos },
-
-	.{ "Open Filesystem Navigator", .["<space>o"], 0, open_file },
-	.{ "Open Filesystem Navigator At Working Directory", .["<space>O"], 0, open_file_in_working_dir },
-	.{ "Open Command Picker", .[":"], .HIDDEN, command_picker_open },
-	.{ "Open File Finder", .["<space>f"], 0, file_finder_open },	
-	.{ "Open Project Search", .["<space>s"], 0, project_search_open },	
-
-	.{ "Enter Insert Mode Start Of Selection", .["i"], 0, enter_insert_mode_start },
-	.{ "Enter Insert Mode End Of Selection", .["a"], 0, enter_insert_mode_end },
-	.{ "Enter Insert Mode Start Of Line", .["I"], 0, enter_insert_mode_line_start },
-	.{ "Enter Insert Mode End Of Line", .["A"], 0, enter_insert_mode_line_end },
-	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
-
-	// misc commands
-	.{ "Print piece chain debug", .[], 0, print_piece_chain_debug },
-	.{ "Toggle draw line endings", .[], 0, toggle_render_line_endings },
-	.{ "Print syntax highlight debug", .[], 0, print_highlight_debug },
-	.{ "Reparse syntax tree", .[], 0, reparse_syntax },
-
-	// @todo: need command arguments to clean this up, second option box pops up to select from a dropdown
-	.{ "Normalize Line Endings To LF", .[], 0, normalize_line_endings_lf },
-	.{ "Normalize Line Endings To CRLF", .[], 0, normalize_line_endings_crlf },];
-
-insertModeCommands :: Command.[
-	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
-	.{ "Move one char left", .["<left>"], 0, move_one_char_left },
-	.{ "Move one char right", .["<right>"], 0, move_one_char_right },
-	.{ "Move one line down", .["<down>"], 0, move_one_line_down },
-	.{ "Move one line up", .["<up>"], 0, move_one_line_up },
-
-	.{ "Page Up", .["<pageup>"], 0, page_up },
-	.{ "Page Down", .["<pagedown>"], 0, page_down },
-
-	.{ "Backward Delete Char", .["<backspace>"], .HIDDEN, insert_mode_backward_delete_char },
-	.{ "Forward Delete Char", .["<delete>"], .HIDDEN, insert_mode_forward_delete_char },
-	.{ "Insert line break", .["<enter>"], .HIDDEN, insert_mode_line_break },
-	.{ "Insert tab", .["<tab>"], .HIDDEN, insert_tab_character },
-];
-
-dialogModeCommands :: Command.[
-	.{ "Dialog Select Next", .["<down>"], .HIDDEN, dialog_select_next },
-	.{ "Dialog Select Previous", .["<up>"], .HIDDEN, dialog_select_previous },
-	.{ "Dialog Action Item", .["<enter>"], .HIDDEN, dialog_action_item },
-	.{ "Dialog Backward Delete", .["<backspace>"], .HIDDEN, dialog_backward_delete },
-	.{ "Enter Normal Mode", .["<escape>"], 0, enter_normal_mode },
-];
-
-allCommands :: []Command.[
-	normalModeCommands,
-	insertModeCommands,
-	dialogModeCommands
-];
 
 initialize_commands_and_keymap :: ()  {
 	register_options(); // created by the metaprogram to fill out all our command metadata
 	
-	execute_command(*focusedPanel, normalModeCommands2[1], .["321"]);
-	execute_command(*focusedPanel, dialogModeCommands2[0], .["MIXED_MAJORITY_LF"]);
+	// execute_command(*focusedPanel, normalModeCommands[1], .["321"]);
+	// execute_command(*focusedPanel, dialogModeCommands[0], .["MIXED_MAJORITY_LF"]);
 	
 	// found, command = table_find(*commandTable, "sample_goto_line");
 	// execute_command(*focusedPanel, , .["321"]);
@@ -233,7 +73,7 @@ initialize_commands_and_keymap :: ()  {
 
 	build_key_map_for_mode :: (list: []Command, mode: EditorMode) {
 		for * cmd : list {
-			for mapping : cmd.mappings {
+			for mapping : cmd.keybinding {
 				if mapping == "" continue;
 
 				// Grab the mapping for each command
@@ -319,6 +159,13 @@ initialize_commands_and_keymap :: ()  {
 					}
 					else if keys.count > 0 { // non-leaf node
 						assert(nArgs == 0, "Arguments in a key mapping must be at the end of the sequence (for binding %)", mapping);
+						// TODO: check that the command being bound to this mapping can actually accept the arguments
+						// if nArgs > 0 {
+							// assert(cmd.args == nArgs, "You can't bind a key with args to a command that doesn't have the corresponding amount of arguments");
+							// for cmd.args {
+								// assert(it.type == type_info(u8), "Argument type mismatch when binding a keybind with char arguments to a command that doesn't take chars"); 
+							// }
+						// }
 						exists, entry := table_find(curNode.children, hashKey);
 						if !exists { 
 							newNode := New(KeyMapNode,,keyMap.allocator);
@@ -347,7 +194,7 @@ initialize_commands_and_keymap :: ()  {
 	keyMap.pendingKeyNode = *keyMap.root[editorMode];
 }
 
-execute_command :: (panel: *Panel, command: Command2, args: []string) {
+execute_command :: (panel: *Panel, command: Command, args: []string) {
 	// Our input here is the command that was invoked either via a keybinding or via 
 	// an entry in the command palette
 	// and then a list of string arguments that the user typed into the command palette
@@ -363,13 +210,13 @@ execute_command :: (panel: *Panel, command: Command2, args: []string) {
 			argsOut[it_index] = talloc(size);
 			success := set_value_from_string(Any.{it.type, argsOut[it_index]}, args[it_index]);
 			if !success {
-				// log_error("In command %, failed to convert argument % \"%\" to type %",
-					// left[0], it_index, it.name, it.type.type);
+				log_error("In command %, failed to convert argument % \"%\" to type %",
+					command.name, it_index, it.name, it.type.type);
 				return;
 			}
 		} else {
-			// log_error("In command %, no value provided for argument % \"%\"",
-				// left[0], it_index, it.name);
+			log_error("In command %, no value provided for argument % \"%\"",
+				command.name, it_index, it.name);
 			return;
 		}
 	}
@@ -490,7 +337,7 @@ input_handler :: (event: Input.Event) {
 	if keyMap.pendingKeyNode.nArgs > keyMap.pendingArgs.count {
 		if keyStringIsText {
 			nodePtr = *keyMap.pendingKeyNode;
-			array_add(*keyMap.pendingArgs, keyString);
+			array_add(*keyMap.pendingArgs, keyString[0]);
 		}
 	}
 	else {
@@ -511,20 +358,30 @@ input_handler :: (event: Input.Event) {
 
 			if keyMap.pendingCount == 0 then keyMap.pendingCount = 1;
 			if !(node.cmd.flags & .REPEATABLE) then keyMap.pendingCount = 1; 
-
+			
+			// Turn the list of pending keyargs to an array of void*
+			// so we can give it to the command wrapper
+			keyArgs: []*void;
+			if keyMap.pendingArgs.count {
+				keyArgs = NewArray(keyMap.pendingArgs.count, *void,, temp);
+				for keyMap.pendingArgs {
+					keyArgs[it_index] = cast(*void, *it);
+				}
+			}
+			
 			while keyMap.pendingCount > 0 {
 				if node.cmd.flags & .EXTEND {
 					anchor := focusedPanel.cursor.anchor;
-					node.cmd.execute(*focusedPanel, keyMap.pendingArgs);
+					node.cmd.wrapper(*focusedPanel, keyArgs);
 					focusedPanel.cursor.anchor = anchor;
 				}
 				else {
-					node.cmd.execute(*focusedPanel, keyMap.pendingArgs);
+					node.cmd.wrapper(*focusedPanel, keyArgs);
 				}
 
 				// register selection has some special behaviour as it's intended to be paired with 
 				// one other action
-				if node.cmd.execute != select_register {
+				if node.cmd.name != "select_register" {
 					registers.selectedRegister = DEFAULT_REGISTER;
 				}
 				keyMap.pendingCount -= 1;

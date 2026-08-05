@@ -93,8 +93,12 @@ startTime: Apollo_Time;
 // allows UI to safely execute key commands
 DeferredCommand :: struct {
 	panel: *Panel;
-	args: []string;
-	exec: (*Panel, []string);
+	// TODO: we don't support sending args, but we theoretically could
+	// just have a little pool of memory with the args in it stored in here
+	// TODO: commands are stored in arrays, with no direct lookup, so for now
+	// we just store the string here and we'll look it up before we call it
+	// if it ever becomes a problem just put them in a table
+	commandName: string;
 }
 deferredCommands: [5]DeferredCommand;
 pendingDeferredCommands := 0;
@@ -142,6 +146,8 @@ Arguments :: struct {
 LoggerData :: struct {
 	logFile: File;
 }
+
+#placeholder normalModeCommands;
 
 loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	logger: *LoggerData;
@@ -285,8 +291,17 @@ update :: (deltaTime: float64) {
 	build_ui();
 
 	for 0..pendingDeferredCommands-1 {
-		command := *deferredCommands[it];
-		command.exec(command.panel, command.args);
+		deferredCommand := *deferredCommands[it];
+		command: *Command;
+		for allCommands {
+			for * it {
+				if it.name == deferredCommand.commandName {
+					command = it;
+					break;
+				}
+			}
+		}
+		execute_command(deferredCommand.panel, command, .[]);
 		// if the command changed the mode we need to reset the root keymap
 		keyMap.pendingKeyNode = *keyMap.root[editorMode];
 	}
@@ -807,8 +822,8 @@ build_ui_panel :: (panel: *Panel) {
 			
 			if signal.doubleClicked {
 				set_cursor_to_mouse_location (panel.document, *panel.cursor, numDocumentLines, codeBox);
-				move_prev_word_start(panel, .[]);
-				move_word_end(panel, .[]);
+				move_prev_word_start(panel);
+				move_word_end(panel);
 			}
 
 			if signal.holding {
@@ -937,7 +952,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				signal := signal_from_box(entryBox);
 				if signal.pressed {
 					panel.commandPicker.selectedCommand = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, .[], command_picker_execute_command};
+					deferredCommands[pendingDeferredCommands] =.{panel, "command_picker_execute_command"};
 					pendingDeferredCommands += 1;
 				}
 				{
@@ -946,13 +961,13 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					// find the normal mode mapping
 					// @todo: should we show bindings for all modes?
 					mappingStr := "";
-					for commandEntry.command.mappings {
+					for commandEntry.command.keybinding {
 						// TODO
 						// if it.mode == .NORMAL then mappingStr = it;
 						mappingStr = it;
 					}
 
-					commandLabel := box(ui_key("%", commandEntry.command.name), .{
+					commandLabel := box(ui_key("%", commandEntry.command.prettyName), .{
 						flags=.DRAW_TEXT_HIGHLIGHTS,
 						layout=.{ width=text_content(), height=text_content() },
 					});
@@ -1098,7 +1113,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.filesystemNav.selectedItem = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, .[], filesystem_nav_action_item};
+						deferredCommands[pendingDeferredCommands] =.{panel, "filesystem_nav_action_item"};
 						pendingDeferredCommands += 1;
 					}
 					{
@@ -1119,7 +1134,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.filesystemNav.selectedItem = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, .[], filesystem_nav_action_item};
+						deferredCommands[pendingDeferredCommands] =.{panel, "filesystem_nav_action_item"};
 						pendingDeferredCommands += 1;
 					}
 					{
@@ -1230,7 +1245,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				signal := signal_from_box(entryBox);
 				if signal.pressed {
 					panel.projectSearcher.selectedEntry = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, .[], project_search_open_result};
+					deferredCommands[pendingDeferredCommands] =.{panel, "project_search_open_result"};
 					pendingDeferredCommands += 1;
 				}
 
@@ -1395,7 +1410,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 				if signal_from_box(entryBox).pressed {
 					panel.fileFinder.selectedEntry = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, .[], file_finder_select_file};
+					deferredCommands[pendingDeferredCommands] =.{panel, "file_finder_select_file"};
 					pendingDeferredCommands += 1;
 				}
 
@@ -2400,6 +2415,7 @@ Input :: #import "Input";
 #import "Bit_Operations";
 #import "Text_File_Handler";
 #import "Thread";
+#import "Reflection";
 
 #load "rect.jai";
 #load "command_picker.jai";
@@ -2416,7 +2432,7 @@ Input :: #import "Input";
 #load "project.jai";
 #load "project_search.jai";
 #load "language.jai";
-#load "cvarexample.jai";
+// #load "cvarexample.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";

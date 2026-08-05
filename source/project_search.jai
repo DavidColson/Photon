@@ -10,7 +10,8 @@ ProjectSearch :: struct {
 
 }
 
-project_search_open :: (using panel: *Panel, args: []string) {
+project_search_open :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Open project search", keybinding = .["<space>s"] };
 	panel.activeDialog = .PROJECT_SEARCH;
 	editorMode = .DIALOG;
 
@@ -21,7 +22,7 @@ project_search_open :: (using panel: *Panel, args: []string) {
 
 	projectSearcher.input.onEditCallback = project_search_input_field_on_edit;
 	projectSearcher.input.userData = *projectSearcher;
-}
+} @command_normal
 
 project_search_input_field_on_edit :: (userData: *void, input: string) {
 	searcher: *ProjectSearch = cast(*ProjectSearch) userData;
@@ -70,7 +71,8 @@ project_search_reset :: (panel: *Panel) {
 	panel.activeDialog = .NONE;
 }
 
-project_search_open_result :: (using panel: *Panel, args: []string) {
+project_search_open_result :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	searcher := *panel.projectSearcher;
 	
 	result := searcher.results[searcher.selectedEntry];
@@ -96,23 +98,25 @@ project_search_open_result :: (using panel: *Panel, args: []string) {
 
 	project_search_reset(panel);
 	editorMode = .NORMAL;
-}
+} @command_dialog
 
 project_search_select_next :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	searcher := *panel.projectSearcher;
 
 	maxEntry := searcher.results.count - 1;
 	searcher.selectedEntry = clamp(searcher.selectedEntry+1, 0, xx maxEntry);
 	searcher.selectedEntryChanged = true;
-}
+} @command_dialog
 
 project_search_select_previous :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	searcher := *panel.projectSearcher;
 
 	maxEntry := searcher.results.count - 1;
 	searcher.selectedEntry = clamp(searcher.selectedEntry-1, 0, xx maxEntry);
 	searcher.selectedEntryChanged = true;
-}
+} @command_dialog
 
 #scope_file
 

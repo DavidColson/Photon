@@ -2,7 +2,12 @@
 // Movement commands
 // ------------------------------------
 
-move_one_char_left :: (using panel: *Panel, args: []string) {
+move_one_char_left :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Move one char left",
+		keybinding = .["h", "<left>"],
+		flags = .REPEATABLE
+	};
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 
 	lineStart, lineEnd := get_line_range(panel.document, cursorCoordinate.line);
@@ -10,9 +15,19 @@ move_one_char_left :: (using panel: *Panel, args: []string) {
 	cursor.head -= 1;
 	cursor.head = clamp(cursor.head, lineStart, lineEnd);
 	cursor.anchor = cursor.head;
-}
+} @command_normal
 
-move_one_char_right :: (using panel: *Panel, args: []string) {
+extend_one_char_left :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend one char left", keybinding = .["H"], flags = .REPEATABLE | .EXTEND };
+	move_one_char_left(panel);
+} @command_normal
+
+move_one_char_right :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Move one char right",
+		keybinding = .["l", "<right>"],
+		flags = .REPEATABLE
+	};
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 
 	lineStart, lineEnd := get_line_range(panel.document, cursorCoordinate.line);
@@ -20,7 +35,12 @@ move_one_char_right :: (using panel: *Panel, args: []string) {
 	panel.cursor.head += 1;
 	panel.cursor.head = clamp(panel.cursor.head, lineStart, lineEnd);
 	cursor.anchor = cursor.head;
-}
+} @command_normal
+
+extend_one_char_right :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend one char right", keybinding = .["L"], flags = .REPEATABLE | .EXTEND };
+	move_one_char_right(panel);
+} @command_normal
 
 chars_to_tabstop :: (column: s64) -> s64 {
 	return tabSize - column % tabSize;
@@ -45,7 +65,12 @@ byte_offset_for_virtual_column :: (lineContent: Document.LineContent, virtualCol
 	return lineContent.text.count;
 }
 
-move_one_line_down :: (using panel: *Panel, args: []string) {
+move_one_line_down :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Move one line down",
+		keybinding = .["j", "<down>"],
+		flags = .REPEATABLE
+	};
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 	numLines := get_number_of_lines(document);
 	newLine := min(cursorCoordinate.line + 1, numLines - 1);
@@ -57,9 +82,19 @@ move_one_line_down :: (using panel: *Panel, args: []string) {
 
 	cursor.virtualColumn = targetColumn;
 	cursor.virtualColumnHead = cursor.head;
-}
+} @command_normal
 
-move_one_line_up :: (using panel: *Panel, args: []string) {
+extend_one_line_down :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend one line down", keybinding = .["J"], flags = .REPEATABLE | .EXTEND };
+	move_one_line_down(panel);
+} @command_normal
+
+move_one_line_up :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Move one line up",
+		keybinding = .["k", "<up>"],
+		flags = .REPEATABLE
+	};
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 	newLine := max(cursorCoordinate.line - 1, 0);
 	newLineContent := get_line_content(panel.document, newLine);
@@ -70,7 +105,12 @@ move_one_line_up :: (using panel: *Panel, args: []string) {
 
 	cursor.virtualColumn = targetColumn;
 	cursor.virtualColumnHead = cursor.head;
-}
+} @command_normal
+
+extend_one_line_up :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend one line up", keybinding = .["K"], flags = .REPEATABLE | .EXTEND };
+	move_one_line_up(panel);
+} @command_normal
 
 move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
 	newLineContent := get_line_content(panel.document, line);
@@ -106,14 +146,21 @@ get_virtual_column :: (using panel: *Panel) -> s64 {
 	return cursor.virtualColumn;
 }
 
-goto_document_start :: (using panel: *Panel, args: []string) {
+goto_document_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Goto document start", keybinding = .["gk"] };
 	cursor.head = 0;
 	cursor.anchor = cursor.head;
 	// scroll the window if the cursor will now become out of view
 	panel_scroll_to_line(panel, 0);
-}
+} @command_normal
 
-goto_document_end :: (using panel: *Panel, args: []string) {
+extend_to_document_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to document start", keybinding = .["gK"], flags = .EXTEND };
+	goto_document_start(panel);
+} @command_normal
+
+goto_document_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Goto document end", keybinding = .["gj"] };
 	cursor.head = get_size(document)-1;
 	cursor.head = shift_offset_line_endings(document, cursor.head, .FORWARD);
 	cursor.anchor = cursor.head;
@@ -122,19 +169,39 @@ goto_document_end :: (using panel: *Panel, args: []string) {
 	pageSize := panel_get_page_size(panel);
 	cursorLine := get_coordinate_from_offset(document, cursor.head).line;
 	panel_scroll_to_line(panel, cursorLine - pageSize + 1);
-}
+} @command_normal
 
-goto_line_end :: (using panel: *Panel, args: []string) { 
+extend_to_document_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to document end", keybinding = .["gJ"], flags = .EXTEND };
+	goto_document_end(panel);
+} @command_normal
+
+goto_line_end :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{ prettyName = "Goto line end", keybinding = .["gl"] };
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	_, cursor.head = get_line_range(document, coordinate.line);
 	cursor.anchor = cursor.head;
-}
+} @command_normal
 
-goto_line_start :: (using panel: *Panel, args: []string) { 
+extend_to_line_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to line end", keybinding = .["gL"], flags = .EXTEND };
+	goto_line_end(panel);
+} @command_normal
+
+goto_line_start :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Goto line start",
+		keybinding = .["gh"],
+	};
 	coordinate := get_coordinate_from_offset(document, cursor.head);
 	cursor.head = get_line_start(document, coordinate.line);
 	cursor.anchor = cursor.head;
-}
+} @command_normal
+
+extend_to_line_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to line start", keybinding = .["gH"], flags = .EXTEND };
+	goto_line_start(panel);
+} @command_normal
 
 CharCategory :: enum {
 	LINE_ENDING;
@@ -227,16 +294,31 @@ move_word_reverse :: (using panel: *Panel, checkPosition: (u8, u8, CharCategory,
 	cursor.anchor = shift_offset_line_endings(document, cursor.anchor, .FORWARD);
 }
 
-move_word_start :: (using panel: *Panel, args: []string) { 
+move_word_start :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next word start",
+		keybinding = .["w"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isWordBoundary := nextCharCategory != prevCharCategory;
 		nextIsLineEnding := nextCharCategory == .LINE_ENDING;
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isWordBoundary && (nextIsLineEnding || !nextIsWhitespace);
 	});
-}
+} @command_normal
 
-move_long_word_start :: (using panel: *Panel, args: []string) { 
+extend_word_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next word start", keybinding = .["W"], flags = .REPEATABLE | .EXTEND };
+	move_word_start(panel);
+} @command_normal
+
+move_long_word_start :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next long word start",
+		keybinding = .["alt+w"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isLongWordBoundary := prevCharCategory != nextCharCategory;
 		if (nextCharCategory == .WORD && prevCharCategory == .PUNCTUATION) 
@@ -248,9 +330,19 @@ move_long_word_start :: (using panel: *Panel, args: []string) {
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isLongWordBoundary && (nextIsLineEnding || !nextIsWhitespace);
 	});
-}
+} @command_normal
 
-move_sub_word_start :: (using panel: *Panel, args: []string) { 
+extend_long_word_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next long word start", keybinding = .["alt+shift+w"], flags = .REPEATABLE | .EXTEND };
+	move_long_word_start(panel);
+} @command_normal
+
+move_sub_word_start :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next sub word start",
+		keybinding = .["ctrl+w"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isSubWordBoundary := prev != next;
 		if nextCharCategory == .WORD && prevCharCategory == .WORD {
@@ -266,9 +358,19 @@ move_sub_word_start :: (using panel: *Panel, args: []string) {
 		nextIsWhitespace := nextCharCategory == .WHITESPACE;
 		return isSubWordBoundary && (nextIsLineEnding || !(nextIsWhitespace || next == #char "_"));
 	});
-}
+} @command_normal
 
-move_prev_word_start :: (using panel: *Panel, args: []string) { 
+extend_sub_word_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next sub word start", keybinding = .["ctrl+shift+w"], flags = .REPEATABLE | .EXTEND };
+	move_sub_word_start(panel);
+} @command_normal
+
+move_prev_word_start :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to previous word start",
+		keybinding = .["b"],
+		flags = .REPEATABLE
+	};
 	move_word_reverse(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isWordBoundary := nextCharCategory != prevCharCategory;
 		if nextCharCategory == .LINE_ENDING && prevCharCategory == .LINE_ENDING {
@@ -278,18 +380,38 @@ move_prev_word_start :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-}
+} @command_normal
 
-move_word_end :: (using panel: *Panel, args: []string) { 
+extend_prev_word_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to prev word start", keybinding = .["B"], flags = .REPEATABLE | .EXTEND };
+	move_prev_word_start(panel);
+} @command_normal
+
+move_word_end :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next word end",
+		keybinding = .["e"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isWordBoundary := nextCharCategory != prevCharCategory;
 		nextIsLineEnding := nextCharCategory == .LINE_ENDING;
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-}
+} @command_normal
 
-move_long_word_end :: (using panel: *Panel, args: []string) { 
+extend_word_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next word end", keybinding = .["E"], flags = .REPEATABLE | .EXTEND };
+	move_word_end(panel);
+} @command_normal
+
+move_long_word_end :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next long word end",
+		keybinding = .["alt+e"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isLongWordBoundary := prevCharCategory != nextCharCategory;
 		if (nextCharCategory == .WORD && prevCharCategory == .PUNCTUATION) 
@@ -300,9 +422,19 @@ move_long_word_end :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isLongWordBoundary && (!prevIsWhitespace || nextIsLineEnding);
 	});
-}
+} @command_normal
 
-move_sub_word_end :: (using panel: *Panel, args: []string) { 
+extend_long_word_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next long word end", keybinding = .["alt+shift+e"], flags = .REPEATABLE | .EXTEND };
+	move_long_word_end(panel);
+} @command_normal
+
+move_sub_word_end :: (using panel: *Panel) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Move to next sub word end",
+		keybinding = .["ctrl+e"],
+		flags = .REPEATABLE
+	};
 	move_word_forward(panel, (prev: u8, next: u8, prevCharCategory: CharCategory, nextCharCategory: CharCategory) -> bool {
 		isSubWordBoundary := ifx prev != next then true else false;
 		if nextCharCategory == .WORD && prevCharCategory == .WORD {
@@ -318,55 +450,101 @@ move_sub_word_end :: (using panel: *Panel, args: []string) {
 		prevIsWhitespace := prevCharCategory == .WHITESPACE;
 		return isSubWordBoundary && (!(prevIsWhitespace || prev == #char "_") || nextIsLineEnding);
 	});
-}
+} @command_normal
 
-jump_to_char :: (using panel: *Panel, args: []string) { 
+extend_sub_word_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to next sub word end", keybinding = .["ctrl+shift+e"], flags = .REPEATABLE | .EXTEND };
+	move_sub_word_end(panel);
+} @command_normal
+
+jump_to_char :: (using panel: *Panel, char: u8) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Jump to first occurence of {char}",
+		keybinding = .["f{char}"],
+		flags = .REPEATABLE
+	};
 	iter := make_iterator(document, cursor.head+1);
 	for iter {
 		cursor.head = iter.offset;
-		// @todo: assumes the args are single char, this may not always be true
-		if args[0][0] == it {
+		if char == it {
 			break;
 		}
 	}
-}
+} @command_normal
 
-jump_to_last_char :: (using panel: *Panel, args: []string) { 
+extend_to_char :: (using panel: *Panel, char: u8) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to first occurence of {char}", keybinding = .["F{char}"], flags = .REPEATABLE | .EXTEND };
+	jump_to_char(panel, char);
+} @command_normal
+
+jump_to_last_char :: (using panel: *Panel, char: u8) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Jump to last occurence of {char}",
+		keybinding = .["alt+f{char}"],
+		flags = .REPEATABLE
+	};
 	iter := make_reverse_iterator(document, cursor.head);
 	for iter {
 		cursor.head = iter.offset;
-		// @todo: assumes the args are single char, this may not always be true
-		if args[0][0] == it {
+		if char == it {
 			break;
 		}
 	}
-}
+} @command_normal
 
-jump_to_before_char :: (using panel: *Panel, args: []string) { 
+extend_to_last_char :: (using panel: *Panel, char: u8) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to last occurence of {char}", keybinding = .["alt+shift+f{char}"], flags = .REPEATABLE | .EXTEND };
+	jump_to_last_char(panel, char);
+} @command_normal
+
+jump_to_before_char :: (using panel: *Panel, char: u8) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Jump to just before first occurence of {char}",
+		keybinding = .["t{char}"],
+		flags = .REPEATABLE
+	};
 	iter := make_iterator(document, cursor.head+1);
 	for iter {
 		cursor.head = iter.offset;
 		next := get_char_at(document, iter.offset+1);
-		// @todo: assumes the args are single char, this may not always be true
-		if args[0][0] == next {
+		if char == next {
 			break;
 		}
 	}
-}
+} @command_normal
 
-jump_to_before_last_char :: (using panel: *Panel, args: []string) { 
+extend_to_before_char :: (using panel: *Panel, char: u8) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to just before first occurence of {char}", keybinding = .["T{char}"], flags = .REPEATABLE | .EXTEND };
+	jump_to_before_char(panel, char);
+} @command_normal
+
+jump_to_before_last_char :: (using panel: *Panel, char: u8) { 
+	CONFIG :: CommandConfig.{
+		prettyName = "Jump to just before last occurence of {char}",
+		keybinding = .["alt+t{char}"],
+		flags = .REPEATABLE
+	};
 	iter := make_reverse_iterator(document, cursor.head);
 	for iter {
 		cursor.head = iter.offset;
-		// @todo: assumes the args are single char, this may not always be true
-		if args[0][0] == it {
+		if char == it {
 			cursor.head += 1;
 			break;
 		}
 	}
-}
+} @command_normal
 
-extend_selection_to_lines :: (using panel: *Panel, args: []string) {
+extend_to_before_last_char :: (using panel: *Panel, char: u8) {
+	CONFIG :: CommandConfig.{ prettyName = "Extend to just before last occurence of {char}", keybinding = .["alt+shift+t{char}"], flags = .REPEATABLE | .EXTEND };
+	jump_to_before_char(panel, char);
+} @command_normal
+
+extend_selection_to_lines :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Extend selection to full lines",
+		keybinding = .["x"],
+		flags = .REPEATABLE
+	};
 	// flip the cursors if required
 	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.head {
 		temp := cursor.head;
@@ -386,9 +564,14 @@ extend_selection_to_lines :: (using panel: *Panel, args: []string) {
 		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
 		cursor.anchor, cursor.head = get_line_range(document, coord.line);
 	}
-}
+} @command_normal
 
-extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
+extend_selection_to_lines_above :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Extend selection to lines above",
+		keybinding = .["X"],
+		flags = .REPEATABLE
+	};
 	// flip the cursors if required
 	if cursor.head != cursor.anchor && min(cursor.head, cursor.anchor) == cursor.anchor {
 		temp := cursor.head;
@@ -408,9 +591,14 @@ extend_selection_to_lines_above :: (using panel: *Panel, args: []string) {
 		coord := get_coordinate_from_offset(document, min(cursor.anchor, cursor.head));
 		cursor.head, cursor.anchor = get_line_range(document, coord.line);
 	}
-}
+} @command_normal
 
-expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
+expand_selection_by_syntax :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Expand selection to parent syntax",
+		keybinding = .["alt+o"],
+		flags = .REPEATABLE
+	};
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
@@ -441,9 +629,14 @@ expand_selection_by_syntax :: (using panel: *Panel, args: []string) {
 	}
 	
 	cursor = range_to_cursor(cursor, .{startByte, endByte});
-}
+} @command_normal
 
-shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
+shrink_selection_by_syntax :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Shrink selection by syntax",
+		keybinding = .["alt+i"],
+		flags = .REPEATABLE
+	};
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
@@ -470,66 +663,18 @@ shrink_selection_by_syntax :: (using panel: *Panel, args: []string) {
 			cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 		}
 	}
-}
+} @command_normal
 
 
 testFontSize: s32; @option
 testLineNumbers: bool; @option
 
-sample_simple_command :: (using panel: *Panel) {
+select_next_sibling :: (using panel: *Panel) {
 	CONFIG :: CommandConfig.{
-		prettyName = "A Simple Command",
-		keybinding = .["alt+t"],
+		prettyName = "Select next sibling syntax node",
+		keybinding = .["alt+n"],
 		flags = .REPEATABLE
 	};
-	
-	log("Simple Command");
-} @command_normal
-
-sample_goto_line :: (using panel: *Panel, number: s64) {
-	CONFIG :: CommandConfig.{
-		prettyName = "Go to Line",
-		keybinding = .["alt+t"],
-		category = "motions",
-		flags = .REPEATABLE
-	};
-	
-	log("goto line %", number);
-} @command_normal
-
-sample_jump_to_char :: (using panel: *Panel, character: u8) {
-	CONFIG :: CommandConfig.{
-		prettyName = "Jump to a Character",
-		keybinding = .["alt+r"],
-		category = "motions",
-		flags = .REPEATABLE
-	};
-	
-	log("jump to char %", character);
-} @command_insert
-
-sample_normalize_line_endings :: (using panel: *Panel, mode: Document.LineEndingMode) {
-	CONFIG :: CommandConfig.{
-		prettyName = "Normalize Line Endings",
-		keybinding = .["alt+r"],
-		category = "changes",
-		flags = .REPEATABLE
-	};
-	
-	log("Normalize endings %", mode);
-} @command_dialog
-
-sample_set_title :: (using panel: *Panel, title: string) {
-	CONFIG :: CommandConfig.{
-		keybinding = .["alt+r"],
-		category = "misc",
-		flags = .REPEATABLE
-	};
-	
-	log("Set title to %", title);
-} @command
-
-select_next_sibling :: (using panel: *Panel, args: []string) {
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
@@ -543,9 +688,14 @@ select_next_sibling :: (using panel: *Panel, args: []string) {
 	if !ts_node_is_null(node) {
 		cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 	}
-}
+} @command_normal
 
-select_prev_sibling :: (using panel: *Panel, args: []string) {
+select_prev_sibling :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{
+		prettyName = "Select prev sibling syntax node",
+		keybinding = .["alt+p"],
+		flags = .REPEATABLE
+	};
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
@@ -559,28 +709,32 @@ select_prev_sibling :: (using panel: *Panel, args: []string) {
 	if !ts_node_is_null(node) {
 		cursor = range_to_cursor(cursor, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 	}
-}
+} @command_normal
 
-select_whole_document :: (using panel: *Panel, args: []string) {
+select_whole_document :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Select whole document", keybinding = .["%"] };
 	cursor.anchor = 0;
 	cursor.head = get_size(document)-1;
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
-}
+} @command_normal
 
-collapse_selection :: (using panel: *Panel, args: []string) {
+collapse_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Collapse selection", keybinding = .[";"] };
 	cursor.anchor = cursor.head;
-}
+} @command_normal
 
-flip_selection :: (using panel: *Panel, args: []string) {
+flip_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Flip selection", keybinding = .["alt+;"] };
 	temp := cursor.head;
 	cursor.head = cursor.anchor;
 	cursor.anchor = temp;
-}
+} @command_normal
 
 // Normal Mode Changes
 // ------------------------------
 
-enter_normal_mode :: (panel: *Panel, args: []string) {
+enter_normal_mode :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	panel_reset_dialogs(panel);
 
 	// if we were in insert mode we must now end the edit
@@ -589,9 +743,10 @@ enter_normal_mode :: (panel: *Panel, args: []string) {
 	}
 	
 	editorMode = .NORMAL;
-}
+} @command_normal @command_insert @command_dialog
 
-enter_insert_mode_start :: (using panel: *Panel, args: []string) {
+enter_insert_mode_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Enter insert mode start of selection", keybinding = .["i"] };
 	if cursor.head > cursor.anchor {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
@@ -600,9 +755,10 @@ enter_insert_mode_start :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-}
+} @command_normal
 
-enter_insert_mode_end :: (using panel: *Panel, args: []string) {
+enter_insert_mode_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Enter insert mode end of selection", keybinding = .["a"] };
 	if cursor.head < cursor.anchor {
 		temp := cursor.head;
 		cursor.head = cursor.anchor;
@@ -613,10 +769,11 @@ enter_insert_mode_end :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-}
+} @command_normal
 
-enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
-	goto_line_start(panel, args);
+enter_insert_mode_line_start :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Enter insert mode start of line", keybinding = .["I"] };
+	goto_line_start(panel);
 
 	// put the cursor on the first non whitespace character
 	cursorChar := get_char_at(document, cursor.head);
@@ -632,19 +789,21 @@ enter_insert_mode_line_start :: (using panel: *Panel, args: []string) {
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-}
+} @command_normal
 
-enter_insert_mode_line_end :: (using panel: *Panel, args: []string) {
-	goto_line_end(panel, args);
+enter_insert_mode_line_end :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Enter insert mode end of line", keybinding = .["A"] };
+	goto_line_end(panel);
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
-}
+} @command_normal
 
-select_register :: (using panel: *Panel, args: []string) { 
-	registers.selectedRegister = args[0][0];
-}
+select_register :: (using panel: *Panel, char: u8) { 
+	CONFIG :: CommandConfig.{ prettyName = "Select register {char}", keybinding = .["\"{char}"] };
+	registers.selectedRegister = char;
+} @command_normal
 
 delete_cursor_range :: (doc: DocumentHandle, locationA: s64, locationB:s64) -> s64 {
 	start := min(locationA, locationB);
@@ -670,7 +829,8 @@ yank_range_to_register :: (doc: DocumentHandle, locationA: s64, locationB:s64) {
 	write_register(registers.selectedRegister, textStr);
 }
 
-delete_selection :: (using panel: *Panel, args: []string) {
+delete_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Delete selection", keybinding = .["d"] };
 	// copy the selection into a register before deleting it
 	yank_range_to_register(document, cursor.head, cursor.anchor);
 
@@ -678,9 +838,10 @@ delete_selection :: (using panel: *Panel, args: []string) {
 	defer end_edit(document);
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
-}
+} @command_normal
 
-change_selection :: (using panel: *Panel, args: []string) {
+change_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Change selection", keybinding = .["c"] };
 	yank_range_to_register(document, cursor.head, cursor.anchor);
 
 	rangeEnd := max(cursor.head, cursor.anchor);
@@ -693,7 +854,7 @@ change_selection :: (using panel: *Panel, args: []string) {
 		indentation = calculate_indentation_for_line(document, lineNumber);
 	}
 
-	enter_insert_mode_start(panel, args);
+	enter_insert_mode_start(panel);
 
 	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
 	cursor.anchor = cursor.head;
@@ -710,25 +871,29 @@ change_selection :: (using panel: *Panel, args: []string) {
 		cursor.head -= textToInsert.count;
 		cursor.anchor -= textToInsert.count;
 	}
-}
+} @command_normal
 
-yank_selection :: (using panel: *Panel, args: []string) {
+yank_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Yank selection", keybinding = .["y"] };
 	range := cursor_to_range(cursor);
 	yank_range_to_register(document, range.start, range.end);
 	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
-}
+} @command_normal
 
-paste_after_selection :: (using panel: *Panel, args: []string) {
+paste_after_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Paste after selection", keybinding = .["p"] };
 	textToPaste := read_register(registers.selectedRegister);
 	paste(panel, textToPaste, false);
-}
+} @command_normal
 
-paste_before_selection :: (using panel: *Panel, args: []string) {
+paste_before_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Paste before selection", keybinding = .["P"] };
 	textToPaste := read_register(registers.selectedRegister);
 	paste(panel, textToPaste, true);
-}
+} @command_normal
 
-replace_selection :: (using panel: *Panel, args: []string) {
+replace_selection :: (using panel: *Panel, char: u8) {
+	CONFIG :: CommandConfig.{ prettyName = "Replace selection with {char}", keybinding = .["r{char}"] };
 	begin_edit(document);
 	defer end_edit(document);
 
@@ -744,15 +909,16 @@ replace_selection :: (using panel: *Panel, args: []string) {
 	init_string_builder(*builder);
 
 	for 0..rangeLength {
-		append(*builder, args[0]);
+		append(*builder, char);
 	}
 
 	insert(document, min(cursor.head, cursor.anchor), builder_to_string(*builder,,temp));
 	cursor.head = head;
 	cursor.anchor = anchor;
-}
+} @command_normal
 
-replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
+replace_selection_with_yanked :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Replace selection with yanked", keybinding = .["R"] };
 	begin_edit(document);
 
 	head := cursor.head;
@@ -780,10 +946,10 @@ replace_selection_with_yanked :: (using panel: *Panel, args: []string) {
 			break;
 		}
 	}
-	if linewise {
-		autoindent_selection(panel, .[]);
+	if linewise && document_supports_treesitter(document) {
+		autoindent_selection(panel);
 	}
-}
+} @command_normal
 
 paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	begin_edit(document);
@@ -826,15 +992,16 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	end_edit(document);
 	
 	if linewise && document_supports_treesitter(document) {
-		autoindent_selection(panel, .[]);
+		autoindent_selection(panel);
 	}
 }
 
-new_line_below :: (using panel: *Panel, args: []string) {
-	if cursor.head < cursor.anchor then flip_selection(panel, .[]);
+new_line_below :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "New line below selection", keybinding = .["o"] };
+	if cursor.head < cursor.anchor then flip_selection(panel);
 	
-	goto_line_end(panel, args);
-	enter_insert_mode_start(panel, args);
+	goto_line_end(panel);
+	enter_insert_mode_start(panel);
 
 	textToInsert := "\r\n";
 	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
@@ -844,14 +1011,15 @@ new_line_below :: (using panel: *Panel, args: []string) {
 	
 	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
 	insert_mode_insert_string(indentation);
-}
+} @command_normal
 
-new_line_above :: (using panel: *Panel, args: []string) {
-	if cursor.head > cursor.anchor then flip_selection(panel, .[]);
+new_line_above :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "New line above selection", keybinding = .["O"] };
+	if cursor.head > cursor.anchor then flip_selection(panel);
 	
-	goto_line_start(panel, args);
+	goto_line_start(panel);
 	panel.cursor.anchor = panel.cursor.head;
-	enter_insert_mode_start(panel, args);
+	enter_insert_mode_start(panel);
 
 	textToInsert := "\r\n";
 	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
@@ -870,9 +1038,10 @@ new_line_above :: (using panel: *Panel, args: []string) {
 	insert_mode_insert_string(indentation);
 
 	panel.cursor.anchor = panel.cursor.head;
-}
+} @command_normal
 
-join_selection :: (using panel: *Panel, args: []string) {
+join_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Join selection", keybinding = .["alt+j"] };
 	begin_edit(document);
 	defer end_edit(document);
 	
@@ -912,12 +1081,13 @@ join_selection :: (using panel: *Panel, args: []string) {
 	else if cursor.head > cursor.anchor {
 		cursor.head = cursor.head+delta;
 	}
-}
+} @command_normal
 
 // TODO: should be defined alongside the language
 commentString :: "// ";
 
-toggle_comment :: (using panel: *Panel, args: []string) {
+toggle_comment :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Toggle comment", keybinding = .["<space>c"] };
 	begin_edit(document);
 	defer end_edit(document);
 
@@ -973,7 +1143,7 @@ toggle_comment :: (using panel: *Panel, args: []string) {
 		cursor.anchor += offset;
 		cursor.head += (endLine - startLine + 1)*offset;
 	}
-}
+} @command_normal
 	
 // returns the change in byte length of the line
 replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
@@ -1012,7 +1182,8 @@ cursor_offset_after_line_indent_change :: (doc: DocumentHandle, coord: Document.
 	return get_offset_from_coordinate(doc, .{coord.line, max(0, coord.col + delta)});
 }
 
-autoindent_selection :: (using panel: *Panel, args: []string) {
+autoindent_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Autoindent selection", keybinding = .["="] };
 	// TODO: allow setting tabs or spaces, and tab width
 	begin_edit(document);
 	defer end_edit(document);
@@ -1033,9 +1204,10 @@ autoindent_selection :: (using panel: *Panel, args: []string) {
 
 	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
 	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
-}
+} @command_normal
 
-indent_line :: (using panel: *Panel, args: []string) {
+indent_line :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Indent line", keybinding = .[">"] };
 	begin_edit(document);
 	defer end_edit(document);
 
@@ -1052,9 +1224,10 @@ indent_line :: (using panel: *Panel, args: []string) {
 
 	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, 1);
 	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, 1);
-}
+} @command_normal
 
-unindent_line :: (using panel: *Panel, args: []string) {
+unindent_line :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Unindent line", keybinding = .["<"] };
 	begin_edit(document);
 	defer end_edit(document);
 
@@ -1081,9 +1254,10 @@ unindent_line :: (using panel: *Panel, args: []string) {
 
 	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
 	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
-}
+} @command_normal
 
-undo :: (using panel: *Panel, args: []string) {
+undo :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Undo", keybinding = .["u"] };
 	result := undo(document);
 	if result >= 0 {
 		panel.cursor.head = result;
@@ -1115,21 +1289,23 @@ undo :: (using panel: *Panel, args: []string) {
 	// when you commit the history you store that range
 	// which may or may not be the same as the initial edit offset
 	
-}
+} @command_normal
 
-redo :: (using panel: *Panel, args: []string) {
+redo :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Redo", keybinding = .["U"] };
 	result := redo(document);
 	if result > 0 {
 		panel.cursor.head = result;
 		panel.cursor.anchor = panel.cursor.head;
 	}
-}
+} @command_normal
 
 
 // File Search Commands
 // --------------------------------
 
-start_document_search :: (using panel: *Panel, args: []string) {
+start_document_search :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Search Document", keybinding = .["/"] };
 	// show search bar
 	editorMode = .DIALOG;
 	panel.activeDialog = .SEARCH;
@@ -1137,9 +1313,9 @@ start_document_search :: (using panel: *Panel, args: []string) {
 	panel.searchInput.onEditCallback = document_search_on_edit;
 	panel.searchInput.userData = cast(*void) panel;
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
-}
+} @command_normal
 
-confirm_document_search :: (using panel: *Panel, args: []string) {
+confirm_document_search :: (using panel: *Panel) {
 	// set real cursor to the match that was found, setup stepping
 	if panel.hasMatches {
 		panel.cursor.anchor = panel.results[0].start;
@@ -1162,7 +1338,8 @@ end_document_search :: (using panel: *Panel) {
 	}
 }
 
-next_search_result :: (using panel: *Panel, args: []string) {
+next_search_result :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Next search result", keybinding = .["n"] };
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
@@ -1184,9 +1361,10 @@ next_search_result :: (using panel: *Panel, args: []string) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2); 
 		}
 	}
-}
+} @command_normal
 
-previous_search_result :: (using panel: *Panel, args: []string) {
+previous_search_result :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Previous search result", keybinding = .["N"] };
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
@@ -1216,9 +1394,10 @@ previous_search_result :: (using panel: *Panel, args: []string) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2); 
 		}
 	}
-}
+} @command_normal
 
-search_selection :: (using panel: *Panel, args: []string) {
+search_selection :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Search selection", keybinding = .["*"] };
 	start := min(cursor.head, cursor.anchor);
 	end := max(cursor.head, cursor.anchor);
 	
@@ -1231,7 +1410,7 @@ search_selection :: (using panel: *Panel, args: []string) {
 	textStr := string.{text.count, text.data};
 	write_register("/", textStr);
 	push_notification("Selection copied to search register");
-}
+} @command_normal
 
 document_search_on_edit :: (userData: *void, input: string) {
 	panel := cast(*Panel) userData;
@@ -1256,9 +1435,10 @@ document_search_on_edit :: (userData: *void, input: string) {
 	}
 }
 
-jump_to_last_open_document :: (using panel: *Panel, args: []string) {
+jump_to_last_open_document :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Jump to last open document", keybinding = .["gp"] };
 	panel_set_active_document(panel, panel.previousDocument);
-}
+} @command_normal
 
 // Insert Mode
 // -----------------------------
@@ -1301,7 +1481,8 @@ insert_mode_handle_text_input :: (char: Utf8_Char) {
 	insert_mode_insert_string(textToInsert);
 }
 
-insert_mode_line_break :: (using panel: *Panel, args: []string) {
+insert_mode_line_break :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Insert line break", keybinding = .["<enter>"] };
 	textToInsert := "\r\n";
 	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		textToInsert = "\n";
@@ -1317,14 +1498,16 @@ insert_mode_line_break :: (using panel: *Panel, args: []string) {
 	delete(document, line.startByteOffset, line.text.count - trimmed.count);
 	
 	insert_mode_insert_string(indentation);
-}
+} @command_insert
 
-insert_tab_character :: (using panel: *Panel, args: []string) {
+insert_tab_character :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Insert tab", keybinding = .["<tab>"] };
 	textToInsert := "\t";
 	insert_mode_insert_string(textToInsert);
-}
+} @command_insert
 
-insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
+insert_mode_backward_delete_char :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Backward delete char", keybinding = .["<backspace>"] };
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head - 1, .REVERSE);
@@ -1343,9 +1526,10 @@ insert_mode_backward_delete_char :: (using panel: *Panel, args: []string) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
-}
+} @command_insert
 
-insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
+insert_mode_forward_delete_char :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Forward delete char", keybinding = .["<delete>"] };
 	distanceToAnchor := cursor.anchor - cursor.head;
 
 	startOffset := shift_offset_line_endings(document, cursor.head, .REVERSE);
@@ -1361,13 +1545,14 @@ insert_mode_forward_delete_char :: (using panel: *Panel, args: []string) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
-}
+} @command_insert
 
 
 // View Commands
 // ------------------------------
 
-page_up :: (using panel: *Panel, args: []string) {
+page_up :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Page up", keybinding = .["ctrl+b", "<pageup>"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
 	// move the cursor up half a page
@@ -1377,9 +1562,10 @@ page_up :: (using panel: *Panel, args: []string) {
 
 	// scroll to keep the cursor in the same relative place on screen
 	panel_scroll_to_line(panel, startVisibleLine - pageSize);
-}
+} @command_normal
 
-page_down :: (using panel: *Panel, args: []string) {
+page_down :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Page down", keybinding = .["ctrl+f", "<pagedown>"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 	numLinesDocument := get_number_of_lines(panel.document);
 
@@ -1390,9 +1576,10 @@ page_down :: (using panel: *Panel, args: []string) {
 
 	// scroll to keep the cursor in the same relative place on screen
 	panel_scroll_to_line(panel, startVisibleLine + pageSize);
-}
+} @command_normal
 
-half_page_up :: (using panel: *Panel, args: []string) {
+half_page_up :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Half page up", keybinding = .["ctrl+u"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
 	// move the cursor up half a page
@@ -1402,9 +1589,10 @@ half_page_up :: (using panel: *Panel, args: []string) {
 
 	// scroll to keep the cursor in the same relative place on screen
 	panel_scroll_to_line(panel, startVisibleLine - pageSize/2);
-}
+} @command_normal
 
-half_page_down :: (using panel: *Panel, args: []string) {
+half_page_down :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Half page down", keybinding = .["ctrl+d"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 	numLinesDocument := get_number_of_lines(panel.document);
 
@@ -1415,60 +1603,64 @@ half_page_down :: (using panel: *Panel, args: []string) {
 
 	// scroll to keep the cursor in the same relative place on screen
 	panel_scroll_to_line(panel, startVisibleLine + pageSize/2);
-}
+} @command_normal
 
 
 // Dialog Commands
 // -----------------------------
 
-dialog_select_next :: (using panel: *Panel, args: []string) {
+dialog_select_next :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Dialog select next", keybinding = .["<down>"] };
 	if activeDialog == {
 		case .NONE; return;
 		case .COMMAND_PICKER;
-			command_picker_select_next(panel, args);
+			command_picker_select_next(panel);
 		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_select_next(panel, args);
+			filesystem_nav_select_next(panel);
 		case .FILE_FINDER;
 			file_finder_select_next(panel);
 		case .PROJECT_SEARCH;
 			project_search_select_next(panel);
 		case .SEARCH; return;
 	}
-}
+} @command_dialog
 
-dialog_select_previous :: (using panel: *Panel, args: []string) {
+dialog_select_previous :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Dialog select previous", keybinding = .["<up>"] };
 	if activeDialog == {
 		case .NONE; return;
 		case .COMMAND_PICKER;
-			command_picker_select_previous(panel, args);
+			command_picker_select_previous(panel);
 		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_select_previous(panel, args);
+			filesystem_nav_select_previous(panel);
 		case .FILE_FINDER;
 			file_finder_select_previous(panel);
 		case .PROJECT_SEARCH;
 			project_search_select_previous(panel);
 		case .SEARCH; return;
 	}
-}
+} @command_dialog
 
-dialog_action_item :: (using panel: *Panel, args: []string) {
+dialog_action_item :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Dialog action item", keybinding = .["<enter>"] };
 	if activeDialog == {
 		case .NONE; return;
 		case .COMMAND_PICKER;
-			command_picker_execute_command(panel, args);
+			command_picker_execute_command(panel);
 		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_action_item(panel, args);
+			filesystem_nav_action_item(panel);
 		case .FILE_FINDER;
-			file_finder_select_file(panel, args);
+			file_finder_select_file(panel);
 		case .SEARCH;
-			confirm_document_search(panel, args);
+			confirm_document_search(panel);
 		case .PROJECT_SEARCH;
-			project_search_open_result(panel, args);
+			project_search_open_result(panel);
 	}
-}
+} @command_dialog
 
 
-dialog_backward_delete :: (using panel: *Panel, args: []string) {
+dialog_backward_delete :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Dialog backward delete", keybinding = .["<backspace>"] };
 	inputField := *commandPicker.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
@@ -1500,7 +1692,7 @@ dialog_backward_delete :: (using panel: *Panel, args: []string) {
 			}
 		case .NONE; return;
 	}
-}
+} @command_dialog
 
 dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 	inputField := *commandPicker.input;
@@ -1525,35 +1717,42 @@ dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 // Misc Commands
 // ------------------------------
 
-quit :: (panel: *Panel, args: []string) {
+quit :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Quit", keybinding = .["Q"] };
 	pendingQuit = true;
-}
+} @command_normal
 
-open_file :: (panel: *Panel, args: []string) {
+open_file :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Open file", keybinding = .["<space>o"] };
 	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
 	filesystem_nav_open(*panel.filesystemNav);
-}
+} @command_normal
 
-open_file_in_working_dir :: (panel: *Panel, args: []string) {
+open_file_in_working_dir :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Open file at working directory", keybinding = .["<space>O"] };
 	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
 	filesystem_nav_open(*panel.filesystemNav, false, get_working_directory());
-}
+} @command_normal
 
-save_file :: (panel: *Panel, args: []string) {
+save_file :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Save file", keybinding = .["ctrl+s"] };
 	document_save(panel.document, document_get_path(panel.document));
-}
+} @command_normal
 
-save_file_as :: (panel: *Panel, args: []string) {
+save_file_as :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Save file as", keybinding = .["ctrl+shift+s"] };
 	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
 	filesystem_nav_open(*panel.filesystemNav, true);
-}
+} @command_normal
 
-p4_checkout_file :: (panel: *Panel, args: []string) {
+p4_checkout_file :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "P4 checkout file", keybinding = .[] };
 	result, output, error := run_command("p4", "edit", document_get_path(panel.document), capture_and_return_output=true);
 	log("%", output);
-}
+} @command_normal
 
-print_piece_chain_debug :: (using panel: *Panel, args: []string) {
+print_piece_chain_debug :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Print piece chain debug" };
 	log("Tree Nodes: ");
 	document_debug_print_tree(document);
 	log("\nDocument: ");
@@ -1579,23 +1778,27 @@ print_piece_chain_debug :: (using panel: *Panel, args: []string) {
 		print("]");
 		next_node(*iterator);
 	}
-}
+} @command_normal
 
-print_highlight_debug :: (using panel: *Panel, args: []string) {
+print_highlight_debug :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Print highlight debug" };
 	queuePrintHighlightDebug = true;
-}
+} @command_normal
 
-reparse_syntax :: (using panel: *Panel, args: []string) {
+reparse_syntax :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Reparse syntax tree" };
 	document_reparse_ts_tree(document, false);
-}
+} @command_normal
 
-visualize_undos :: (using panel: *Panel, args: []string) {
+visualize_undos :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Visualize Undos" };
 	// document_debug_print_undos(document);
-}
+} @command_normal
 
-toggle_render_line_endings :: (panel: *Panel, args: []string) {
+toggle_render_line_endings :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Toggle render line endings" };
 	fontCode.drawLineEndings = !fontCode.drawLineEndings;
-}
+} @command_normal
 
 normalize_line_endings_common :: (document: DocumentHandle, targetEndings: Document.LineEndingMode, range: Document.Range) -> s64 {
 	// this function needs to peak ahead, which requires it to binary query the tree for every single character checked
@@ -1633,15 +1836,17 @@ normalize_line_endings_common :: (document: DocumentHandle, targetEndings: Docum
 	return end - range.end;
 }
 
-normalize_line_endings_lf :: (using panel: *Panel, args: []string) {
+normalize_line_endings_lf :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Normalize line endings to LF" };
 	begin_edit(document);
 	normalize_line_endings_common(document, .LF, .{0, S64_MAX});
 	end_edit(document);
-}
+} @command_normal
 
-normalize_line_endings_crlf :: (using panel: *Panel, args: []string) {
+normalize_line_endings_crlf :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Normalize line endings to CRLF" };
 	begin_edit(document);
 	normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
 	end_edit(document);
-}
+} @command_normal
 	

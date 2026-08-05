@@ -62,21 +62,24 @@ filesystem_nav_input_field_on_edit :: (userData: *void, input: string) {
 	filesystem_nav_filter_directory_list(state);
 }
 
-filesystem_nav_select_next :: (using panel: *Panel, args: []string) {
+filesystem_nav_select_next :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	state := *filesystemNav;
 	maxItems := state.numToDisplay - 1;
 	state.selectedItem = clamp(state.selectedItem+1, 0, xx maxItems);
 	state.selectedItemChanged = true;
-}
+} @command_dialog
 
-filesystem_nav_select_previous :: (using panel: *Panel, args: []string) {
+filesystem_nav_select_previous :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	state := *filesystemNav;
 	maxItems := state.numToDisplay - 1;
 	state.selectedItem = clamp(state.selectedItem-1, 0, xx maxItems);
 	state.selectedItemChanged = true;
-}
+} @command_dialog
 
-filesystem_nav_action_item :: (using panel: *Panel, args: []string) {
+filesystem_nav_action_item :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	state := *filesystemNav;
 
 	item := state.itemList[state.selectedItem];
@@ -104,16 +107,16 @@ filesystem_nav_action_item :: (using panel: *Panel, args: []string) {
 			filesystem_nav_reset(panel);
 		}
 	}
-}
+} @command_dialog
 
-filesystem_nav_delete_item :: (using panel: *Panel, args: []string) {
+filesystem_nav_delete_item :: (using panel: *Panel) {
 	state := *filesystemNav;
 	// This actually won't work because a letter is consumed by the text input for this widget
 	// unless you made a submode, something to think about when we get here
 	print("Not implemented, delete item");
 }
 
-filesystem_nav_rename_move_item :: (using panel: *Panel, args: []string) {
+filesystem_nav_rename_move_item :: (using panel: *Panel) {
 	state := *filesystemNav;
 	print("Not implemented, rename/move item");
 }

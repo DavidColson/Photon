@@ -152,17 +152,17 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 		if message.kind == {
 		case .TYPECHECKED;
 			typechecked := cast(*Message_Typechecked)message;
-			for typechecked.procedure_headers {
+			for typechecked.procedure_bodies {
 				expr := it.expression;
-				for expr.notes {
+				for expr.header.notes {
 					if it.text == "command_normal" {
-						array_add(*normalModeCommands, expr);
+						array_add(*normalModeCommands, expr.header);
 					}
 					if it.text == "command_insert" {
-						array_add(*insertModeCommands, expr);
+						array_add(*insertModeCommands, expr.header);
 					}
 					if it.text == "command_dialog" {
-						array_add(*dialogModeCommands, expr);
+						array_add(*dialogModeCommands, expr.header);
 					}
 				}
 			}
@@ -197,28 +197,16 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 						append(*builder, ")});\n");
 					}
 					
-					append(*builder, "};\n");
-					
-					
 					// this will be static data
-					append(*builder, "normalModeCommands2 :: Command2.[\n");
-					generate_command_data(*builder, *normalModeCommands);
-					append(*builder, "];\n");
-					append(*builder, "insertModeCommands2 :: Command2.[\n");
-					generate_command_data(*builder, *insertModeCommands);
-					append(*builder, "];\n");
-					append(*builder, "dialogModeCommands2 :: Command2.[\n");
-					generate_command_data(*builder, *dialogModeCommands);
-					append(*builder, "];\n");
+					generate_command_data(*builder, *normalModeCommands, "normalModeCommands");
+					generate_command_data(*builder, *insertModeCommands, "insertModeCommands");
+					generate_command_data(*builder, *dialogModeCommands, "dialogModeCommands");
 					
-					// make all commands list
-					append(*builder, "allCommands2 :: []Command2.[\n");
-					append(*builder, "    normalModeCommands2,\n");
-					append(*builder, "    insertModeCommands2,\n");
-					append(*builder, "    dialogModeCommands2,\n");
-					append(*builder, "];\n");
+					append(*builder, "allCommands[0] = normalModeCommands;\n");
+					append(*builder, "allCommands[1] = insertModeCommands;\n");
+					append(*builder, "allCommands[2] = dialogModeCommands;\n");
 					
-					
+					append(*builder, "};\n");
 					
 					code := builder_to_string(*builder);
 					add_build_string(code, w);
@@ -231,7 +219,7 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 	}
 }
 
-generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedure_Header)  {
+generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedure_Header, arrayToAddTo: string)  {
 	// TODO: this breaks the syntax tree somehow
 	// append(*builder, "    // Cvars\n");
 	
@@ -244,7 +232,7 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 	}
 	
 	for header: (.*)commands {
-		append(builder, "    .{\n");
+		append(builder, tprint("    array_add(*%, Command.{\n", arrayToAddTo));
 		append(builder, tprint("       \"%\",\n", header.name));
 		
 		// generate the list of args
@@ -304,21 +292,24 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 		
 		// Pull out and place the config structure
 		body := header.body_or_null;
-		block := body.block;
-		for statement: block.statements {
-			// we expect some of these to be declarations
-			if statement.kind == .DECLARATION {
-				declaration := cast(*Code_Declaration, statement);
-				if declaration.flags & .IS_CONSTANT && declaration.name == "CONFIG" {
-					log("Found CONFIG with name %\n%", declaration.name, node_to_string(declaration));
-					append(builder,        "        ");
-					print_expression(builder, declaration.expression);
+		if body {
+			for statement: body.block.statements {
+				// we expect some of these to be declarations
+				if statement.kind == .DECLARATION {
+					declaration := cast(*Code_Declaration, statement);
+					if declaration.flags & .IS_CONSTANT && declaration.name == "CONFIG" {
+						append(builder,        "        ");
+						print_expression(builder, declaration.expression);
+					}
 				}
 			}
 		}
+		else {
+			log("Procedure % has an empty body when we're trying to pull out the command config", header.name);
+		}
 		
 		append(builder, "\n");
-		append(builder, "    },\n");
+		append(builder, "    });\n");
 	}
 	
 }

@@ -16,7 +16,8 @@ FileFinder :: struct {
 	input: InputField;
 }
 
-file_finder_open :: (using panel: *Panel, args: []string) {
+file_finder_open :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ prettyName = "Open file finder", keybinding = .["<space>f"] };
 	panel.activeDialog = .FILE_FINDER;
 	editorMode = .DIALOG;
 
@@ -46,7 +47,7 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	
 	fileFinder.input.onEditCallback = file_finder_input_field_on_edit;
 	fileFinder.input.userData = *fileFinder;
-}
+} @command_normal
 
 calculate_open_recency_bonus :: (document: DocumentHandle) -> s64 {
 	found, lastOpenTime := table_find(*fileOpenRecency, document);
@@ -142,7 +143,8 @@ file_finder_reset :: (panel: *Panel) {
 	panel.activeDialog = .NONE;
 }
 
-file_finder_select_file :: (panel: *Panel, args: []string) {
+file_finder_select_file :: (panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	finder := *panel.fileFinder;
 	entry := finder.fileList[finder.selectedEntry];
 	if entry.loaded {
@@ -156,23 +158,25 @@ file_finder_select_file :: (panel: *Panel, args: []string) {
 	}
 	file_finder_reset(panel);
 	editorMode = .NORMAL;
-}
+} @command_dialog
 
 file_finder_select_next :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	finder := *panel.fileFinder;
 
 	maxEntry := finder.fileList.count - 1;
 	finder.selectedEntry = clamp(finder.selectedEntry+1, 0, xx maxEntry);
 	finder.selectedEntryChanged = true;
-}
+} @command_dialog
 
 file_finder_select_previous :: (using panel: *Panel) {
+	CONFIG :: CommandConfig.{ };
 	finder := *panel.fileFinder;
 
 	maxEntry := finder.fileList.count - 1;
 	finder.selectedEntry = clamp(finder.selectedEntry-1, 0, xx maxEntry);
 	finder.selectedEntryChanged = true;
-}
+} @command_dialog
 
 #scope_file
 
