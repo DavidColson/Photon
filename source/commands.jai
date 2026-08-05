@@ -1358,8 +1358,10 @@ next_search_result :: (using panel: *Panel) {
 		matchLine := get_coordinate_from_offset(panel.document, panel.results[0].start).line;
 		startVisibleLine, pageSize := panel_calculate_visible_lines(panel);
 		if matchLine < startVisibleLine || matchLine >= (startVisibleLine+pageSize) {
-			panel_scroll_to_line(panel, matchLine - pageSize/2); 
+			panel_scroll_to_line(panel, matchLine - pageSize/2);
 		}
+
+		panel.lastScrolledCursorHead = panel.cursor.head;
 	}
 } @command_normal
 
@@ -1391,8 +1393,10 @@ previous_search_result :: (using panel: *Panel) {
 		matchLine := get_coordinate_from_offset(panel.document, panel.results[bestMatch].start).line;
 		startVisibleLine, pageSize := panel_calculate_visible_lines(panel);
 		if matchLine < startVisibleLine || matchLine >= (startVisibleLine+pageSize) {
-			panel_scroll_to_line(panel, matchLine - pageSize/2); 
+			panel_scroll_to_line(panel, matchLine - pageSize/2);
 		}
+
+		panel.lastScrolledCursorHead = panel.cursor.head;
 	}
 } @command_normal
 

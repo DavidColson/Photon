@@ -210,7 +210,7 @@
     "__pow" "__shl" "__shr" "__sub" "__tostring" "__unm"))
 
 ; Others
-(comment) @comment @spell
+(comment) @comment
 
 ((comment) @comment.documentation
   (#match? @comment.documentation "^[-][-][-]"))
