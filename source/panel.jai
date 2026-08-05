@@ -48,6 +48,8 @@ Panel :: struct {
 	results: [..]Document.Range;
 }
 
+fileOpenRecency : Table(DocumentHandle, Apollo_Time, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
+
 panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	// Save the scroll offset of the old document so we can come back to it
 	success, codeBox := find_box(ui_key("code"));
@@ -69,6 +71,8 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	panel.cursor.head = 0;
 	panel.cursor.anchor = 0;
 	panel.cursor.virtualColumn = 0;
+	
+	table_set(*fileOpenRecency, panel.document, current_time_consensus());
 
 	// Restore a saved scroll offset if one exists
 	location := table_find_pointer(*panel.documentLocations, panel.document);

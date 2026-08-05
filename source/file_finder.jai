@@ -22,11 +22,12 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 
 	// Collect open documents
 	for doc: openDocuments {
+		recencyBonus := calculate_edit_recency_bonus(document_get_disk_last_modtime(doc)) + calculate_open_recency_bonus(doc);
 		entry := array_add(*fileFinder.fileList);
 		entry.filePath = document_get_path(doc);
 		entry.loaded = true;
 		entry.handle = doc;
-		entry.sortKey = 10 + calculate_recency_bonus(document_get_disk_last_modtime(doc));
+		entry.sortKey = 10 + recencyBonus;
 		fileFinder.numToDisplay += 1;
 	}
 
@@ -36,7 +37,7 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 			entry.filePath = file.fullName;
 			entry.loaded = false;
 			entry.handle = .{locator = file.locator};
-			entry.sortKey = 10 + calculate_recency_bonus(file.diskLastModtime);
+			entry.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
 			fileFinder.numToDisplay += 1;
 		}
 	}
@@ -47,14 +48,24 @@ file_finder_open :: (using panel: *Panel, args: []string) {
 	fileFinder.input.userData = *fileFinder;
 }
 
-calculate_recency_bonus :: (modtime: Apollo_Time) -> s64 {
+calculate_open_recency_bonus :: (document: DocumentHandle) -> s64 {
+	found, lastOpenTime := table_find(*fileOpenRecency, document);
+	if found {
+		timeSinceLastOpen := to_float64_seconds(current_time_consensus() - lastOpenTime);
+		normalized := clamp(pow(0.9995, timeSinceLastOpen), 0.0, 1.0);
+		return cast(s64, normalized * 16000);
+	}
+	return 0;
+}
+
+calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
 	fileAge := to_float64_seconds(current_time_consensus() - modtime);
 	// this is an exponential decay that ensures all files get some kind of recency bonus
 	// and the recency bonus decays out to zero for every file, so there is no "window"
 	// The 0.9998 value is picked such that files you've touched over the last 4-5 hours have meaningful values
 	// to sort, so you can expect a sensible ordering for your last day of work
 	normalized := clamp(pow(0.9998, fileAge), 0.0, 1.0);
-	return cast(s64, normalized * 4000);
+	return cast(s64, normalized * 12000);
 }
 
 compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
@@ -64,6 +75,7 @@ compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
 }
 
 file_finder_input_field_on_edit :: (userData: *void, input: string) {
+	log("New Search");
 	finder: *FileFinder = cast(*FileFinder) userData;
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);
@@ -75,13 +87,14 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 		scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(filePath), input,,get_allocator(finder));
 		score := scoreFile + scorePath/5;
+		recencyBonus := calculate_edit_recency_bonus(document_get_disk_last_modtime(doc)) + calculate_open_recency_bonus(doc);
 		
 		if score > 0 {
 			entry := array_add(*finder.fileList);
 			entry.filePath = filePath;
 			entry.loaded = true;
 			entry.handle = doc;
-			entry.sortKey = score + calculate_recency_bonus(document_get_disk_last_modtime(doc));
+			entry.sortKey = score + recencyBonus;
 			entry.fuzzyMatchesFile = fuzzyMatchesFile;
 			entry.fuzzyMatchesPath = fuzzyMatchesPath;
 			finder.numToDisplay += 1;
@@ -97,10 +110,11 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 			
 			if score > 0 {
 				entry := array_add(*finder.fileList);
+				recencyBonus := calculate_edit_recency_bonus(file.diskLastModtime);
 				entry.filePath = file.fullName;
 				entry.loaded = false;
 				entry.handle = .{locator = file.locator};
-				entry.sortKey = score + calculate_recency_bonus(file.diskLastModtime);
+				entry.sortKey = score + calculate_edit_recency_bonus(file.diskLastModtime);
 				entry.fuzzyMatchesFile = fuzzyMatchesFile;
 				entry.fuzzyMatchesPath = fuzzyMatchesPath;
 				finder.numToDisplay += 1;
