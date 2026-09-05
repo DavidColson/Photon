@@ -17,7 +17,7 @@ CommandPicker :: struct {
 }
 
 command_picker_open :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ prettyName = "Open Command Picker", keybinding = .[":"] };
+	NORMAL :: CommandConfig.{ prettyName = "Open Command Picker", keybinding = .[":"] };
 	panel.activeDialog = .COMMAND_PICKER;
 	commandPicker.editorModeFilter = editorMode;
 	editorMode = .DIALOG;
@@ -35,7 +35,7 @@ command_picker_open :: (using panel: *Panel) {
 
 	commandPicker.input.onEditCallback = command_picker_input_field_on_edit;
 	commandPicker.input.userData = *commandPicker;
-} @command_normal
+} @command
 
 command_picker_input_field_on_edit :: (userData: *void, input: string) {
 	state: *CommandPicker = cast(*CommandPicker) userData;
@@ -85,7 +85,7 @@ command_picker_reset :: (panel: *Panel) {
 }
 
 command_picker_execute_command :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
 
 	cmd := state.filteredCommandList[state.selectedCommand].command; 
@@ -95,22 +95,22 @@ command_picker_execute_command :: (using panel: *Panel) {
 	editorMode = .NORMAL;
 
 	execute_command(panel, cmd, .[]); // @todo: collect args to pass in
-} @command_dialog
+} @command
 
 command_picker_select_next :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
 
 	maxItems := state.numToDisplay - 1;
 	state.selectedCommand = clamp(state.selectedCommand+1, 0, xx maxItems);
 	state.selectedCommandChange = true;
-} @command_dialog
+} @command
 
 command_picker_select_previous :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
 
 	maxItems := state.numToDisplay - 1;
 	state.selectedCommand = clamp(state.selectedCommand-1, 0, xx maxItems);
 	state.selectedCommandChange = true;
-} @command_dialog
+} @command

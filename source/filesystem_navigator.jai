@@ -63,23 +63,23 @@ filesystem_nav_input_field_on_edit :: (userData: *void, input: string) {
 }
 
 filesystem_nav_select_next :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *filesystemNav;
 	maxItems := state.numToDisplay - 1;
 	state.selectedItem = clamp(state.selectedItem+1, 0, xx maxItems);
 	state.selectedItemChanged = true;
-} @command_dialog
+} @command
 
 filesystem_nav_select_previous :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *filesystemNav;
 	maxItems := state.numToDisplay - 1;
 	state.selectedItem = clamp(state.selectedItem-1, 0, xx maxItems);
 	state.selectedItemChanged = true;
-} @command_dialog
+} @command
 
 filesystem_nav_action_item :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *filesystemNav;
 
 	item := state.itemList[state.selectedItem];
@@ -107,7 +107,7 @@ filesystem_nav_action_item :: (using panel: *Panel) {
 			filesystem_nav_reset(panel);
 		}
 	}
-} @command_dialog
+} @command
 
 filesystem_nav_delete_item :: (using panel: *Panel) {
 	state := *filesystemNav;
