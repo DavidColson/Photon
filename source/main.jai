@@ -2421,7 +2421,7 @@ Input :: #import "Input";
 #load "command_picker.jai";
 #load "filesystem_navigator.jai";
 #load "file_finder.jai";
-#load "keymap.jai";
+#load "command_system.jai";
 #load "commands.jai";
 #load "panel.jai";
 #load "ui.jai";
@@ -2432,7 +2432,6 @@ Input :: #import "Input";
 #load "project.jai";
 #load "project_search.jai";
 #load "language.jai";
-// #load "cvarexample.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";
