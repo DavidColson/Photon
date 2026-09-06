@@ -219,6 +219,29 @@ extend_to_line_start :: (using panel: *Panel) {
 	goto_line_start(panel);
 } @command
 
+// testing commands with args
+goto_line :: (using panel: *Panel, lineNumber: s64) {
+	NORMAL :: CommandConfig.{ prettyName = "Goto Line", keybinding = .["gg"] };
+	log("Goto line %", lineNumber);
+	cursor.head = get_line_start(document, lineNumber-1);
+	cursor.anchor = cursor.head;
+} @command
+
+set_title_string :: (using panel: *Panel, titleString: string) {
+	NORMAL :: CommandConfig.{ prettyName = "Set Title String" };
+	log("Set title string %", titleString);
+} @command
+
+print_boolean :: (using panel: *Panel, boolean: bool) {
+	NORMAL :: CommandConfig.{ prettyName = "Print Boolean" };
+	log("%", boolean);
+} @command
+
+command_with_many_args :: (using panel: *Panel, boolean: bool, titlestring: string, line: float) {
+	NORMAL :: CommandConfig.{ prettyName = "Command With Many Args" };
+	log("% - % - %", boolean, titlestring, line);
+} @command
+
 CharCategory :: enum {
 	LINE_ENDING;
 	WHITESPACE;
