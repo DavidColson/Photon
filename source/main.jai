@@ -916,7 +916,8 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 		{
 			push_parent(commandPickerContainer); defer pop_parent();
 
-			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+			fontMetrics := get_font_metrics(uiState.defaultFont,
+											xx uiState.defaultFontSize);
 			inputBox := box(ui_key("commandPickerInput"), .{
 				flags=.DRAW_BACKGROUND,
 				layout=.{
@@ -932,12 +933,13 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			inputBox.customDrawUdata = cast(*void, *panel.commandPicker.input);
 
 			elementHeight := cast(float, fontMetrics.characterHeight*2);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"), ui_key("commandListScroller"),
-								panel.layoutRect.h/2,
-								elementHeight,
-								panel.commandPicker.numToDisplay,
-								panel.commandPicker.selectedCommand,
-								panel.commandPicker.selectedCommandChange);
+			rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"),
+													  ui_key("commandListScroller"),
+													  panel.layoutRect.h/2,
+													  elementHeight,
+													  panel.commandPicker.numToDisplay,
+													  panel.commandPicker.selectedCommand,
+													  panel.commandPicker.selectedCommandChange);
 
 			if panel.commandPicker.selectedCommandChange then panel.commandPicker.selectedCommandChange = false;
 

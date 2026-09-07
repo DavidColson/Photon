@@ -813,8 +813,16 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 						indentLevel = max(indentLevel - tabSize, 0);
 					}
 					else {
-						// this is an absolute position, so set it and bail
-						indentLevel = open.col + 1;
+						// This is an absolute position, so set it and bail.
+						// the indent must be a visual column as well, so regrettably we must calculate that
+						openLineContent := get_line_content(handle, open.line);
+						openVisualCol := 0;
+						for openLineContent.text {
+							if it_index >= open.col then break;
+							if it == #char "\t" then openVisualCol += chars_to_tabstop(openVisualCol);
+							else openVisualCol += 1;
+						}
+						indentLevel = openVisualCol + 1;
 						isAbsoluteIndentation = true;
 					}
 				}

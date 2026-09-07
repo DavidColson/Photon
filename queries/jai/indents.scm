@@ -23,7 +23,6 @@
   (array_literal "[")
   (index_expression "[")
   (literal)
-  (assignment_parameters "(")
 ] @indent.begin
 
 ((modify_block) @indent.end)
@@ -57,6 +56,17 @@
   "]"
   "}"
 ] @indent.branch @indent.end
+
+; Aligned / hanging indents for parenthesised lists, the same way C and C++
+; handle argument_list and parameter_list. assignment_parameters covers call
+; argument lists, named_parameters covers procedure parameter declarations.
+; The indent engine picks aligned vs hanging based on the open delimiter.
+([
+  (assignment_parameters)
+  (named_parameters)
+] @indent.align
+  (#set! indent.open_delimiter "(")
+  (#set! indent.close_delimiter ")"))
 
 [
   (comment)
