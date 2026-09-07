@@ -1098,7 +1098,9 @@ delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory :
 		if atOffset > 0 {
 			startChar := get_char_at(handle, atOffset);
 			endChar := get_char_at(handle, atOffset+length-1);
-			assert(!(startChar == #char "\n" || endChar == #char "\r"));
+			splitsAtStart := startChar == #char "\n" && get_char_at(handle, atOffset-1) == #char "\r";
+			splitsAtEnd   := endChar   == #char "\r" && get_char_at(handle, atOffset+length) == #char "\n";
+			assert(!(splitsAtStart || splitsAtEnd));
 		}
 	}
 
