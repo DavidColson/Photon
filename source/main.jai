@@ -1575,6 +1575,18 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	});
 }
 
+highlight_color_at :: (highlights: [] Highlight, byteOffset: s64, currentIndex: *s64) -> Vector4 {
+	while currentIndex.* < highlights.count && byteOffset >= highlights[currentIndex.*].end {
+		currentIndex.* += 1;
+	}
+	if currentIndex.* < highlights.count
+	&& byteOffset >= highlights[currentIndex.*].start
+	&& byteOffset <  highlights[currentIndex.*].end {
+		return style.codeColors[highlights[currentIndex.*].type];
+	}
+	return style.codeDefault;
+}
+
 custom_draw_search_result :: (box: *UIBox, udata: *void) {
 	searchResult:*Project.SearchResult = cast(*Project.SearchResult)udata;
 
@@ -1615,62 +1627,62 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 	fileExt := path_extension(searchResult.filePath);
 	success, language := get_language(fileExt);
 	if success {
-		// make a parser and parse the line of code
-		parser := ts_parser_new();
-		defer ts_parser_delete(parser);
-		ts_parser_set_language(parser, language.treesitterLang);
+		lineStart := searchResult.lineOffset;
+		lineEnd   := searchResult.lineOffset + searchResult.matchLine.count;
 
-		tree := ts_parser_parse_string(parser, null, line.data, xx line.count);
-		defer ts_tree_delete(tree);
-
-		query_start(*language.highlightsQuery, ts_tree_root_node(tree), 0, line.count);
-
-		// @TODO: reuse this code with the usual code drawing stuff
-		// move the whole block here to the languages file where it can be a polymorph
 		highlights: [..]Highlight;
-		highlights.allocator = temp;
+		haveHighlights := false;
 
-		// collect all the highlights for the region of code we must render
-		while true {
-			result, capture := query_next(*language.highlightsQuery, line,,temp);
-			if result == false then break;
-
-			startByte := ts_node_start_byte(capture.node);
-			endByte := ts_node_end_byte(capture.node);
-			type := to_string(ts_node_grammar_type(capture.node));
-
-			if type == "ERROR" then continue;
-
-			success, highlightType := table_find(*language.captureToHighlight, capture.index);
-
-			if highlights.count > 0 {
-				if highlights[highlights.count-1].start == startByte {
-					// override the previous range if there's a newer (better) one
-					highlights[highlights.count-1] = .{startByte, endByte, highlightType};
-					continue;
+		if searchResult.loaded {
+			// The file is open as a document, reuse its syntax tree
+			found, handle := document_get_by_path(searchResult.filePath);
+			if found {
+				tsTree := document_get_ts_tree(handle);
+				if tsTree {
+					highlights = compute_highlights(language, ts_tree_root_node(tsTree), lineStart, lineEnd, handle);
+					haveHighlights = true;
 				}
 			}
-			array_add(*highlights, .{startByte, endByte, highlightType});
+		}
+		else {
+			// for project files we'll trigger a syntax parse and cache the result
+			file := bucket_array_find_pointer(*project.projectFiles, searchResult.fileLocator);
+			if file {
+				lock(*file.lock);
+				defer unlock(*file.lock);
+
+				if file.tsTree == null && file.content.count > 0 {
+					parser := ts_parser_new();
+					defer ts_parser_delete(parser);
+					ts_parser_set_language(parser, language.treesitterLang);
+					file.tsTree = ts_parser_parse_string(parser, null, file.content.data, xx file.content.count);
+				}
+
+				if file.tsTree {
+					highlights = compute_highlights(language, ts_tree_root_node(file.tsTree), lineStart, lineEnd, file.content);
+					haveHighlights = true;
+				}
+			}
 		}
 
-		currentHighlightIndex := 0;
-		for box.textRun.instances {
-			byteOffset:u32 = xx box.textRun.byteOffsets[it_index];
+		if haveHighlights {
+			// The displayed line is left-trimmed, so glyph offsets are relative to the
+			// trimmed line, convert to absolute file offsets to match `highlights`.
+			base := searchResult.lineOffset + removedByTrim;
+			currentHighlightIndex : s64 = 0;
+			for box.textRun.instances {
+				byteOffset := base + box.textRun.byteOffsets[it_index];
+				color := highlight_color_at(highlights, byteOffset, *currentHighlightIndex);
 
-			while currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
-				currentHighlightIndex += 1;
+				instance := it;
+				instance.dstRect.x = round(xPos + instance.dstRect.x);
+				instance.dstRect.y = round(yPos + instance.dstRect.y);
+				instance.color = color;
+				submit_instance(instance);
 			}
-
-			color := style.codeDefault;
-			if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].start && byteOffset < highlights[currentHighlightIndex].end {
-				color = style.codeColors[highlights[currentHighlightIndex].type];
-			}
-
-			instance := it;
-			instance.dstRect.x = round(xPos + instance.dstRect.x);
-			instance.dstRect.y = round(yPos + instance.dstRect.y);
-			instance.color = color;
-			submit_instance(instance);
+		}
+		else {
+			draw_text_run(box.textRun, xPos, yPos, box.palette.text);
 		}
 	}
 	else {
@@ -1757,75 +1769,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 		treeNode := ts_tree_root_node(tsTree);
 
-		query_start(*language.highlightsQuery, treeNode, rangeStartByte, rangeEndByte);
-
-		highlights: [..]Highlight;
-		highlights.allocator = temp;
-
-		// Captures can overlap, so we first just collect the raw highlight ranges
-		// that came from treesitter, then we'll sort them such that larger spawns (outer)
-		// come first and when we actually apply the highlights the inner most is always 
-		// the one that gets used to actually do the colouring.
-		RawHighlight :: struct {
-			start: u32;
-			end: u32;
-			type: HighlightType;
-			order: s64; // capture order, used to keep the last of an identical range
-		}
-		rawHighlights: [..]RawHighlight;
-		rawHighlights.allocator = temp;
-		while true {
-			result, capture := query_next(*language.highlightsQuery, panel.document,,temp);
-			if result == false then break;
-
-			startByte := ts_node_start_byte(capture.node);
-			endByte := ts_node_end_byte(capture.node);
-			type := to_string(ts_node_grammar_type(capture.node));
-
-			if type == "ERROR" then continue;
-
-			success, highlightType := table_find(*language.captureToHighlight, capture.index);
-
-			array_add(*rawHighlights, .{xx startByte, xx endByte, highlightType, rawHighlights.count});
-		}
-
-		compare_raw_highlights :: (a: RawHighlight, b: RawHighlight) -> s64 {
-			if a.start != b.start then return cast(s64) a.start - cast(s64) b.start;
-			if a.end   != b.end   then return cast(s64) b.end   - cast(s64) a.end;
-			return a.order - b.order;
-		}
-		quick_sort(rawHighlights, compare_raw_highlights);
-
-		// This will flatten our raw captures into an actually non-overlapping list we can render
-		add_span :: (out: *[..]Highlight, pos: *u32, upTo: u32, type: HighlightType) {
-			if pos.* < upTo {
-				array_add(out, .{pos.*, upTo, type});
-				pos.* = upTo;
-			}
-		}
-		ActiveSpan :: struct { end: u32; type: HighlightType; }
-		activeStack: [..]ActiveSpan;
-		activeStack.allocator = temp;
-		pos: u32 = ifx rawHighlights.count > 0 then rawHighlights[0].start else 0;
-		for raw: rawHighlights {
-			// close any spans that finish before this capture starts
-			while activeStack.count > 0 && activeStack[activeStack.count-1].end <= raw.start {
-				top := activeStack[activeStack.count-1];
-				add_span(*highlights, *pos, top.end, top.type);
-				pop(*activeStack);
-			}
-			// colour the gap up to this capture with the current innermost span
-			if activeStack.count > 0 {
-				add_span(*highlights, *pos, raw.start, activeStack[activeStack.count-1].type);
-			}
-			if pos < raw.start then pos = raw.start; // skip past any uncaptured gap
-			array_add(*activeStack, .{raw.end, raw.type});
-		}
-		while activeStack.count > 0 {
-			top := activeStack[activeStack.count-1];
-			add_span(*highlights, *pos, top.end, top.type);
-			pop(*activeStack);
-		}
+		highlights := compute_highlights(language, treeNode, rangeStartByte, rangeEndByte, panel.document);
 
 		if queuePrintHighlightDebug {
 			get_text_range :: (doc: DocumentHandle, start: s64, end: s64) -> string {
@@ -1845,20 +1789,12 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 		x :float = textAreaX;
 		y :float = textAreaY;
-		currentHighlightIndex := 0;
+		currentHighlightIndex : s64 = 0;
 		for line: linesOnScreen {
 			run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
 			for run.instances {
 				byteOffset := line.startByteOffset + run.byteOffsets[it_index];
-
-				while currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].end {
-					currentHighlightIndex += 1;
-				}
-
-				color := style.codeDefault;
-				if currentHighlightIndex < highlights.count && byteOffset >= highlights[currentHighlightIndex].start && byteOffset < highlights[currentHighlightIndex].end {
-					color = style.codeColors[highlights[currentHighlightIndex].type];
-				}
+				color := highlight_color_at(highlights, byteOffset, *currentHighlightIndex);
 
 				instance := it;
 				instance.dstRect.x = round(x + instance.dstRect.x);

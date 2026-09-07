@@ -20,6 +20,7 @@ Project :: struct {
 		diskLastModtime: Apollo_Time;
 		lineEndingMode: Document.LineEndingMode;
 		lineStarts: []s64;
+		tsTree: *TSTree;
 	}
 	projectFiles: Bucket_Array(File, 128);
 	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
@@ -63,6 +64,7 @@ project_allocator :: inline () -> Allocator {
 free_file :: (file: *Project.File) {
 	free(file.content);
 	array_reset(*file.lineStarts);
+	if file.tsTree { ts_tree_delete(file.tsTree); file.tsTree = null; }
 }
 
 ProjectFileSections :: enum {

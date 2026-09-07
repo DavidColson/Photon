@@ -714,7 +714,18 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 	}
 
 	calculate_longest_line(doc);
-	document_reparse_ts_tree(doc.handle);
+
+	lock(*file.lock);
+	cachedTree := file.tsTree;
+	file.tsTree = null;
+	unlock(*file.lock);
+
+	if cachedTree {
+		doc.tsTree = cachedTree;
+	}
+	else {
+		document_reparse_ts_tree(doc.handle);
+	}
 
 	// unload the file from the project
 	// @todo: if you ever support closing documents, you must reload it back into the project

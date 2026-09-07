@@ -1097,6 +1097,83 @@ query_next :: (query: *Language.Query, text: $T) -> bool, capture: TSQueryCaptur
 	return false, .{}, 0, .{};
 }
 
+compute_highlights :: (language: *Language, root: TSNode, startByte: s64, endByte: s64, text: $T, allocator := temp) -> [..]Highlight
+#modify {
+	return T == DocumentHandle || T == string;
+} {
+	highlights: [..]Highlight;
+	highlights.allocator = allocator;
+
+	query_start(*language.highlightsQuery, root, startByte, endByte);
+
+	// Captures can overlap, so we first just collect the raw highlight ranges
+	// that came from treesitter, then we'll sort them such that larger spans (outer)
+	// come first and when we actually apply the highlights the inner most is always
+	// the one that gets used to actually do the colouring.
+	RawHighlight :: struct {
+		start: u32;
+		end: u32;
+		type: HighlightType;
+		order: s64; // capture order, used to keep the last of an identical range
+	}
+	rawHighlights: [..]RawHighlight;
+	rawHighlights.allocator = temp;
+	while true {
+		result, capture := query_next(*language.highlightsQuery, text,,temp);
+		if result == false then break;
+
+		startByte := ts_node_start_byte(capture.node);
+		endByte := ts_node_end_byte(capture.node);
+		type := to_string(ts_node_grammar_type(capture.node));
+
+		if type == "ERROR" then continue;
+
+		success, highlightType := table_find(*language.captureToHighlight, capture.index);
+
+		array_add(*rawHighlights, .{xx startByte, xx endByte, highlightType, rawHighlights.count});
+	}
+
+	compare_raw_highlights :: (a: RawHighlight, b: RawHighlight) -> s64 {
+		if a.start != b.start then return cast(s64) a.start - cast(s64) b.start;
+		if a.end   != b.end   then return cast(s64) b.end   - cast(s64) a.end;
+		return a.order - b.order;
+	}
+	quick_sort(rawHighlights, compare_raw_highlights);
+
+	// This will flatten our raw captures into an actually non-overlapping list we can render
+	add_span :: (out: *[..]Highlight, pos: *u32, upTo: u32, type: HighlightType) {
+		if pos.* < upTo {
+			array_add(out, .{pos.*, upTo, type});
+			pos.* = upTo;
+		}
+	}
+	ActiveSpan :: struct { end: u32; type: HighlightType; }
+	activeStack: [..]ActiveSpan;
+	activeStack.allocator = temp;
+	pos: u32 = ifx rawHighlights.count > 0 then rawHighlights[0].start else 0;
+	for raw: rawHighlights {
+		// close any spans that finish before this capture starts
+		while activeStack.count > 0 && activeStack[activeStack.count-1].end <= raw.start {
+			top := activeStack[activeStack.count-1];
+			add_span(*highlights, *pos, top.end, top.type);
+			pop(*activeStack);
+		}
+		// colour the gap up to this capture with the current innermost span
+		if activeStack.count > 0 {
+			add_span(*highlights, *pos, raw.start, activeStack[activeStack.count-1].type);
+		}
+		if pos < raw.start then pos = raw.start; // skip past any uncaptured gap
+		array_add(*activeStack, .{raw.end, raw.type});
+	}
+	while activeStack.count > 0 {
+		top := activeStack[activeStack.count-1];
+		add_span(*highlights, *pos, top.end, top.type);
+		pop(*activeStack);
+	}
+
+	return highlights;
+}
+
 // allocates memory for the returned string
 get_node_content :: (node: TSNode, doc: *Document) -> string {
 	startByte := ts_node_start_byte(node);
