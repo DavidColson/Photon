@@ -154,6 +154,11 @@ DocumentSlot :: struct {
 	// we will update this in async callbacks on the main thread
 	// so it's fine for now
 	state: State;
+	
+	// Used to ensure we don't reload the document while a load is in progress
+	// happens cause windows gives us loads of file change events for some reason
+	loadInProgress: bool;
+	loadRequested: bool;
 }
 
 
@@ -576,19 +581,36 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 			push_notification("Document Opened");
 		}
 		else if result == .FAILED_TO_READ_FILE_DATA {
-			push_notification("File read failed");			
+			push_notification("File read failed");
 		}
 		else if result == .FAILED_TO_OPEN_FILE_FOR_WRITE {
-			push_notification("File open failed");			
+			push_notification("File open failed");
+		}
+
+		completedSlot := bucket_array_find_pointer(*openDocuments.documents, taskData.handle.locator);
+		completedSlot.loadInProgress = false;
+		if completedSlot.loadRequested {
+			completedSlot.loadRequested = false;
+			handle := taskData.handle;
+			wasAsync := taskData.async;
+			free(taskData);
+			document_load_from_disk(handle, wasAsync);
+			return;
 		}
 
 		free(taskData);
 	}
 
+	slot := bucket_array_find_pointer(*openDocuments.documents, docHandle.locator);
+
+	if async && slot.loadInProgress {
+		slot.loadRequested = true;
+		return;
+	}
+
 	data := New(TaskData); // freed by load_from_disk_complete
 	data.handle = docHandle;
 	data.async = async;
-	slot := bucket_array_find_pointer(*openDocuments.documents, docHandle.locator);
 	// we'll load into the document that's _not_ valid currently
 	oldSlot: *Document;
 	newSlot: *Document;
@@ -615,6 +637,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	
 	data.result = .IN_PROGRESS;
 	if async {
+		slot.loadInProgress = true;
 		push_task(*asyncWorker, data, load_from_disk_task, load_from_disk_complete);
 	}
 	else {
@@ -955,6 +978,13 @@ document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
 		if modtime != doc.diskLastModtime {
 			// reload file
 			if !document_is_unsaved(handle) {
+				// A single external save makes Windows emit a burst of change events (you can
+				// see the duplicates, even with differing drive-letter case, in the log). Record
+				// the new modtime now, before the reload starts, so the remaining events in the
+				// burst see an unchanged modtime and skip: the whole burst collapses into one
+				// reload. The async worker also writes diskLastModtime once it reads the file,
+				// to the same value, so this stays consistent after the slot flips.
+				doc.diskLastModtime = modtime;
 				document_load_from_disk(doc.handle);
 			}
 			else {
