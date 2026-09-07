@@ -76,7 +76,6 @@ compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
 }
 
 file_finder_input_field_on_edit :: (userData: *void, input: string) {
-	log("New Search");
 	finder: *FileFinder = cast(*FileFinder) userData;
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);

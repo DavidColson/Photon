@@ -1756,14 +1756,24 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 		rangeEndByte := linesOnScreen[linesOnScreen.count-1].endByteOffset;
 
 		treeNode := ts_tree_root_node(tsTree);
-		treeNode = ts_node_descendant_for_byte_range(treeNode, xx rangeStartByte, xx rangeEndByte);
 
 		query_start(*language.highlightsQuery, treeNode, rangeStartByte, rangeEndByte);
 
 		highlights: [..]Highlight;
 		highlights.allocator = temp;
 
-		// collect all the highlights for the region of code we must render
+		// Captures can overlap, so we first just collect the raw highlight ranges
+		// that came from treesitter, then we'll sort them such that larger spawns (outer)
+		// come first and when we actually apply the highlights the inner most is always 
+		// the one that gets used to actually do the colouring.
+		RawHighlight :: struct {
+			start: u32;
+			end: u32;
+			type: HighlightType;
+			order: s64; // capture order, used to keep the last of an identical range
+		}
+		rawHighlights: [..]RawHighlight;
+		rawHighlights.allocator = temp;
 		while true {
 			result, capture := query_next(*language.highlightsQuery, panel.document,,temp);
 			if result == false then break;
@@ -1776,14 +1786,45 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 			success, highlightType := table_find(*language.captureToHighlight, capture.index);
 
-			if highlights.count > 0 {
-				if highlights[highlights.count-1].start == startByte {
-					// override the previous range if there's a newer (better) one
-					highlights[highlights.count-1] = .{startByte, endByte, highlightType};
-					continue;
-				}
+			array_add(*rawHighlights, .{xx startByte, xx endByte, highlightType, rawHighlights.count});
+		}
+
+		compare_raw_highlights :: (a: RawHighlight, b: RawHighlight) -> s64 {
+			if a.start != b.start then return cast(s64) a.start - cast(s64) b.start;
+			if a.end   != b.end   then return cast(s64) b.end   - cast(s64) a.end;
+			return a.order - b.order;
+		}
+		quick_sort(rawHighlights, compare_raw_highlights);
+
+		// This will flatten our raw captures into an actually non-overlapping list we can render
+		add_span :: (out: *[..]Highlight, pos: *u32, upTo: u32, type: HighlightType) {
+			if pos.* < upTo {
+				array_add(out, .{pos.*, upTo, type});
+				pos.* = upTo;
 			}
-			array_add(*highlights, .{startByte, endByte, highlightType});
+		}
+		ActiveSpan :: struct { end: u32; type: HighlightType; }
+		activeStack: [..]ActiveSpan;
+		activeStack.allocator = temp;
+		pos: u32 = ifx rawHighlights.count > 0 then rawHighlights[0].start else 0;
+		for raw: rawHighlights {
+			// close any spans that finish before this capture starts
+			while activeStack.count > 0 && activeStack[activeStack.count-1].end <= raw.start {
+				top := activeStack[activeStack.count-1];
+				add_span(*highlights, *pos, top.end, top.type);
+				pop(*activeStack);
+			}
+			// colour the gap up to this capture with the current innermost span
+			if activeStack.count > 0 {
+				add_span(*highlights, *pos, raw.start, activeStack[activeStack.count-1].type);
+			}
+			if pos < raw.start then pos = raw.start; // skip past any uncaptured gap
+			array_add(*activeStack, .{raw.end, raw.type});
+		}
+		while activeStack.count > 0 {
+			top := activeStack[activeStack.count-1];
+			add_span(*highlights, *pos, top.end, top.type);
+			pop(*activeStack);
 		}
 
 		if queuePrintHighlightDebug {
