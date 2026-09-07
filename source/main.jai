@@ -139,6 +139,7 @@ tabSize :: 4;
 lineNumbers := true;
 
 Arguments :: struct {
+	project: string;
 	fetch_grammars: bool;
 	build_grammars: bool;
 }
@@ -223,8 +224,10 @@ main :: () {
 	// Have to be careful though to keep them separate and touching different things
 	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
 	// and a "project async worker" which handles filesystem scanning and such things
-	success, project = project_parser("photon.photon-project");
-	project_begin_load();
+	if isSet.project {
+		success, project = project_parser(args.project);
+		project_begin_load();
+	}
 
 	platform_set_backup_timer(window, do_backup_callback);
 
@@ -2421,7 +2424,7 @@ Input :: #import "Input";
 #load "command_picker.jai";
 #load "filesystem_navigator.jai";
 #load "file_finder.jai";
-#load "keymap.jai";
+#load "command_system.jai";
 #load "commands.jai";
 #load "panel.jai";
 #load "ui.jai";

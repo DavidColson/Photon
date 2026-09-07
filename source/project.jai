@@ -25,11 +25,11 @@ Project :: struct {
 	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
 
 	ProjectLoadProgress :: enum {
+		COMPLETE;
 		WAITING_FOR_FILE_SCAN;
 		FILE_SCAN_IN_PROGRESS;
 		WAITING_FOR_FILE_LOADING;
 		FILE_LOADING_IN_PROGRESS;
-		COMPLETE;
 	}
 	loadProgress: ProjectLoadProgress;
 	pendingFileLoads: s32;
