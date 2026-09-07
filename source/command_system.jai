@@ -207,12 +207,18 @@ execute_command :: (panel: *Panel, command: Command, args: []string) {
 	for command.args {
 		if it_index < args.count && args[it_index] {
 			size := it.type.runtime_size;
-			argsOut[it_index] = talloc(size);
-			success := set_value_from_string(Any.{it.type, argsOut[it_index]}, args[it_index]);
-			if !success {
-				log_error("In command %, failed to convert argument % \"%\" to type %",
-					command.name, it_index, it.name, it.type.type);
-				return;
+			// we do this because our strings come from UI, they have no quotes around them, so set_value_from_string fails to parse them
+			if it.type.type == .STRING {
+				argsOut[it_index] = *args[it_index];
+			}
+			else {
+				argsOut[it_index] = talloc(size);
+				success := set_value_from_string(Any.{it.type, argsOut[it_index]}, args[it_index]);
+				if !success {
+					log_error("In command %, failed to convert argument % \"%\" to type %",
+						command.name, it_index, it.name, it.type.type);
+					return;
+				}
 			}
 		} else {
 			log_error("In command %, no value provided for argument % \"%\"",
@@ -370,15 +376,24 @@ input_handler :: (event: Input.Event) {
 			}
 			
 			while keyMap.pendingCount > 0 {
+				anchor := 0;
 				if node.cmd.flags & .EXTEND {
-					anchor := focusedPanel.cursor.anchor;
-					node.cmd.wrapper(*focusedPanel, keyArgs);
-					focusedPanel.cursor.anchor = anchor;
+					anchor = focusedPanel.cursor.anchor;
+				}
+				
+				if keyArgs.count < node.cmd.args.count {
+					// invoke the command palette if the command wants more arguments
+					command_picker_open(*focusedPanel);
+					focusedPanel.commandPicker.pendingCommand = node.cmd;
 				}
 				else {
 					node.cmd.wrapper(*focusedPanel, keyArgs);
 				}
-
+				
+				if node.cmd.flags & .EXTEND {
+					focusedPanel.cursor.anchor = anchor;
+				}
+				
 				// register selection has some special behaviour as it's intended to be paired with 
 				// one other action
 				if node.cmd.name != "select_register" {

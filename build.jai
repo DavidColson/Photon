@@ -138,9 +138,7 @@ Build :: ()
 }
 
 compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
-	normalModeCommands : [..]*Code_Procedure_Header;
-	insertModeCommands : [..]*Code_Procedure_Header;
-	dialogModeCommands : [..]*Code_Procedure_Header;
+	commands : [..]*Code_Procedure_Header;
 	options: [..]*Code_Declaration;
 	commandsGenerated := false;
 	
@@ -154,15 +152,10 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 			typechecked := cast(*Message_Typechecked)message;
 			for typechecked.procedure_bodies {
 				expr := it.expression;
+				
 				for expr.header.notes {
-					if it.text == "command_normal" {
-						array_add(*normalModeCommands, expr.header);
-					}
-					if it.text == "command_insert" {
-						array_add(*insertModeCommands, expr.header);
-					}
-					if it.text == "command_dialog" {
-						array_add(*dialogModeCommands, expr.header);
+					if it.text == "command" {
+						array_add(*commands, expr.header);
 					}
 				}
 			}
@@ -198,9 +191,8 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 					}
 					
 					// this will be static data
-					generate_command_data(*builder, *normalModeCommands, "normalModeCommands");
-					generate_command_data(*builder, *insertModeCommands, "insertModeCommands");
-					generate_command_data(*builder, *dialogModeCommands, "dialogModeCommands");
+					// TODO: one call to generate command data with the whole list of commands
+					generate_command_data(*builder, *commands);
 					
 					append(*builder, "allCommands[0] = normalModeCommands;\n");
 					append(*builder, "allCommands[1] = insertModeCommands;\n");
@@ -219,7 +211,7 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 	}
 }
 
-generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedure_Header, arrayToAddTo: string)  {
+generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedure_Header)  {
 	// TODO: this breaks the syntax tree somehow
 	// append(*builder, "    // Cvars\n");
 	
@@ -232,63 +224,14 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 	}
 	
 	for header: (.*)commands {
-		append(builder, tprint("    array_add(*%, Command.{\n", arrayToAddTo));
-		append(builder, tprint("       \"%\",\n", header.name));
 		
-		// generate the list of args
-		append(builder, "        .[\n");
-		for arg, argIndex: header.arguments {
-			if argIndex == 0 then continue;
-			append(builder, "            ");
-			append(builder, tprint(".{\"%\", type_info(", arg.name));
-			arg_type := arg.type_inst;
-			print_expression(builder, arg_type);
-			append(builder, ")},\n");
+		EditorMode :: enum {
+			NORMAL;
+			INSERT;
+			DIALOG;
+			COUNT;
 		}
-		append(builder, "        ],\n");
-		
-		// generate the wrapper function
-		append(builder, "        (panel: *Panel, args: []*void) {\n");
-		append(builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
-		
-		append(builder, tprint("            %(\n", header.name));
-		for arg, argIndex: header.arguments {
-			append(builder, "                ");
-			
-			argTypeInfo := arg.type_inst.result;
-			
-			if argIndex == 0 {
-				// We want to verify the first argument of all commands is actually a panel
-				firstArgIsPanel := false;
-				if argTypeInfo.type == .POINTER {
-					pointer := cast(*Type_Info_Pointer)argTypeInfo;
-					if pointer.pointer_to.type == .STRUCT {
-						structInfo := cast(*Type_Info_Struct) pointer.pointer_to;
-						if structInfo.name == "Panel" {
-							firstArgIsPanel = true;
-						}
-					}
-				}
-				if !firstArgIsPanel then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The first argument of a command must be of type \"*Panel\"");
-				append(builder, "panel,\n");
-			}
-			else {
-				append(builder,    "cast(*");
-				
-				if argTypeInfo.type != .INTEGER &&
-				argTypeInfo.type != .FLOAT &&
-				argTypeInfo.type != .BOOL &&
-				argTypeInfo.type != .ENUM &&
-				argTypeInfo.type != .STRING {
-					compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "Unsupported argument type in command");
-				}
-				
-				print_expression(builder, arg.type_inst);
-				append(builder, tprint(", args[%]).*,\n", argIndex-1));
-			}
-		}
-		append(builder, "            );\n");
-		append(builder, "        },\n");
+		configs : [EditorMode.COUNT]*Code_Node;
 		
 		// Pull out and place the config structure
 		body := header.body_or_null;
@@ -297,19 +240,94 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 				// we expect some of these to be declarations
 				if statement.kind == .DECLARATION {
 					declaration := cast(*Code_Declaration, statement);
-					if declaration.flags & .IS_CONSTANT && declaration.name == "CONFIG" {
-						append(builder,        "        ");
-						print_expression(builder, declaration.expression);
+					if declaration.flags & .IS_CONSTANT {
+						if declaration.name == {
+						case "NORMAL";  configs[EditorMode.NORMAL] = declaration.expression;
+						case "INSERT";  configs[EditorMode.INSERT] = declaration.expression;
+						case "DIALOG";  configs[EditorMode.DIALOG] = declaration.expression;
+						}
+						// append(builder,        "        ");
+						// print_expression(builder, declaration.expression);
 					}
 				}
 			}
 		}
 		else {
-			log("Procedure % has an empty body when we're trying to pull out the command config", header.name);
+			compiler_report(header.enclosing_load.fully_pathed_filename, header.l0, header.c0, tprint("Procedure % has an empty body when we're trying to pull out the command config", header.name));
 		}
 		
-		append(builder, "\n");
-		append(builder, "    });\n");
+		for configs {
+			if it == null continue;
+			
+			if it_index == {
+			case 0;  append(builder, "    array_add(*normalModeCommands, Command.{\n");
+			case 1;  append(builder, "    array_add(*insertModeCommands, Command.{\n");
+			case 2;  append(builder, "    array_add(*dialogModeCommands, Command.{\n");
+			}
+			append(builder, tprint("       \"%\",\n", header.name));
+			
+			// generate the list of args
+			append(builder, "        .[\n");
+			for arg, argIndex: header.arguments {
+				if argIndex == 0 then continue;
+				append(builder, "            ");
+				append(builder, tprint(".{\"%\", type_info(", arg.name));
+				arg_type := arg.type_inst;
+				print_expression(builder, arg_type);
+				append(builder, ")},\n");
+			}
+			append(builder, "        ],\n");
+			
+			// generate the wrapper function
+			append(builder, "        (panel: *Panel, args: []*void) {\n");
+			append(builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
+			
+			append(builder, tprint("            %(\n", header.name));
+			for arg, argIndex: header.arguments {
+				append(builder, "                ");
+				
+				argTypeInfo := arg.type_inst.result;
+				
+				if argIndex == 0 {
+					// We want to verify the first argument of all commands is actually a panel
+					firstArgIsPanel := false;
+					if argTypeInfo.type == .POINTER {
+						pointer := cast(*Type_Info_Pointer)argTypeInfo;
+						if pointer.pointer_to.type == .STRUCT {
+							structInfo := cast(*Type_Info_Struct) pointer.pointer_to;
+							if structInfo.name == "Panel" {
+								firstArgIsPanel = true;
+							}
+						}
+					}
+					if !firstArgIsPanel then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The first argument of a command must be of type \"*Panel\"");
+					append(builder, "panel,\n");
+				}
+				else {
+					append(builder,    "cast(*");
+					
+					if argTypeInfo.type != .INTEGER &&
+					argTypeInfo.type != .FLOAT &&
+					argTypeInfo.type != .BOOL &&
+					argTypeInfo.type != .ENUM &&
+					argTypeInfo.type != .STRING {
+						compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "Unsupported argument type in command");
+					}
+					
+					print_expression(builder, arg.type_inst);
+					append(builder, tprint(", args[%]).*,\n", argIndex-1));
+				}
+			}
+			append(builder, "            );\n");
+			append(builder, "        },\n");
+			
+			// print the config struct data here
+			append(builder,        "        ");
+			print_expression(builder, it);
+			
+			append(builder, "\n");
+			append(builder, "    });\n");
+		}
 	}
 	
 }

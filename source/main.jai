@@ -139,7 +139,6 @@ tabSize :: 4;
 lineNumbers := true;
 
 Arguments :: struct {
-	project: string;
 	fetch_grammars: bool;
 	build_grammars: bool;
 }
@@ -224,10 +223,8 @@ main :: () {
 	// Have to be careful though to keep them separate and touching different things
 	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
 	// and a "project async worker" which handles filesystem scanning and such things
-	if isSet.project {
-		success, project = project_parser(args.project);
-		project_begin_load();
-	}
+	success, project = project_parser("photon.photon-project");
+	project_begin_load();
 
 	platform_set_backup_timer(window, do_backup_callback);
 
@@ -916,82 +913,130 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 		{
 			push_parent(commandPickerContainer); defer pop_parent();
 
-			fontMetrics := get_font_metrics(uiState.defaultFont,
-											xx uiState.defaultFontSize);
-			inputBox := box(ui_key("commandPickerInput"), .{
+			// Few things need to happen here
+			// If in pending command mode, you must render a block for the command in the input box
+			// additionally when in pending command mode, draw a block for every arg in the arg list
+			
+			// for now, don't draw the suggestions box when in pending command mode
+
+			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+			inputBox := box(ui_key_nil, .{
 				flags=.DRAW_BACKGROUND,
 				layout=.{
 					width=grow(),
 					height=fixed(fontMetrics.lineSpacing+em(0.8)),
+					childLayoutAxis=.X,
+					padding=padding_all(em(0.4)),
+					childGap=em(0.2)
 				},
 				cornerRadius=corner_rad_all(em(0.2)),
 				palette=.{ background=style.backgroundLighter },
 				textPadding=em(0.5)
 			});
-
-			inputBox.customDrawFunction = custom_draw_input_field;
-			inputBox.customDrawUdata = cast(*void, *panel.commandPicker.input);
-
-			elementHeight := cast(float, fontMetrics.characterHeight*2);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"),
-													  ui_key("commandListScroller"),
-													  panel.layoutRect.h/2,
-													  elementHeight,
-													  panel.commandPicker.numToDisplay,
-													  panel.commandPicker.selectedCommand,
-													  panel.commandPicker.selectedCommandChange);
-
-			if panel.commandPicker.selectedCommandChange then panel.commandPicker.selectedCommandChange = false;
-
-			for rangeStart..rangeEnd {
-				commandEntry := panel.commandPicker.filteredCommandList[it];
-				selected := it == panel.commandPicker.selectedCommand;
-
-				if commandEntry.sortKey == 0 continue;
-
-				entryBox := box(ui_key("commandEntry##%", it), .{
-					flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-					layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
-					palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
-				});
-				signal := signal_from_box(entryBox);
-				if signal.pressed {
-					panel.commandPicker.selectedCommand = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, "command_picker_execute_command"};
-					pendingDeferredCommands += 1;
-				}
-				{
-					push_parent(entryBox); defer pop_parent();
-
-					// find the normal mode mapping
-					// @todo: should we show bindings for all modes?
-					mappingStr := "";
-					for commandEntry.command.keybinding {
-						// TODO
-						// if it.mode == .NORMAL then mappingStr = it;
-						mappingStr = it;
-					}
-
-					commandLabel := box(ui_key("%", commandEntry.command.prettyName), .{
-						flags=.DRAW_TEXT_HIGHLIGHTS,
+			
+			// draw existing path sections
+			{
+				push_parent(inputBox); defer pop_parent();
+				
+				if panel.commandPicker.pendingCommand {
+					pendingCommandLabel := box(ui_key("%", panel.commandPicker.pendingCommand.prettyName), .{
+						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=text_content() },
 					});
-					commandLabel.textHighlights = commandEntry.fuzzyMatches;
-
-					box(ui_key_nil, .{ layout=.{width=grow()}});
-
-					if mappingStr {
-						box(ui_key("%##%", mappingStr, it), .{
+					
+					for panel.commandPicker.argList {
+						box(ui_key("%##%", it, it_index), .{
 							flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 							layout=.{ width=text_content(), height=text_content() },
-							palette=.{ background=style.backgroundMid },
-							textPadding=em(0.3)
 						});
 					}
 				}
+				
+				if panel.commandPicker.input.text.count == 0 && panel.commandPicker.pendingCommand {
+					currentArg := panel.commandPicker.argList.count;
+					// TODO: capitalize and undo camelcase on this name
+					box(ui_key("%", panel.commandPicker.pendingCommand.args[currentArg].name), .{
+						flags=.DRAW_TEXT,
+						layout=.{ width=text_content(), height=text_content() },
+					});
+				}
+				else {
+					inputArea := box(ui_key("commandPickerInput"), .{
+						flags=0,
+						layout=.{
+							width=grow(),
+							height=fixed(xx fontMetrics.lineSpacing),
+							childLayoutAxis=.X
+						},
+					});
+					
+					inputArea.customDrawFunction = custom_draw_input_field;
+					inputArea.customDrawUdata = cast(*void, *panel.commandPicker.input);
+				}
 			}
+			
+			// TODO: suggestions for arguments
+			if panel.commandPicker.pendingCommand == null {
+				elementHeight := cast(float, fontMetrics.characterHeight*2);
+				rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"), ui_key("commandListScroller"),
+															panel.layoutRect.h/2,
+															elementHeight,
+															panel.commandPicker.numToDisplay,
+															panel.commandPicker.selectedCommand,
+															panel.commandPicker.selectedCommandChange);
 
-			scroll_list_end(); 
+				if panel.commandPicker.selectedCommandChange then panel.commandPicker.selectedCommandChange = false;
+				
+				for rangeStart..rangeEnd {
+					commandEntry := panel.commandPicker.filteredCommandList[it];
+					selected := it == panel.commandPicker.selectedCommand;
+					
+					if commandEntry.sortKey == 0 continue;
+					
+					entryBox := box(ui_key("commandEntry##%", it), .{
+						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
+						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
+						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
+					});
+					signal := signal_from_box(entryBox);
+					if signal.pressed {
+						panel.commandPicker.selectedCommand = xx it;
+						deferredCommands[pendingDeferredCommands] =.{panel, "command_picker_execute_command"};
+						pendingDeferredCommands += 1;
+					}
+					{
+						push_parent(entryBox); defer pop_parent();
+						
+						// find the normal mode mapping
+						// @todo: should we show bindings for all modes?
+						mappingStr := "";
+						for commandEntry.command.keybinding {
+							// TODO
+							// if it.mode == .NORMAL then mappingStr = it;
+							mappingStr = it;
+						}
+						
+						commandLabel := box(ui_key("%", commandEntry.command.prettyName), .{
+							flags=.DRAW_TEXT_HIGHLIGHTS,
+							layout=.{ width=text_content(), height=text_content() },
+						});
+						commandLabel.textHighlights = commandEntry.fuzzyMatches;
+						
+						box(ui_key_nil, .{ layout=.{width=grow()}});
+						
+						if mappingStr {
+							box(ui_key("%##%", mappingStr, it), .{
+								flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+								layout=.{ width=text_content(), height=text_content() },
+								palette=.{ background=style.backgroundMid },
+								textPadding=em(0.3)
+							});
+						}
+					}
+				}
+				
+				scroll_list_end(); 
+			}
 
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,
@@ -2437,7 +2482,6 @@ Input :: #import "Input";
 #load "project.jai";
 #load "project_search.jai";
 #load "language.jai";
-// #load "cvarexample.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";

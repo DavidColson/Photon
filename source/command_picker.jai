@@ -14,10 +14,14 @@ CommandPicker :: struct {
 	numToDisplay:s64; // number of items with positive sortkeys
 	input: InputField;
 	editorModeFilter: EditorMode;
+	
+	// New stuff
+	pendingCommand: *Command;
+	argList: [..]string;
 }
 
 command_picker_open :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ prettyName = "Open Command Picker", keybinding = .[":"] };
+	NORMAL :: CommandConfig.{ prettyName = "Open Command Picker", keybinding = .[":"] };
 	panel.activeDialog = .COMMAND_PICKER;
 	commandPicker.editorModeFilter = editorMode;
 	editorMode = .DIALOG;
@@ -35,7 +39,7 @@ command_picker_open :: (using panel: *Panel) {
 
 	commandPicker.input.onEditCallback = command_picker_input_field_on_edit;
 	commandPicker.input.userData = *commandPicker;
-} @command_normal
+} @command
 
 command_picker_input_field_on_edit :: (userData: *void, input: string) {
 	state: *CommandPicker = cast(*CommandPicker) userData;
@@ -85,32 +89,98 @@ command_picker_reset :: (panel: *Panel) {
 }
 
 command_picker_execute_command :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
+	
+	if state.pendingCommand {
+		// we require an argument, so take whatever the current text is in the input field
+		// and place that in as an argument
+		
+		arg := copy_string(string.{state.input.text.count, state.input.text.data});
+		array_add(*state.argList, arg);
+		
+		// we now have enough arguments to actually invoke the command
+		if state.argList.count == state.pendingCommand.args.count {
+			// reset before executing the command, incase the command opens a dialog
+			command_picker_reset(panel);
+			editorMode = .NORMAL;
+			
+			execute_command(panel, state.pendingCommand, state.argList);
+			
+			for state.argList {
+				free(it);
+			}
+			array_reset(*state.argList);
+		}
+		else {
+			input_field_reset_keeping_memory(*state.input);
+		}
+	}
+	else {
+		cmd := state.filteredCommandList[state.selectedCommand].command; 
+		
+		// if it requires no args, just execute it now
+		if cmd.args.count == 0 {
+			// reset before executing the command, incase the command opens a dialog
+			command_picker_reset(panel);
+			editorMode = .NORMAL;
+			
+			execute_command(panel, cmd, .[]);
+		}
+		else {
+			// We need commands, so enter pending command mode
+			state.pendingCommand = cmd;
+			input_field_reset_keeping_memory(*state.input);
+		}
+	}
 
-	cmd := state.filteredCommandList[state.selectedCommand].command; 
+	// TODO: if the command has arguments
+	// then you want to enter a new mode where we are pending arguments
+	// you will store the current pending command
+	// and you will have an array of strings for the arguments as they get filled out
+	// the whole command picker goes into a new mode
+	// which changes how it renders
+	
+	// when in pending command mode, the UI will draw the command's prettyname in a box
+	// and then the fuzzy find will be populated with options based on the type of the argument
+	
+	// I feel like we need to make the whole fuzzy find functionality much more generic here
+	
+	// so maybe we should start there
+	// what do we actually need for a fuzzy search
+	// we need an array of strings of items to show
+	// we need the score value for the item
+	// and I guess we might need some userdata for the item so it can be retrieved
+	
+	// when we're in pending command mode, the relevant places will populated the suggestions list based on the type of the argument
+	
+	// we need really a function like "populate_suggestions" and "filter_and_sort_suggestions", we can branch on the type
+	
+	// how to handle path arguments?
+	// Paths will be strings like anything else, but they'll have some special editing features
+	// They're simply rendered as text, but with a highlight for the final segments, similar to file pilot
+	// The populate_suggestions box will read the _current_ path string, and populate based on that path string 
+	// (minus the final text after the last separator which will be used for sorting)
+	// When we're editing a path ctrl backspace will delete the whole last path segment
+	// enter, or tab, when the path is not a valid file, will populate the next path segment with what is selected, rather than actuall commit the argument
+	
 
-	// reset before executing the command, incase the command opens a dialog
-	command_picker_reset(panel);
-	editorMode = .NORMAL;
-
-	execute_command(panel, cmd, .[]); // @todo: collect args to pass in
-} @command_dialog
+} @command
 
 command_picker_select_next :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
 
 	maxItems := state.numToDisplay - 1;
 	state.selectedCommand = clamp(state.selectedCommand+1, 0, xx maxItems);
 	state.selectedCommandChange = true;
-} @command_dialog
+} @command
 
 command_picker_select_previous :: (using panel: *Panel) {
-	CONFIG :: CommandConfig.{ };
+	DIALOG :: CommandConfig.{ };
 	state := *commandPicker;
 
 	maxItems := state.numToDisplay - 1;
 	state.selectedCommand = clamp(state.selectedCommand-1, 0, xx maxItems);
 	state.selectedCommandChange = true;
-} @command_dialog
+} @command
