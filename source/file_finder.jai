@@ -79,6 +79,12 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 	finder: *FileFinder = cast(*FileFinder) userData;
 	finder.numToDisplay = 0;
 	array_reset_keeping_memory(*finder.fileList);
+	
+	#if BUILD_TYPE == BuildType.DEBUG {
+		reset(*finder.memory, overwrite_memory=true);
+	} else {
+		reset(*finder.memory, overwrite_memory=false);
+	}
 
 	for doc: openDocuments {
 		// @todo: at some point you probably want to search the whole path for matches

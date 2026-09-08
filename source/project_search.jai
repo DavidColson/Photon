@@ -28,6 +28,11 @@ project_search_input_field_on_edit :: (userData: *void, input: string) {
 	searcher: *ProjectSearch = cast(*ProjectSearch) userData;
 
 	array_reset_keeping_memory(*searcher.results);
+	#if BUILD_TYPE == BuildType.DEBUG {
+		reset(*searcher.memory, overwrite_memory=true);
+	} else {
+		reset(*searcher.memory, overwrite_memory=false);
+	}
 
 	// each job will get one bucket
 
