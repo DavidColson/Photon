@@ -130,7 +130,7 @@ keyword: (identifier) @keyword
 
 (member_expression . "." (identifier) @constant)
 
-(enum_declaration "{" (identifier) @constant)
+(enum_field (identifier) @constant)
 
 ; Literals
 
@@ -218,11 +218,17 @@ keyword: (identifier) @keyword
   (comment)
 ] @comment
 
+; Tagged unions
+
+(tagged_union_kind name: (identifier) @keyword)
+
+(tagged_union_binding tag: (identifier) @constant)
+
+",," @operator
+
 ; Errors
 
 (ERROR) @error
-
-(block_comment) @comment
 
 directive: ("#") @keyword ; #if
 type: ("type_of") @type

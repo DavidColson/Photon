@@ -74,7 +74,7 @@ HighlightType :: enum {
 
 // should probably be in a config file or something?
 staticLanguageData :: Language.[
-	.{name="jai", extensions=.["jai"], url="https://github.com/constantitus/tree-sitter-jai.git", revision="e15938a94c931662aa3e38cc07dfb98cf7436a90"},
+	.{name="jai", extensions=.["jai"], url="https://github.com/constantitus/tree-sitter-jai.git", revision="714acc6da66526d9111b51ab8eee7e016b9e2268"},
 	.{name="cpp", extensions=.["cpp", "h", "hpp", "cc"], url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
 	.{name="c", extensions=.["c"], url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
 	.{name="python", extensions=.["py"], url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
@@ -129,6 +129,10 @@ get_language :: (fileExtension: string) -> bool, *Language {
 	lang.highlightsQuery = load_query(lang, "highlights");
 	lang.indentQuery = load_query(lang, "indents");
 
+	if lang.highlightsQuery.query == null {
+		return true, lang;
+	}
+	
 	// build mapping table for highlight captures
 	captureCount := ts_query_capture_count(lang.highlightsQuery.query);
 	for captureIndex: 0..captureCount-1 {
@@ -889,7 +893,7 @@ fetch_grammars :: () {
 	// Have a list of grammar repositories
 	// Clone them at a certain revision
 
-	verboseOutput := false;
+	verboseOutput := true;
 
 	// @todo: check that git actually exists on this machine
 	// @todo: error if not on windows
@@ -1103,6 +1107,8 @@ compute_highlights :: (language: *Language, root: TSNode, startByte: s64, endByt
 } {
 	highlights: [..]Highlight;
 	highlights.allocator = allocator;
+
+	if language.highlightsQuery.query == null then return highlights;
 
 	query_start(*language.highlightsQuery, root, startByte, endByte);
 
