@@ -242,6 +242,12 @@ command_with_many_args :: (using panel: *Panel, boolean: bool, titlestring: stri
 	log("% - % - %", boolean, titlestring, line);
 } @command
 
+command_with_enum :: (using panel: *Panel, charCategory: CharCategory) {
+	NORMAL :: CommandConfig.{ prettyName = "Command With Enum" };
+	log("Selected Enum %", charCategory);
+	
+} @command
+
 CharCategory :: enum {
 	LINE_ENDING;
 	WHITESPACE;

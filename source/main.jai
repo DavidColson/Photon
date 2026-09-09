@@ -981,60 +981,63 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			// TODO: suggestions for arguments
 			if panel.commandPicker.pendingCommand == null {
 				elementHeight := cast(float, fontMetrics.characterHeight*2);
-				rangeStart, rangeEnd := scroll_list_begin(ui_key("commandList"), ui_key("commandListScroller"),
+				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
 															panel.commandPicker.numToDisplay,
-															panel.commandPicker.selectedCommand,
-															panel.commandPicker.selectedCommandChange);
+															panel.commandPicker.selection,
+															panel.commandPicker.selectionChange);
 
-				if panel.commandPicker.selectedCommandChange then panel.commandPicker.selectedCommandChange = false;
+				if panel.commandPicker.selectionChange then panel.commandPicker.selectionChange = false;
 				
 				for rangeStart..rangeEnd {
-					commandEntry := panel.commandPicker.filteredCommandList[it];
-					selected := it == panel.commandPicker.selectedCommand;
+					suggestion := panel.commandPicker.suggestionList[it];
+					selected := it == panel.commandPicker.selection;
 					
-					if commandEntry.sortKey == 0 continue;
+					if suggestion.sortKey == 0 continue;
 					
-					entryBox := box(ui_key("commandEntry##%", it), .{
+					entryBox := box(ui_key("suggestion##%", it), .{
 						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
 						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
 						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 					});
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
-						panel.commandPicker.selectedCommand = xx it;
+						panel.commandPicker.selection = xx it;
 						deferredCommands[pendingDeferredCommands] =.{panel, "command_picker_execute_command"};
 						pendingDeferredCommands += 1;
 					}
 					{
 						push_parent(entryBox); defer pop_parent();
 						
+						
+						// TODO: Fix mapping strings for commands suggestions
+						
 						// find the normal mode mapping
 						// @todo: should we show bindings for all modes?
-						mappingStr := "";
-						for commandEntry.command.keybinding {
-							// TODO
-							// if it.mode == .NORMAL then mappingStr = it;
-							mappingStr = it;
-						}
+						// mappingStr := "";
+						// for suggest.command.keybinding {
+							// // TODO
+							// // if it.mode == .NORMAL then mappingStr = it;
+							// mappingStr = it;
+						// }
 						
-						commandLabel := box(ui_key("%", commandEntry.command.prettyName), .{
+						suggestionLabel := box(ui_key("%", suggestion.name), .{
 							flags=.DRAW_TEXT_HIGHLIGHTS,
 							layout=.{ width=text_content(), height=text_content() },
 						});
-						commandLabel.textHighlights = commandEntry.fuzzyMatches;
+						suggestionLabel .textHighlights = suggestion.fuzzyMatches;
 						
 						box(ui_key_nil, .{ layout=.{width=grow()}});
 						
-						if mappingStr {
-							box(ui_key("%##%", mappingStr, it), .{
-								flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-								layout=.{ width=text_content(), height=text_content() },
-								palette=.{ background=style.backgroundMid },
-								textPadding=em(0.3)
-							});
-						}
+						// if mappingStr {
+							// box(ui_key("%##%", mappingStr, it), .{
+								// flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+								// layout=.{ width=text_content(), height=text_content() },
+								// palette=.{ background=style.backgroundMid },
+								// textPadding=em(0.3)
+							// });
+						// }
 					}
 				}
 				
