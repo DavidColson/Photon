@@ -979,7 +979,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			}
 			
 			// TODO: suggestions for arguments
-			if panel.commandPicker.pendingCommand == null {
+			if panel.commandPicker.suggestionList.count > 0 {
 				elementHeight := cast(float, fontMetrics.characterHeight*2);
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
@@ -1022,7 +1022,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 							// mappingStr = it;
 						// }
 						
-						suggestionLabel := box(ui_key("%", suggestion.name), .{
+						suggestionLabel := box(ui_key("%##%", suggestion.name, it), .{
 							flags=.DRAW_TEXT_HIGHLIGHTS,
 							layout=.{ width=text_content(), height=text_content() },
 						});

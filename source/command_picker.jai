@@ -74,6 +74,9 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 	// If we're in pending command mode, figure out which argument is current
 	// and then provide suggestions based on the type
 	
+	array_reset(*suggestionList);
+	numToDisplay = 0;
+	
 	if pendingCommand == null {
 		// default mode, suggestions will be a list of commands
 		for * command: allCommands[editorModeFilter] {
@@ -90,9 +93,17 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 		// show suggestions based on the current commands pending argument
 		pendingArgument := argList.count;
 		
-		// if pendingCommand.args[pendingArgument].type == {
-		// case type_info(bool);
-		// }
+		if pendingCommand.args[pendingArgument].type == {
+		case type_info(bool);
+			suggestionTrue := array_add(*suggestionList);
+			suggestionTrue.sortKey = 10;
+			suggestionTrue.name = "true";
+			numToDisplay += 1;
+			suggestionFalse := array_add(*suggestionList);
+			suggestionFalse.sortKey = 10;
+			suggestionFalse.name = "false";
+			numToDisplay += 1;
+		}
 	}
 	
 	// how do we populate suggestions for enums? We need a pretty name getter for enums
@@ -177,6 +188,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 		}
 		else {
 			input_field_reset_keeping_memory(*state.input);
+			command_picker_populate_suggestions(*commandPicker);
 		}
 	}
 	else {
@@ -194,6 +206,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 			// We need commands, so enter pending command mode
 			state.pendingCommand = cmd;
 			input_field_reset_keeping_memory(*state.input);
+			command_picker_populate_suggestions(*commandPicker);
 		}
 	}
 
