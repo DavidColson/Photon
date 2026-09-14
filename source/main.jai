@@ -916,12 +916,6 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 		{
 			push_parent(commandPickerContainer); defer pop_parent();
 
-			// Few things need to happen here
-			// If in pending command mode, you must render a block for the command in the input box
-			// additionally when in pending command mode, draw a block for every arg in the arg list
-			
-			// for now, don't draw the suggestions box when in pending command mode
-
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 			inputBox := box(ui_key_nil, .{
 				flags=.DRAW_BACKGROUND,
@@ -937,7 +931,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				textPadding=em(0.5)
 			});
 			
-			// draw existing path sections
+			// Draw everything inside the input field
 			{
 				push_parent(inputBox); defer pop_parent();
 				
@@ -978,7 +972,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				}
 			}
 			
-			// TODO: suggestions for arguments
+			// Draw the list of suggestions, that are currently relevant
 			if panel.commandPicker.suggestionList.count > 0 {
 				elementHeight := cast(float, fontMetrics.characterHeight*2);
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
@@ -1011,39 +1005,52 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						push_parent(entryBox); defer pop_parent();
 						
 						
-						// TODO: Fix mapping strings for commands suggestions
-						
-						// find the normal mode mapping
-						// @todo: should we show bindings for all modes?
-						// mappingStr := "";
-						// for suggest.command.keybinding {
-							// // TODO
-							// // if it.mode == .NORMAL then mappingStr = it;
-							// mappingStr = it;
-						// }
-						
-						suggestionLabel := box(ui_key("%##%", suggestion.name, it), .{
-							flags=.DRAW_TEXT_HIGHLIGHTS,
-							layout=.{ width=text_content(), height=text_content() },
-						});
-						suggestionLabel .textHighlights = suggestion.fuzzyMatches;
-						
-						box(ui_key_nil, .{ layout=.{width=grow()}});
-						
-						// if mappingStr {
-							// box(ui_key("%##%", mappingStr, it), .{
-								// flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-								// layout=.{ width=text_content(), height=text_content() },
-								// palette=.{ background=style.backgroundMid },
-								// textPadding=em(0.3)
-							// });
-						// }
+						if suggestion.displayMode == {
+						case .NORMAL;
+							suggestionLabel := box(ui_key("%##%", suggestion.name, it), .{
+								flags=.DRAW_TEXT_HIGHLIGHTS,
+								layout=.{ width=text_content(), height=text_content() },
+							});
+							suggestionLabel .textHighlights = suggestion.fuzzyMatches;
+							
+							box(ui_key_nil, .{ layout=.{width=grow()}});
+							
+						case .COMMAND;
+							
+							// find the normal mode mapping
+							// @todo: should we show bindings for all modes?
+							command := cast(*Command, suggestion.userData);
+							mappingStr := "";
+							for command.keybinding {
+								// TODO
+								// if it.mode == .NORMAL then mappingStr = it;
+								mappingStr = it;
+							}
+							
+							commandLabel := box(ui_key("%##%", suggestion.name, it), .{
+								flags=.DRAW_TEXT_HIGHLIGHTS,
+								layout=.{ width=text_content(), height=text_content() },
+							});
+							commandLabel.textHighlights = suggestion.fuzzyMatches;
+							
+							box(ui_key_nil, .{ layout=.{width=grow()}});
+							
+							if mappingStr {
+								box(ui_key("%##%", mappingStr, it), .{
+									flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+									layout=.{ width=text_content(), height=text_content() },
+									palette=.{ background=style.backgroundMid },
+									textPadding=em(0.3)
+								});
+							}
+						}
 					}
 				}
 				
 				scroll_list_end(); 
 			}
 
+			// Draw the control hints box at the bottom
 			hintsBox := box(ui_key("hintsBox"), .{
 				flags=.DRAW_SIDE_TOP,
 				layout=.{ 

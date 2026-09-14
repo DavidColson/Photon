@@ -18,7 +18,13 @@ CommandPicker :: struct {
 		sortKey: s64;
 		fuzzyMatches: []Highlight;
 		userData: *void;
+		DisplayMode :: enum {
+			NORMAL;
+			COMMAND;
+		}
+		displayMode: DisplayMode;
 	}
+	
 	numToDisplay:s64; // number of items with positive sortkeys
 	suggestionList: [..]Suggestion;
 	selection: s32;
@@ -56,11 +62,6 @@ command_picker_open :: (using panel: *Panel) {
 } @command
 
 command_picker_populate_suggestions :: (using picker: *CommandPicker) {
-	// fill out a list of items for the suggestions based on what mode we're in
-	// by default we fill it out from the command list
-	// If we're in pending command mode, figure out which argument is current
-	// and then provide suggestions based on the type
-	
 	array_reset(*suggestionList);
 	numToDisplay = 0;
 	
@@ -72,6 +73,7 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 				suggestion.sortKey = 10;
 				suggestion.name = command.prettyName;
 				suggestion.userData = command;
+				suggestion.displayMode = .COMMAND;
 				numToDisplay += 1;
 			}
 		}
@@ -104,10 +106,6 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 			// all other types don't have suggestions
 		}
 	}
-	
-	// how do we populate suggestions for enums? We need a pretty name getter for enums
-	// and we need a generic way to get them
-	// Ultimately it's just a little array of strings, but need to register them somehow
 }
 
 command_picker_filter_and_sort_suggestions :: (using picker: *CommandPicker, filter: string) {
