@@ -296,6 +296,16 @@ project_update :: () {
 				}
 			}
 		}
+		else {
+			// these results are being discarded (stale search term, or we've already hit the display cap),
+			// so free the matchLine strings that get_line_content heap-allocated for open-document matches
+			// (unloaded-file matches just slice into file.content and don't own their matchLine)
+			for searchWork.results {
+				if it.loaded {
+					free(it.matchLine);
+				}
+			}
+		}
 		array_reset(*searchWork.results);
 		free(searchWork.searchTerm);
 		free(searchWork);
@@ -399,12 +409,13 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 			}
 
 			hasMatches, results := search(doc.handle, .NOCASE, 0, searchWork.searchTerm, false);
+			defer array_reset(*results);
 
 			for result: results {
 				coordinate := get_coordinate_from_offset(doc.handle, result.start);
 				line := get_line_content(doc.handle, coordinate.line);
 
-				searchResult: Project.SearchResult; 
+				searchResult: Project.SearchResult;
 				searchResult.matchLine = line.text;
 				searchResult.lineNum = coordinate.line;
 				searchResult.lineOffset = line.startByteOffset;

@@ -339,6 +339,9 @@ update :: (deltaTime: float64) {
 	}
 
 	if nNotificationsToRemove > 0 {
+		for i: 0..nNotificationsToRemove-1 {
+			free(notifications[i].content);
+		}
 		memcpy(notifications.data, notifications.data + nNotificationsToRemove, (numActiveNotifications - nNotificationsToRemove)*size_of(Notification));
 		numActiveNotifications -= nNotificationsToRemove;
 	}
@@ -2007,7 +2010,13 @@ write_register :: (name: u8, value: string) {
 
 read_register :: (name: u8) -> string {
 	if name == DEFAULT_REGISTER {
-		return os_clipboard_get_text();
+		// os_clipboard_get_text() heap-allocates its result
+		// the semantics of this function are that the data is always available
+		// so you shouldn't store it, so we put this in temp storage,
+		// and one can simply call read_register again to retrieve it
+		clipboardText := os_clipboard_get_text();
+		defer free(clipboardText);
+		return copy_string(clipboardText,,temp);
 	}
 	else {
 		registerData := table_find_pointer(*registers.table, name); 
@@ -2299,16 +2308,18 @@ find_index_from_left_fast :: (s: string, substring: string, start_index := 0) ->
 
 // notifications
 
-// this function will not copy the string
+// this function copies the message string; the notification system owns the copy and frees it once the notification expires or is evicted
 push_notification :: (message: string) {
+	owned := copy_string(message);
 	if numActiveNotifications < 10 {
-		notifications[numActiveNotifications] = Notification.{message, notificationTime}; 
+		notifications[numActiveNotifications] = Notification.{owned, notificationTime};
 		numActiveNotifications += 1;
 	}
 	else {
 		// we'll delete the oldest element to make space for this one, so no notifications get missed
+		free(notifications[0].content);
 		memcpy(notifications.data, notifications.data+1, size_of(Notification));
-		notifications[9] = Notification.{message, 20}; 
+		notifications[9] = Notification.{owned, 20};
 	}
 	requestRedraw = true;
 }

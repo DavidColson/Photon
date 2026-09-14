@@ -147,17 +147,28 @@ command_palette_reset :: (panel: *Panel) {
 	using panel.commandPalette;
 	selection = 0;
 	numToDisplay = 0;
-	
+
 	// reset memory
 	// note we don't reset the arg list, this must be done after a command is executed
 	// so the arguments are usable by the command
 	array_reset(*suggestionList);
 	reset(*perInvocationMem);
 	reset(*perSearchMem);
-	
+
 	// input field manages it's own memory
 	input_field_reset_keeping_memory(*input);
 	panel.activeDialog = .NONE;
+}
+
+// Used when the dialog is dismissed without a command having run to completion 
+command_palette_cancel :: (panel: *Panel) {
+	using panel.commandPalette;
+	for argList {
+		free(it);
+	}
+	array_reset(*argList);
+	pendingCommand = null;
+	command_palette_reset(panel);
 }
 
 command_palette_execute_command :: (using panel: *Panel) {

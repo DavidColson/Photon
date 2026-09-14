@@ -86,7 +86,7 @@ move_one_line_down :: (using panel: *Panel) {
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 	numLines := get_number_of_lines(document);
 	newLine := min(cursorCoordinate.line + 1, numLines - 1);
-	newLineContent := get_line_content(panel.document, newLine);
+	newLineContent := get_line_content(panel.document, newLine,,temp);
 
 	targetColumn := get_virtual_column(panel);
 	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
@@ -113,7 +113,7 @@ move_one_line_up :: (using panel: *Panel) {
 	};
 	cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
 	newLine := max(cursorCoordinate.line - 1, 0);
-	newLineContent := get_line_content(panel.document, newLine);
+	newLineContent := get_line_content(panel.document, newLine,,temp);
 
 	targetColumn := get_virtual_column(panel);
 	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
@@ -129,7 +129,7 @@ extend_one_line_up :: (using panel: *Panel) {
 } @command
 
 move_cursor_to_specific_line :: (using panel: *Panel, line: s64) {
-	newLineContent := get_line_content(panel.document, line);
+	newLineContent := get_line_content(panel.document, line,,temp);
 
 	targetColumn := get_virtual_column(panel);
 	cursor.head = newLineContent.startByteOffset + byte_offset_for_virtual_column(newLineContent, targetColumn);
@@ -146,7 +146,7 @@ get_virtual_column :: (using panel: *Panel) -> s64 {
 	// This getter will check if it needs updating and update it accordingly
 	if cursor.virtualColumnHead != cursor.head {
 		cursorCoordinate := get_coordinate_from_offset(document, cursor.head);
-		newLineContent := get_line_content(document, cursorCoordinate.line);
+		newLineContent := get_line_content(document, cursorCoordinate.line,,temp);
 		cursor.virtualColumn = 0;
 		for newLineContent.text {
 			if it_index >= cursorCoordinate.col then break;
@@ -924,7 +924,7 @@ yank_selection :: (using panel: *Panel) {
 	NORMAL :: CommandConfig.{ prettyName = "Yank selection", keybinding = .["y"] };
 	range := cursor_to_range(cursor);
 	yank_range_to_register(document, range.start, range.end);
-	push_notification(sprint("Yanked into register %", string.{1,*registers.selectedRegister}));
+	push_notification(tprint("Yanked into register %", string.{1,*registers.selectedRegister}));
 } @command
 
 paste_after_selection :: (using panel: *Panel) {
@@ -1102,7 +1102,7 @@ join_selection :: (using panel: *Panel) {
 	delta := 0;
 	for 1..max(1,endLine-startLine) {
 		// we deal with the start line every time, cause each iteration removes one of the lines below
-		nextLine := get_line_content(document, startLine+1, true);
+		nextLine := get_line_content(document, startLine+1, true,,temp);
 		lineTrimmed := trim_left(nextLine.text);
 		bytesToRemove := nextLine.text.count - lineTrimmed.count;
 		deletionStart := nextLine.startByteOffset;
@@ -1150,7 +1150,7 @@ toggle_comment :: (using panel: *Panel) {
 
 	toggleComment := false;
 	for startLine..endLine {
-		line := get_line_content(document, it);
+		line := get_line_content(document, it,,temp);
 		
 		lineTrimmed := trim_left(line.text);
 		if !begins_with(lineTrimmed, commentString) {
@@ -1162,7 +1162,7 @@ toggle_comment :: (using panel: *Panel) {
 	// add comment strings
 	offset := 0;
 	for startLine..endLine {
-		line := get_line_content(document, it);
+		line := get_line_content(document, it,,temp);
 		firstNonBlankChar := 0;
 		for character: line.text {
 			if !is_space(character) {
@@ -1195,7 +1195,7 @@ toggle_comment :: (using panel: *Panel) {
 // returns the change in byte length of the line
 replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
 	indentation := calculate_indentation_for_line(doc, lineNumber);
-	lineContent := get_line_content(doc, lineNumber);
+	lineContent := get_line_content(doc, lineNumber,,temp);
 
 	// delete any existing indentation
 	deleteUpTo := -1;
@@ -1544,7 +1544,7 @@ insert_mode_line_break :: (using panel: *Panel) {
 	indentation := calculate_indentation_for_line(document, cursorLine);
 	
 	// delete any existing whitespace on the newline before inserting the indentation
-	line := get_line_content(document, cursorLine);
+	line := get_line_content(document, cursorLine,,temp);
 	trimmed := trim_left(line.text);
 	delete(document, line.startByteOffset, line.text.count - trimmed.count);
 	
