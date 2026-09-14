@@ -5,24 +5,11 @@ CommandPicker :: struct {
 	// one for every single run of a search (more or less each keypress)
 	perInvocationMem : Flat_Pool;
 	perSearchMem : Flat_Pool;
-
-	// CommandEntry :: struct {
-		// command: *Command;
-		// // right now this is just the search score, but i'd like to add
-		// // the last use time of the command, or how often it's used
-		// sortKey: s64;
-		// fuzzyMatches: []Highlight;
-	// }
-	// filteredCommandList: [..]CommandEntry;
-	// selectedCommand:s32;
-	// selectedCommandChange:bool;
 	input: InputField;
-	
-	
-	
-	
-	// New stuff
 	pendingCommand: *Command;
+	// TODO: argList memory is handled differently because it must exist during command invocation
+	// I don't particularly like this, we should refactor this to be nicer and clean up
+	// the memory properly
 	argList: [..]string;
 	
 	fuzzySearchResultMemory : Flat_Pool;
@@ -93,16 +80,28 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 		// show suggestions based on the current commands pending argument
 		pendingArgument := argList.count;
 		
-		if pendingCommand.args[pendingArgument].type == {
-		case type_info(bool);
+		if pendingCommand.args[pendingArgument].type.type == {
+		case .BOOL;
 			suggestionTrue := array_add(*suggestionList);
 			suggestionTrue.sortKey = 10;
 			suggestionTrue.name = "true";
 			numToDisplay += 1;
+			
 			suggestionFalse := array_add(*suggestionList);
 			suggestionFalse.sortKey = 10;
 			suggestionFalse.name = "false";
 			numToDisplay += 1;
+		case .ENUM;
+			enumType := cast(*Type_Info_Enum)pendingCommand.args[pendingArgument].type;
+			for get_enum_pretty_names(enumType) {
+				suggestion := array_add(*suggestionList);
+				suggestion.sortKey = 10;
+				suggestion.name = enumType.names[it_index];
+				suggestion.userData = *enumType.values[it_index];
+				numToDisplay += 1;
+			}
+		case;
+			// all other types don't have suggestions
 		}
 	}
 	
@@ -152,8 +151,9 @@ command_picker_reset :: (panel: *Panel) {
 	numToDisplay = 0;
 	
 	// reset memory
+	// note we don't reset the arg list, this must be done after a command is executed
+	// so the arguments are usable by the command
 	array_reset(*suggestionList);
-	array_reset(*argList);
 	reset(*perInvocationMem);
 	reset(*perSearchMem);
 	
@@ -167,11 +167,55 @@ command_picker_execute_command :: (using panel: *Panel) {
 	state := *commandPicker;
 	
 	if state.pendingCommand {
-		// we require an argument, so take whatever the current text is in the input field
-		// and place that in as an argument
+		// In this branch we are waiting for arguments
+		// we switch on the expected argument type
 		
-		arg := copy_string(string.{state.input.text.count, state.input.text.data});
-		array_add(*state.argList, arg);
+		pendingArgument := state.argList.count;
+		if state.pendingCommand.args[pendingArgument].type.type == {
+		case .BOOL;
+			if state.selection < 0 then return; // Invalid selection
+			arg := copy_string(state.suggestionList[state.selection].name);
+			array_add(*state.argList, arg);
+			
+		case .STRING;
+			// string doesn't need validation
+			// TODO: it probably does tbh
+			arg := copy_string(string.{state.input.text.count, state.input.text.data});
+			array_add(*state.argList, arg);
+			
+		case .FLOAT;
+			// Theoretically wasteful as we convert to float again later
+			// but it's probably fine tbh, validation is useful
+			argStr := string.{state.input.text.count, state.input.text.data};
+			_, success := string_to_float64(argStr);
+			if !success then return;
+			arg := copy_string(string.{state.input.text.count, state.input.text.data});
+			array_add(*state.argList, arg);
+			
+		case .INTEGER;
+			if state.pendingCommand.args[pendingArgument].type.runtime_size == 1 {
+				// if the integer is a u8, I've aribrarily decided it should be treated as a char
+				// this may come back to bite me, but there we go
+				// we convert the char to a string of that number, which is a bit ick tbh
+				if state.input.text.count > 1 return;
+				array_add(*state.argList, sprint("%", state.input.text.data.*));
+			}
+			else {
+				argStr := string.{state.input.text.count, state.input.text.data};
+				_, success := string_to_int(argStr);
+				if !success then return;
+				arg := copy_string(string.{state.input.text.count, state.input.text.data});
+				array_add(*state.argList, arg);
+			}
+			
+		case .ENUM;
+			if state.selection < 0 then return; // Invalid selection
+			arg := copy_string(state.suggestionList[state.selection].name);
+			array_add(*state.argList, arg);
+			
+		case;
+			assert(false, "Invalid argument type given");
+		}
 		
 		// we now have enough arguments to actually invoke the command
 		if state.argList.count == state.pendingCommand.args.count {
@@ -185,6 +229,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 				free(it);
 			}
 			array_reset(*state.argList);
+			state.pendingCommand = null;
 		}
 		else {
 			input_field_reset_keeping_memory(*state.input);
@@ -192,6 +237,9 @@ command_picker_execute_command :: (using panel: *Panel) {
 		}
 	}
 	else {
+		// In this branch we haven't picked what command we want to execute yet, so 
+		// here we do just that
+		
 		cmd := cast(*Command, state.suggestionList[state.selection].userData); 
 		
 		// if it requires no args, just execute it now
@@ -201,6 +249,11 @@ command_picker_execute_command :: (using panel: *Panel) {
 			editorMode = .NORMAL;
 			
 			execute_command(panel, cmd, .[]);
+			
+			for state.argList {
+				free(it);
+			}
+			array_reset(*state.argList);
 		}
 		else {
 			// We need commands, so enter pending command mode

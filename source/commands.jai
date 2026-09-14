@@ -1732,15 +1732,27 @@ dialog_backward_delete :: (using panel: *Panel) {
 				return;
 			}
 			#through;
-		case .COMMAND_PICKER; #through;
+		case .COMMAND_PICKER;
+			if commandPicker.argList.count > 0 && commandPicker.input.text.count == 0 {
+				free(commandPicker.argList[commandPicker.argList.count-1]);
+				commandPicker.argList.count -= 1;
+				command_picker_populate_suggestions(*commandPicker);
+				return;
+			}
+			else if commandPicker.pendingCommand {
+				commandPicker.pendingCommand = null;
+				command_picker_populate_suggestions(*commandPicker);
+			}
+			#through;
 		case .SEARCH; #through;
 		case .FILE_FINDER; #through;
 		case .PROJECT_SEARCH;
+			before := inputField.text.count;
 			inputField.text.count -= 1;
 			inputField.cursor -= 1;
 			inputField.text.count = max(inputField.text.count, 0);
 			inputField.cursor = max(inputField.cursor, 0);
-			if inputField.onEditCallback {
+			if inputField.onEditCallback && before != inputField.text.count {
 				inputField.onEditCallback(inputField.userData, string.{inputField.text.count, inputField.text.data});
 			}
 		case .NONE; return;
