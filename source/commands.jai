@@ -1666,8 +1666,8 @@ dialog_select_next :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog select next", keybinding = .["<down>"] };
 	if activeDialog == {
 		case .NONE; return;
-		case .COMMAND_PICKER;
-			command_picker_select_next(panel);
+		case .COMMAND_PALETTE;
+			command_palette_select_next(panel);
 		case .FILESYSTEM_NAVIGATOR;
 			filesystem_nav_select_next(panel);
 		case .FILE_FINDER;
@@ -1682,8 +1682,8 @@ dialog_select_previous :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog select previous", keybinding = .["<up>"] };
 	if activeDialog == {
 		case .NONE; return;
-		case .COMMAND_PICKER;
-			command_picker_select_previous(panel);
+		case .COMMAND_PALETTE;
+			command_palette_select_previous(panel);
 		case .FILESYSTEM_NAVIGATOR;
 			filesystem_nav_select_previous(panel);
 		case .FILE_FINDER;
@@ -1698,8 +1698,8 @@ dialog_action_item :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog action item", keybinding = .["<enter>"] };
 	if activeDialog == {
 		case .NONE; return;
-		case .COMMAND_PICKER;
-			command_picker_execute_command(panel);
+		case .COMMAND_PALETTE;
+			command_palette_execute_command(panel);
 		case .FILESYSTEM_NAVIGATOR;
 			filesystem_nav_action_item(panel);
 		case .FILE_FINDER;
@@ -1714,12 +1714,12 @@ dialog_action_item :: (using panel: *Panel) {
 
 dialog_backward_delete :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog backward delete", keybinding = .["<backspace>"] };
-	inputField := *commandPicker.input;
+	inputField := *commandPalette.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
 		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
-		case .COMMAND_PICKER; inputField = *commandPicker.input;
+		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
 
@@ -1732,16 +1732,16 @@ dialog_backward_delete :: (using panel: *Panel) {
 				return;
 			}
 			#through;
-		case .COMMAND_PICKER;
-			if commandPicker.argList.count > 0 && commandPicker.input.text.count == 0 {
-				free(commandPicker.argList[commandPicker.argList.count-1]);
-				commandPicker.argList.count -= 1;
-				command_picker_populate_suggestions(*commandPicker);
+		case .COMMAND_PALETTE;
+			if commandPalette.argList.count > 0 && commandPalette.input.text.count == 0 {
+				free(commandPalette.argList[commandPalette.argList.count-1]);
+				commandPalette.argList.count -= 1;
+				command_palette_populate_suggestions(*commandPalette);
 				return;
 			}
-			else if commandPicker.pendingCommand {
-				commandPicker.pendingCommand = null;
-				command_picker_populate_suggestions(*commandPicker);
+			else if commandPalette.pendingCommand {
+				commandPalette.pendingCommand = null;
+				command_palette_populate_suggestions(*commandPalette);
 			}
 			#through;
 		case .SEARCH; #through;
@@ -1760,12 +1760,12 @@ dialog_backward_delete :: (using panel: *Panel) {
 } @command
 
 dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
-	inputField := *commandPicker.input;
+	inputField := *commandPalette.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
 		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
-		case .COMMAND_PICKER; inputField = *commandPicker.input;
+		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
 

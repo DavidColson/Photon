@@ -35,7 +35,7 @@ Panel :: struct {
 
 	// Dialogs
 	activeDialog: DialogType;
-	commandPicker: CommandPicker;
+	commandPalette: CommandPalette;
 	filesystemNav: FilesystemNavigator;
 	fileFinder: FileFinder;
 	projectSearcher: ProjectSearch;
@@ -106,7 +106,7 @@ panel_reset_dialogs :: (panel: *Panel) {
 		case .FILE_FINDER; file_finder_reset(panel);
 		case .PROJECT_SEARCH; project_search_reset(panel);
 		case .FILESYSTEM_NAVIGATOR; filesystem_nav_reset(panel);
-		case .COMMAND_PICKER; command_picker_reset(panel);
+		case .COMMAND_PALETTE; command_palette_reset(panel);
 		case .SEARCH; end_document_search(panel);
 	}
 	panel.activeDialog = .NONE;

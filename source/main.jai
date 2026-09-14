@@ -1,6 +1,6 @@
 DialogType :: enum u8 {
 	NONE;
-	COMMAND_PICKER;
+	COMMAND_PALETTE;
 	FILESYSTEM_NAVIGATOR;
 	FILE_FINDER;
 	PROJECT_SEARCH;
@@ -899,8 +899,8 @@ build_ui_panel :: (panel: *Panel) {
 }
 
 build_ui_panel_dialogs :: (panel: *Panel) {
-	if panel.activeDialog == .COMMAND_PICKER {
-		commandPickerContainer := box(ui_key_nil, .{
+	if panel.activeDialog == .COMMAND_PALETTE {
+		commandPaletteContainer := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND,
 			layout=.{ 
 				childLayoutAxis = .Y,
@@ -914,7 +914,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			fixedY=em(3.0)
 		});
 		{
-			push_parent(commandPickerContainer); defer pop_parent();
+			push_parent(commandPaletteContainer); defer pop_parent();
 
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 			inputBox := box(ui_key_nil, .{
@@ -935,13 +935,13 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			{
 				push_parent(inputBox); defer pop_parent();
 				
-				if panel.commandPicker.pendingCommand {
-					pendingCommandLabel := box(ui_key("%", panel.commandPicker.pendingCommand.prettyName), .{
+				if panel.commandPalette.pendingCommand {
+					pendingCommandLabel := box(ui_key("%", panel.commandPalette.pendingCommand.prettyName), .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					
-					for panel.commandPicker.argList {
+					for panel.commandPalette.argList {
 						box(ui_key("%##%", it, it_index), .{
 							flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 							layout=.{ width=text_content(), height=text_content() },
@@ -949,16 +949,16 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					}
 				}
 				
-				if panel.commandPicker.input.text.count == 0 && panel.commandPicker.pendingCommand {
-					currentArg := panel.commandPicker.argList.count;
+				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommand {
+					currentArg := panel.commandPalette.argList.count;
 					// TODO: capitalize and undo camelcase on this name
-					box(ui_key("%", panel.commandPicker.pendingCommand.args[currentArg].name), .{
+					box(ui_key("%", panel.commandPalette.pendingCommand.args[currentArg].name), .{
 						flags=.DRAW_TEXT,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 				}
 				else {
-					inputArea := box(ui_key("commandPickerInput"), .{
+					inputArea := box(ui_key("commandPaletteInput"), .{
 						flags=0,
 						layout=.{
 							width=grow(),
@@ -968,25 +968,25 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					});
 					
 					inputArea.customDrawFunction = custom_draw_input_field;
-					inputArea.customDrawUdata = cast(*void, *panel.commandPicker.input);
+					inputArea.customDrawUdata = cast(*void, *panel.commandPalette.input);
 				}
 			}
 			
 			// Draw the list of suggestions, that are currently relevant
-			if panel.commandPicker.suggestionList.count > 0 {
+			if panel.commandPalette.suggestionList.count > 0 {
 				elementHeight := cast(float, fontMetrics.characterHeight*2);
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
-															panel.commandPicker.numToDisplay,
-															panel.commandPicker.selection,
-															panel.commandPicker.selectionChange);
+															panel.commandPalette.numToDisplay,
+															panel.commandPalette.selection,
+															panel.commandPalette.selectionChange);
 
-				if panel.commandPicker.selectionChange then panel.commandPicker.selectionChange = false;
+				if panel.commandPalette.selectionChange then panel.commandPalette.selectionChange = false;
 				
 				for rangeStart..rangeEnd {
-					suggestion := panel.commandPicker.suggestionList[it];
-					selected := it == panel.commandPicker.selection;
+					suggestion := panel.commandPalette.suggestionList[it];
+					selected := it == panel.commandPalette.selection;
 					
 					if suggestion.sortKey == 0 continue;
 					
@@ -997,8 +997,8 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					});
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
-						panel.commandPicker.selection = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, "command_picker_execute_command"};
+						panel.commandPalette.selection = xx it;
+						deferredCommands[pendingDeferredCommands] =.{panel, "command_palette_execute_command"};
 						pendingDeferredCommands += 1;
 					}
 					{
@@ -2458,7 +2458,7 @@ Input :: #import "Input";
 #import "Reflection";
 
 #load "rect.jai";
-#load "command_picker.jai";
+#load "command_palette.jai";
 #load "filesystem_navigator.jai";
 #load "file_finder.jai";
 #load "command_system.jai";

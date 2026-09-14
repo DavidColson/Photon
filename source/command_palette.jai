@@ -1,7 +1,7 @@
-CommandPicker :: struct {
+CommandPalette :: struct {
 	
 	// two memory lifetimes in use in this tool
-	// one for the duration of a full use of the tool (i.e., opening the picker window, through to calling a command or closing the tool)
+	// one for the duration of a full use of the tool (i.e., opening the palette window, through to calling a command or closing the tool)
 	// one for every single run of a search (more or less each keypress)
 	perInvocationMem : Flat_Pool;
 	perSearchMem : Flat_Pool;
@@ -46,22 +46,22 @@ get_enum_pretty_names :: (enumType: *Type_Info_Enum) -> []string {
 	}
 }
 
-command_picker_open :: (using panel: *Panel) {
-	NORMAL :: CommandConfig.{ prettyName = "Open Command Picker", keybinding = .[":"] };
-	panel.activeDialog = .COMMAND_PICKER;
-	commandPicker.editorModeFilter = editorMode;
+command_palette_open :: (using panel: *Panel) {
+	NORMAL :: CommandConfig.{ prettyName = "Open Command Palette", keybinding = .[":"] };
+	panel.activeDialog = .COMMAND_PALETTE;
+	commandPalette.editorModeFilter = editorMode;
 	editorMode = .DIALOG;
 	
-	commandPicker.argList.allocator = get_per_invocation_allocator(*commandPicker);
-	commandPicker.suggestionList.allocator = get_per_invocation_allocator(*commandPicker);
+	commandPalette.argList.allocator = get_per_invocation_allocator(*commandPalette);
+	commandPalette.suggestionList.allocator = get_per_invocation_allocator(*commandPalette);
 
-	command_picker_populate_suggestions(*commandPicker);
+	command_palette_populate_suggestions(*commandPalette);
 	
-	commandPicker.input.onEditCallback = command_picker_input_field_on_edit;
-	commandPicker.input.userData = *commandPicker;
+	commandPalette.input.onEditCallback = command_palette_input_field_on_edit;
+	commandPalette.input.userData = *commandPalette;
 } @command
 
-command_picker_populate_suggestions :: (using picker: *CommandPicker) {
+command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	array_reset(*suggestionList);
 	numToDisplay = 0;
 	
@@ -108,7 +108,7 @@ command_picker_populate_suggestions :: (using picker: *CommandPicker) {
 	}
 }
 
-command_picker_filter_and_sort_suggestions :: (using picker: *CommandPicker, filter: string) {
+command_palette_filter_and_sort_suggestions :: (using palette: *CommandPalette, filter: string) {
 	// Go through all the suggestions doing a fuzzy search on it
 	// and applying any score modifiers that are relevant, count how many are included in the results 
 	
@@ -116,7 +116,7 @@ command_picker_filter_and_sort_suggestions :: (using picker: *CommandPicker, fil
 	
 	numToDisplay = 0;
 	for * suggestion: suggestionList {
-		score,fuzzyMatches := fuzzy_search(suggestion.name, filter,,get_per_search_allocator(picker));
+		score,fuzzyMatches := fuzzy_search(suggestion.name, filter,,get_per_search_allocator(palette));
 		
 		suggestion.fuzzyMatches = fuzzyMatches;
 		suggestion.sortKey = score;
@@ -127,7 +127,7 @@ command_picker_filter_and_sort_suggestions :: (using picker: *CommandPicker, fil
 	
 	// TODO: somehow add extra sorting information for items depending on their type??
 	
-	compare_entries :: (e1: CommandPicker.Suggestion, e2: CommandPicker.Suggestion) -> s64 {
+	compare_entries :: (e1: CommandPalette.Suggestion, e2: CommandPalette.Suggestion) -> s64 {
 		diff := e2.sortKey - e1.sortKey;
 		if diff != 0 return diff;
 		return memcmp(e1.name.data, e2.name.data, min(e1.name.count, e2.name.count));
@@ -138,13 +138,13 @@ command_picker_filter_and_sort_suggestions :: (using picker: *CommandPicker, fil
 	selection = clamp(selection-1, 0, xx maxItems);
 }
 
-command_picker_input_field_on_edit :: (userData: *void, input: string) {
-	state: *CommandPicker = cast(*CommandPicker) userData;
-	command_picker_filter_and_sort_suggestions(state, input);
+command_palette_input_field_on_edit :: (userData: *void, input: string) {
+	state: *CommandPalette = cast(*CommandPalette) userData;
+	command_palette_filter_and_sort_suggestions(state, input);
 }
 
-command_picker_reset :: (panel: *Panel) {
-	using panel.commandPicker;
+command_palette_reset :: (panel: *Panel) {
+	using panel.commandPalette;
 	selection = 0;
 	numToDisplay = 0;
 	
@@ -160,9 +160,9 @@ command_picker_reset :: (panel: *Panel) {
 	panel.activeDialog = .NONE;
 }
 
-command_picker_execute_command :: (using panel: *Panel) {
+command_palette_execute_command :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ };
-	state := *commandPicker;
+	state := *commandPalette;
 	
 	if state.pendingCommand {
 		// In this branch we are waiting for arguments
@@ -218,7 +218,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 		// we now have enough arguments to actually invoke the command
 		if state.argList.count == state.pendingCommand.args.count {
 			// reset before executing the command, incase the command opens a dialog
-			command_picker_reset(panel);
+			command_palette_reset(panel);
 			editorMode = .NORMAL;
 			
 			execute_command(panel, state.pendingCommand, state.argList);
@@ -231,7 +231,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 		}
 		else {
 			input_field_reset_keeping_memory(*state.input);
-			command_picker_populate_suggestions(*commandPicker);
+			command_palette_populate_suggestions(*commandPalette);
 		}
 	}
 	else {
@@ -243,7 +243,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 		// if it requires no args, just execute it now
 		if cmd.args.count == 0 {
 			// reset before executing the command, incase the command opens a dialog
-			command_picker_reset(panel);
+			command_palette_reset(panel);
 			editorMode = .NORMAL;
 			
 			execute_command(panel, cmd, .[]);
@@ -257,7 +257,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 			// We need commands, so enter pending command mode
 			state.pendingCommand = cmd;
 			input_field_reset_keeping_memory(*state.input);
-			command_picker_populate_suggestions(*commandPicker);
+			command_palette_populate_suggestions(*commandPalette);
 		}
 	}
 
@@ -265,7 +265,7 @@ command_picker_execute_command :: (using panel: *Panel) {
 	// then you want to enter a new mode where we are pending arguments
 	// you will store the current pending command
 	// and you will have an array of strings for the arguments as they get filled out
-	// the whole command picker goes into a new mode
+	// the whole command palette goes into a new mode
 	// which changes how it renders
 	
 	// when in pending command mode, the UI will draw the command's prettyname in a box
@@ -294,18 +294,18 @@ command_picker_execute_command :: (using panel: *Panel) {
 
 } @command
 
-command_picker_select_next :: (using panel: *Panel) {
+command_palette_select_next :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ };
-	state := *commandPicker;
+	state := *commandPalette;
 
 	maxItems := state.numToDisplay - 1;
 	state.selection = clamp(state.selection+1, 0, xx maxItems);
 	state.selectionChange = true;
 } @command
 
-command_picker_select_previous :: (using panel: *Panel) {
+command_palette_select_previous :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ };
-	state := *commandPicker;
+	state := *commandPalette;
 
 	maxItems := state.numToDisplay - 1;
 	state.selection = clamp(state.selection-1, 0, xx maxItems);
@@ -314,10 +314,10 @@ command_picker_select_previous :: (using panel: *Panel) {
 
 #scope_file
 
-get_per_search_allocator :: (state: *CommandPicker) -> Allocator {
+get_per_search_allocator :: (state: *CommandPalette) -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *state.perSearchMem };
 }
 
-get_per_invocation_allocator :: (state: *CommandPicker) -> Allocator {
+get_per_invocation_allocator :: (state: *CommandPalette) -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *state.perInvocationMem };
 }
