@@ -87,9 +87,15 @@ project_search_open_result :: (using panel: *Panel) {
 		panel_set_active_document(panel, doc);
 	}
 	else {
-		// open project file
-		doc := document_get_or_open(result.filePath, noLoad = true);
+		// open project file. The results were gathered earlier, so it may have been deleted since
 		projectFile := bucket_array_find_pointer(*project.projectFiles, result.fileLocator);
+		if projectFile == null || projectFile.tombstoned {
+			push_notification("File Does Not Exist");
+			project_search_reset(panel);
+			editorMode = .NORMAL;
+			return;
+		}
+		doc := document_get_or_open(result.filePath, noLoad = true);
 		document_load_from_project(doc, projectFile);
 		panel_set_active_document(panel, doc);
 	}

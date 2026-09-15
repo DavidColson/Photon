@@ -32,8 +32,9 @@ file_finder_open :: (using panel: *Panel) {
 		fileFinder.numToDisplay += 1;
 	}
 
-	if project.loadProgress == .COMPLETE {
+	if project_is_loaded() {
 		for * file: project.projectFiles {
+			if file.tombstoned then continue; // gone from disk, only its memory is still here
 			entry := array_add(*fileFinder.fileList);
 			entry.filePath = file.fullName;
 			entry.loaded = false;
@@ -107,8 +108,9 @@ file_finder_input_field_on_edit :: (userData: *void, input: string) {
 		}
 	}
 
-	if project.loadProgress == .COMPLETE {
+	if project_is_loaded() {
 		for * file: project.projectFiles {
+			if file.tombstoned then continue; // gone from disk, only its memory is still here
 			filePath := file.fullName;
 			scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(filePath), input,,get_allocator(finder));
 			scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(filePath), input,,get_allocator(finder));
@@ -156,8 +158,15 @@ file_finder_select_file :: (panel: *Panel) {
 		panel_set_active_document(panel, entry.handle);
 	}
 	else {
+		// the list was built when the dialog opened, so the file may have been deleted since
+		projectFile := bucket_array_find_pointer(*project.projectFiles, entry.handle.locator);
+		if projectFile == null || projectFile.tombstoned {
+			push_notification("File Does Not Exist");
+			file_finder_reset(panel);
+			editorMode = .NORMAL;
+			return;
+		}
 		doc := document_get_or_open(finder.fileList[finder.selectedEntry].filePath, noLoad = true);
-		projectFile:= bucket_array_find_pointer(*project.projectFiles, entry.handle.locator);
 		document_load_from_project(doc, projectFile);
 		panel_set_active_document(panel, doc);
 	}

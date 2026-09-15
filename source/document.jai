@@ -1,5 +1,4 @@
 
-// @todo: once this replaces the old document system it will be renamed to just "Document"
 Document :: struct {
 
 	Piece :: struct {
@@ -114,9 +113,10 @@ Document :: struct {
 	lastInsert: BufferCursor;
 	lineEndings: LineEndingMode;
 	path: string;
+	// what we last saw on disk, and therefore what tells somebody else's write apart from our own
 	diskLastModtime: Apollo_Time;
+	diskLastSize: s64;
 	diskReadOnly: bool;
-	savePending: bool;
 	handle: DocumentHandle;
 	longestLine: s32;
 	longestLineLength: s32;
@@ -155,10 +155,15 @@ DocumentSlot :: struct {
 	// so it's fine for now
 	state: State;
 	
-	// Used to ensure we don't reload the document while a load is in progress
-	// happens cause windows gives us loads of file change events for some reason
+	// These bools are all intended to monitor the state of the file on disk vs in memory
+	// so that loads/saves do not happen inadvertendly when stuff
+	// is happening on disk that is a bit hairy
 	loadInProgress: bool;
 	loadRequested: bool;
+	savePending: bool;
+	missingOnDisk: bool;
+	conflictedOnDisk: bool;
+	reconcileWanted: bool;
 }
 
 
@@ -199,14 +204,6 @@ for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expa
 
 // @todo: make read only or something??
 nilDocument: Document;
-
-PendingDocumentRename :: struct {
-	handle: DocumentHandle;
-	oldPath: string;
-	time: float64;
-}
-pendingDocumentRenames: [..]PendingDocumentRename;
-PENDING_RENAME_TIMEOUT_SECONDS :: 0.75; // generous relative to File_Watcher's own 0.1s merge window
 
 tree_test :: () {
 	docHandle := document_get_or_open("build_shorter.jai");
@@ -385,11 +382,13 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 	// check if this file is already open
 	success, existingDocument := document_get_by_path(path);
 	if success {
+		unlock(*openDocuments.lock);
 		return existingDocument;
 	}
 
 	// check if the file even exists
 	if !file_exists(path) {
+		unlock(*openDocuments.lock);
 		push_notification("File Does Not Exist");
 		return .{};
 	}
@@ -414,12 +413,24 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 		document_load_from_disk(doc.handle, async);
 	}
 
-	// setup file watcher
-	parentPath := path_strip_filename(doc.path);
-	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	add_directories(*fileWatcher, parentPath);
+	watch_directory_for_document(doc.path);
 
 	return doc.handle;
+}
+
+document_get_slot :: (handle: DocumentHandle) -> *DocumentSlot {
+	if handle.directCopy return null;
+	if openDocuments.documents.count == 0 return null;
+	return bucket_array_find_pointer(*openDocuments.documents, handle.locator);
+}
+
+document_remember_disk_state :: (doc: *Document) {
+	modtime, size, success := file_modtime_and_size(doc.path);
+	if success {
+		doc.diskLastModtime = modtime;
+		doc.diskLastSize = size;
+	}
+	doc.diskReadOnly = platform_file_is_read_only(doc.path);
 }
 
 document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
@@ -442,6 +453,8 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 		doc.language = lang;
 
 		doc.bufferMemory.alignment = 1; // important!! make this hard to miss
+
+		document_remember_disk_state(doc);
 
 		// if this fails, we have not reset any memory yet, so the existing document will persist in memory
 		f, success := file_open(doc.path);
@@ -467,13 +480,6 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 			success = true;
 		}
 		file_close(*f);
-
-
-		modtime, size, result := file_modtime_and_size(doc.path);
-		if result {
-			doc.diskLastModtime = modtime;
-		}
-		doc.diskReadOnly = platform_file_is_read_only(doc.path);
 
 		if !success {
 			taskData.result = .FAILED_TO_READ_FILE_DATA;
@@ -589,12 +595,30 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 
 		completedSlot := bucket_array_find_pointer(*openDocuments.documents, taskData.handle.locator);
 		completedSlot.loadInProgress = false;
+
+		if result == .SUCCESS {
+			completedSlot.missingOnDisk = false;
+			completedSlot.conflictedOnDisk = false;
+		}
+
 		if completedSlot.loadRequested {
+			// Another load call was made while we were loading
+			// so run load again
 			completedSlot.loadRequested = false;
 			handle := taskData.handle;
 			wasAsync := taskData.async;
 			free(taskData);
 			document_load_from_disk(handle, wasAsync);
+			return;
+		}
+
+		if completedSlot.reconcileWanted {
+			// On disk changes arrived while we were reading. Reconcile will no-op
+			// if we do in fact have the latest file in memory
+			completedSlot.reconcileWanted = false;
+			handle := taskData.handle;
+			free(taskData);
+			reconcile_document(handle);
 			return;
 		}
 
@@ -632,6 +656,7 @@ document_load_from_disk :: (docHandle: DocumentHandle, async := true) {
 	data.workingDocument = newSlot;
 	data.workingDocument.path = copy_string(oldSlot.path);
 	data.workingDocument.diskLastModtime = oldSlot.diskLastModtime;
+	data.workingDocument.diskLastSize = oldSlot.diskLastSize;
 	data.workingDocument.diskReadOnly = oldSlot.diskReadOnly;
 	data.workingDocument.handle= docHandle;
 	
@@ -713,8 +738,7 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 
 	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
 
-	doc.diskLastModtime = file.diskLastModtime;
-	doc.diskReadOnly = platform_file_is_read_only(doc.path);
+	document_remember_disk_state(doc);
 	doc.lineEndings = file.lineEndingMode;
 
 	// setup initial undo point
@@ -750,13 +774,10 @@ document_load_from_project :: (docHandle: DocumentHandle, file: *Project.File) {
 		document_reparse_ts_tree(doc.handle);
 	}
 
-	// unload the file from the project
+	// unload the file from the project, it is a real document now
 	// @todo: if you ever support closing documents, you must reload it back into the project
 	// if required
-	free(file.content);
-	array_reset(*file.lineStarts);
-	table_remove(*project.projectFileTable, file.fullName);
-	bucket_array_remove(*project.projectFiles, file.locator);
+	project_remove_file(file.locator);
 
 	push_notification("Document Loaded");
 }
@@ -805,11 +826,23 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 	}
 	save_task_complete :: (data: *void) {
 		using taskData := cast(*TaskData, data);
-		doc := document_get(taskData.document);
+
+		// when finishing the save we want to write to the actual document, not the 
+		// copy otherwise our changes will be lost
+		handle := document_get(taskData.document).handle;
+		doc := document_get(handle);
+		slot := document_get_slot(handle);
+
 		defer free(taskData);
 		defer free(desiredPath);
 		defer document_copy_free(taskData.document);
-		defer if !isBackup then doc.savePending = false;
+		defer if !isBackup && slot {
+			slot.savePending = false;
+			if slot.reconcileWanted {
+				slot.reconcileWanted = false;
+				reconcile_document(handle);
+			}
+		}
 
 		if result == .FAILED_TO_MAKE_DIRECTORY {
 			push_notification("Failed to make directory for file save");
@@ -824,14 +857,15 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 		if !isBackup {
 			if doc.path != desiredPath {
 				// keeps openDocumentTable, disk metadata and the watched directories in sync with the new path
-				document_update_path(doc.handle, desiredPath);
+				document_update_path(handle, desiredPath);
 			}
 			else {
-				modtime, size, success := file_modtime_and_size(doc.path);
-				if success {
-					doc.diskLastModtime = modtime;
-				}
-				doc.diskReadOnly = platform_file_is_read_only(doc.path);
+				document_remember_disk_state(doc);
+			}
+
+			if slot {
+				slot.missingOnDisk = false;
+				slot.conflictedOnDisk = false;
 			}
 
 			push_notification("Document Saved");
@@ -850,7 +884,10 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 		}
 	}
 
-	if !backup then document_get(doc).savePending = true;
+	if !backup {
+		slot := document_get_slot(doc);
+		if slot then slot.savePending = true;
+	}
 
 	data := New(TaskData);
 	data.document = document_copy(doc);
@@ -860,7 +897,10 @@ document_save :: (doc: DocumentHandle, path: string, backup := false) {
 	push_task(*asyncWorker, data, save_task, save_task_complete);
 }
 
-document_is_unsaved :: (handle: DocumentHandle) -> bool {
+// has_local_edits means literally someone has edited the open document
+// is_unsaved means either there are local edits OR the on disk representation of the file
+// has changed
+document_has_local_edits :: (handle: DocumentHandle) -> bool {
 	doc := document_get(handle);
 
 	// there is pending edits that have not been finished yet, definitely unsaved
@@ -874,9 +914,14 @@ document_is_unsaved :: (handle: DocumentHandle) -> bool {
 	}
 
 	// most recent edit has not been saved
-	if doc.undoStack[doc.undoStack.count-1].saved == false {
-		return true;
-	}
+	return doc.undoStack[doc.undoStack.count-1].saved == false;
+}
+
+document_is_unsaved :: (handle: DocumentHandle) -> bool {
+	if document_has_local_edits(handle) return true;
+
+	slot := document_get_slot(handle);
+	if slot && (slot.missingOnDisk || slot.conflictedOnDisk) return true;
 
 	return false;
 }
@@ -900,105 +945,57 @@ document_update_path :: (handle: DocumentHandle, newPath: string) {
 	table_add(*openDocuments.pathTable, doc.path, handle);
 	unlock(*openDocuments.lock);
 
-	modtime, size, success := file_modtime_and_size(doc.path);
-	if success then doc.diskLastModtime = modtime;
-	doc.diskReadOnly = platform_file_is_read_only(doc.path);
-
-	parentPath := path_strip_filename(doc.path);
-	if parentPath.count > 1 && parentPath[parentPath.count-1] == #char "/" then parentPath.count -= 1;
-	add_directories(*fileWatcher, parentPath);
+	document_remember_disk_state(doc);
+	watch_directory_for_document(doc.path);
 }
 
-document_notify_moved_from :: (path: string) -> bool {
-	document_expire_stale_pending_renames();
+reconcile_document :: (handle: DocumentHandle) {
+	// Note that repeated calls of this function will function the same as a single call
+	slot := document_get_slot(handle);
+	if slot == null return;
+	if slot.state == .INVALID return;
 
-	found, doc := document_get_by_path(path);
-	if !found return false;
-
-	for * pendingDocumentRenames {
-		if platform_path_equal(it.oldPath, path) {
-			it.time = seconds_since_init();
-			return true;
-		}
-	}
-
-	entry: PendingDocumentRename;
-	entry.handle = doc;
-	entry.oldPath = copy_string(path);
-	entry.time = seconds_since_init();
-	array_add(*pendingDocumentRenames, entry);
-	return true;
-}
-
-document_notify_moved_to :: (path: string) -> bool {
-	document_expire_stale_pending_renames();
-
-	found, _ := document_get_by_path(path);
-	if found return true;
-
-	if pendingDocumentRenames.count > 0 {
-		entry := pendingDocumentRenames[0];
-		document_update_path(entry.handle, path);
-		free(entry.oldPath);
-		array_ordered_remove_by_index(*pendingDocumentRenames, 0);
-		return true;
-	}
-
-	return false;
-}
-
-document_expire_stale_pending_renames :: () {
-	now := seconds_since_init();
-	i := pendingDocumentRenames.count - 1;
-	while i >= 0 {
-		entry := *pendingDocumentRenames[i];
-		if now - entry.time > PENDING_RENAME_TIMEOUT_SECONDS {
-			doc := document_get(entry.handle);
-			if doc != *nilDocument && doc.undoStack.count > 0 {
-				doc.undoStack[doc.undoStack.count-1].saved = false;
-			}
-			free(entry.oldPath);
-			array_ordered_remove_by_index(*pendingDocumentRenames, i);
-		}
-		i -= 1;
-	}
-}
-
-document_handle_file_change :: (handle: DocumentHandle, change: *File_Change) {
 	doc := document_get(handle);
+	if doc == *nilDocument return;
 
-	if doc.savePending {
+	if slot.savePending || slot.loadInProgress {
+		slot.reconcileWanted = true;
 		return;
 	}
 
 	modtime, size, exists := file_modtime_and_size(doc.path);
-	if exists {
-		// check if the file changed on disk, we do a != to cover cases like
-		// P4 updating the modtime to an older time when you revert
-		if modtime != doc.diskLastModtime {
-			// reload file
-			if !document_is_unsaved(handle) {
-				// A single external save makes Windows emit a burst of change events (you can
-				// see the duplicates, even with differing drive-letter case, in the log). Record
-				// the new modtime now, before the reload starts, so the remaining events in the
-				// burst see an unchanged modtime and skip: the whole burst collapses into one
-				// reload. The async worker also writes diskLastModtime once it reads the file,
-				// to the same value, so this stays consistent after the slot flips.
-				doc.diskLastModtime = modtime;
-				document_load_from_disk(doc.handle);
-			}
-			else {
-				// @todo: when we have nicer UI this should give a popup or something more explicit
-				doc.undoStack[doc.undoStack.count-1].saved = false;
-				push_notification("File on disk changed, but you have unsaved edits");
-			}
+
+	wasMissing := slot.missingOnDisk;
+	slot.missingOnDisk = !exists || is_directory(doc.path);
+	if slot.missingOnDisk {
+		if !wasMissing then log("Document % has gone missing on disk", doc.path);
+		return;
+	}
+	if wasMissing then log("Document % is back on disk", doc.path);
+
+	// attributes can change without the contents doing so
+	doc.diskReadOnly = platform_file_is_read_only(doc.path);
+
+	// != rather than >, so that a Perforce revert setting an older modtime still triggers a reload
+	diskHasMovedOn := modtime != doc.diskLastModtime || size != doc.diskLastSize;
+	if !diskHasMovedOn {
+		slot.conflictedOnDisk = false;
+		return;
+	}
+
+	if document_has_local_edits(handle) {
+		if !slot.conflictedOnDisk {
+			slot.conflictedOnDisk = true;
+			log("Document % changed on disk while it has local edits", doc.path);
+			// @todo: when we have nicer UI this should give a popup or something more explicit
+			push_notification("File on disk changed, but you have unsaved edits");
 		}
-		// Even if the file modtime has not changed, there could have been an attribute change
-		doc.diskReadOnly = platform_file_is_read_only(doc.path);
+		return;
 	}
-	else if change.events & .REMOVED {
-		doc.undoStack[doc.undoStack.count-1].saved = false;
-	}
+
+	slot.conflictedOnDisk = false;
+	log("Reloading % from disk", doc.path);
+	document_load_from_disk(handle);
 }
 
 begin_edit :: (handle: DocumentHandle) {

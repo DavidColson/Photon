@@ -28,6 +28,12 @@ platform_is_path_directory :: (path: string) -> bool {
 	return false;
 }
 
+platform_path_stat :: (path: string) -> exists: bool, isDirectory: bool {
+	attrib := GetFileAttributesW(utf8_to_wide(path,,temp));
+	if attrib == INVALID_FILE_ATTRIBUTES return false, false;
+	return true, (attrib & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
 platform_path_hash :: (path: string) -> u32 {
 	lower := to_lower_copy(path,,temp);
 	path_overwrite_separators(lower, #char "/");

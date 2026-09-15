@@ -76,7 +76,6 @@ EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
 // globals
 editorMode := EditorMode.NORMAL;
 focusedPanel : Panel;
-fileWatcher: File_Watcher(void);
 window: Window_Type;
 windowWidth  : s32 = 1920;
 windowHeight : s32 = 1080;
@@ -199,9 +198,7 @@ main :: () {
 
 	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
 
-	if !init(*fileWatcher, file_watcher_callback, watch_recursively = true) {
-		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
-	}
+	watcher_init();
 
 	focusedPanel.layoutRect.x = 0;
 	focusedPanel.layoutRect.y = 0;
@@ -209,26 +206,19 @@ main :: () {
 	focusedPanel.layoutRect.h = xx windowHeight;
 	focusedPanel.activeDialog = .NONE;
 
+	projectParsed := false;
+	if isSet.project {
+		projectParsed, project = project_parser(args.project);
+		if projectParsed then project_watch_folders();
+	}
+
 	if filesToOpen.count > 0 {
 		doc := document_get_or_open(filesToOpen[0]);
 		panel_set_active_document(*focusedPanel, doc);
 	}
 
-	// test projects
-	// Note, this should be done _after the document is loaded so that it doesn't block the
-	// parsing job of the opening document
-	// does the beg the question of what happens if you open a big file? Does project loading _wait_ until it's done?
-	// The other option is that project loading stays on it's own thread similar to focus?
-	// means we either need a second async worker, or a thread group?
-	// I guess you could literally have a second async worker dedicated to project stuff?
-	// Have to be careful though to keep them separate and touching different things
-	// potentially we have a "file operations async worker" for opening, saving, parsing, calculating line length etc
-	// and a "project async worker" which handles filesystem scanning and such things
-	if isSet.project {
-		success, project = project_parser(args.project);
-		project_begin_load();
-	}
-	
+	if projectParsed then project_begin_load();
+
 	platform_set_backup_timer(window, do_backup_callback);
 
 	deltaTime: float64 = 0.0;
@@ -282,9 +272,8 @@ update :: (deltaTime: float64) {
 		array_add(*uiState.events, it);
 	}
 
+	watcher_update();
 	project_update();
-	process_changes(*fileWatcher);
-	document_expire_stale_pending_renames();
 
 	newDpiScale := platform_get_dpi_scale(window);
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
@@ -632,7 +621,7 @@ build_ui_panel :: (panel: *Panel) {
 			layout=.{ width=text_content(), height=text_content() },
 		});
 
-		if project.loadProgress != .COMPLETE || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
+		if project_is_loading() || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
 			spacer(.X, fixed(em(2.0)));
 
 			spinner := box(ui_key_nil, .{
@@ -1663,7 +1652,7 @@ custom_draw_search_result :: (box: *UIBox, udata: *void) {
 		else {
 			// for project files we'll trigger a syntax parse and cache the result
 			file := bucket_array_find_pointer(*project.projectFiles, searchResult.fileLocator);
-			if file {
+			if file && !file.tombstoned {
 				lock(*file.lock);
 				defer unlock(*file.lock);
 
@@ -1963,34 +1952,6 @@ do_backup_callback :: () {
 
 			document_save(doc, builder_to_string(*builder,,temp), true);
 		}
-	}
-}
-
-file_watcher_callback :: (watcher: *File_Watcher(void), change: *File_Change, userdata: *void) {
-	log("FileChange detected % %", change.full_path, change.events);
-
-	// unpaired move events are no-op here if the
-	// file isn't open as a document
-	// For project files it'll get handled below, we just
-	// delete and reload the project file, but for documents we handle it correctly so 
-	// nothing weird happens for the user, the filename will just change suddenly
-	if change.events & .MOVED_FROM {
-		if document_notify_moved_from(change.full_path) {
-			return;
-		}
-	}
-
-	if change.events & .MOVED_TO {
-		document_notify_moved_to(change.full_path);
-	}
-
-	// two different handlers for whether the file is open or not
-	found, doc := document_get_by_path(change.full_path);
-	if found {
-		document_handle_file_change(doc, change);
-	}
-	else {
-		project_handle_file_change(change);
 	}
 }
 
@@ -2481,6 +2442,7 @@ Input :: #import "Input";
 #load "async.jai";
 #load "document.jai";
 #load "project.jai";
+#load "watcher.jai";
 #load "project_search.jai";
 #load "language.jai";
 

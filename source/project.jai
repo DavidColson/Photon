@@ -21,11 +21,18 @@ Project :: struct {
 		lineEndingMode: Document.LineEndingMode;
 		lineStarts: []s64;
 		tsTree: *TSTree;
+
+		// Load tasks on the thread group hold a raw pointer to this file and take its lock while
+		// they write into it, so it cannot be freed while any of them are outstanding.
+		queuedLoads: s32;
+		// Removed from the project, but a queud load is still holding it.
+		tombstoned: bool;
 	}
 	projectFiles: Bucket_Array(File, 128);
 	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
 
 	ProjectLoadProgress :: enum {
+		NONE;
 		COMPLETE;
 		WAITING_FOR_FILE_SCAN;
 		FILE_SCAN_IN_PROGRESS;
@@ -35,7 +42,9 @@ Project :: struct {
 	loadProgress: ProjectLoadProgress;
 	pendingFileLoads: s32;
 	threadGroup: Thread_Group; // @todo: rename
+	threadGroupStarted: bool;
     lineStartTempArrays: [ ][..]s64;
+	pendingReconciles: [..]string; // these are file change events that came in while we were building the project file list
 
 	SearchResult :: struct {
 		matchLine: string;
@@ -61,10 +70,71 @@ project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
 
+project_is_loaded :: inline () -> bool {
+	return project.loadProgress == .COMPLETE;
+}
+
+project_is_loading :: inline () -> bool {
+	return project.loadProgress != .NONE && project.loadProgress != .COMPLETE;
+}
+
 free_file :: (file: *Project.File) {
 	free(file.content);
 	array_reset(*file.lineStarts);
 	if file.tsTree { ts_tree_delete(file.tsTree); file.tsTree = null; }
+}
+
+project_remove_file :: (locator: Bucket_Locator) {
+	file := bucket_array_find_pointer(*project.projectFiles, locator);
+	if file == null || file.tombstoned return;
+
+	table_remove(*project.projectFileTable, file.fullName);
+
+	if file.queuedLoads > 0 {
+		file.tombstoned = true; // reaped by project_update once those loads come back
+		log("Project file % tombstoned, % load(s) still in flight", file.fullName, file.queuedLoads);
+		return;
+	}
+
+	free_file(file);
+	destroy(*file.lock);
+	bucket_array_remove(*project.projectFiles, locator);
+}
+
+project_reap_tombstones :: () {
+	for * file: project.projectFiles {
+		if !file.tombstoned || file.queuedLoads > 0 continue;
+		log("Reaped tombstoned project file %", file.fullName);
+		locator := file.locator;
+		free_file(file);
+		destroy(*file.lock);
+		bucket_array_remove(*project.projectFiles, locator);
+	}
+}
+
+project_add_file :: (path: string) -> Bucket_Locator {
+	file := Project.File.{ fullName = copy_string(path,, project_allocator()) };
+	init(*file.lock);
+	locator, entry := bucket_array_add(*project.projectFiles, file);
+	entry.locator = locator;
+	table_add(*project.projectFileTable, entry.fullName, locator);
+	return locator;
+}
+
+project_queue_file_load :: (locator: Bucket_Locator) {
+	file := bucket_array_find_pointer(*project.projectFiles, locator);
+	if file == null || file.tombstoned return;
+
+	file.queuedLoads += 1;
+	project.pendingFileLoads += 1;
+	add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
+}
+
+path_is_within_project_folders :: (path: string) -> bool {
+	for project.folders {
+		if path_is_within(path, it) return true;
+	}
+	return false;
 }
 
 ProjectFileSections :: enum {
@@ -194,11 +264,15 @@ check_file_for_zeroes :: (path: string) -> bool {
 	return false;
 }
 
+project_watch_folders :: () {
+	for project.folders {
+		watch_project_directory(it);
+	}
+}
+
 project_begin_load :: () {
 	// note this task will read/edit the project without any protection
 	// it is assumed no other project processes happen while this occurs
-
-    add_directories(*fileWatcher, ..project.folders);
 
 	collect_project_files_task :: (data: *void) {
 		maybe_add_file_to_project_list :: (info: *File_Visit_Info, udata: *Project) {
@@ -218,12 +292,7 @@ project_begin_load :: () {
 
 			// log("found file short: % full: %", info.short_name, info.full_name);
 
-			// If we're keeping a file, copy it's full_name with our allocator and store
-			file := Project.File.{ fullName = copy_string(info.full_name,, project_allocator()) };
-			init(*file.lock);
-			locator, entry := bucket_array_add(*project.projectFiles, file);
-			entry.locator = locator;
-			table_add(*project.projectFileTable, file.fullName, locator);
+			project_add_file(info.full_name);
 		}
 
 		for project.folders {
@@ -245,11 +314,11 @@ project_update :: () {
 		init_thread_groups();
 		start(*project.threadGroup);
 		start(*project.searchThreads);
+		project.threadGroupStarted = true;
 
 		for * project.projectFiles {
 			if it.content.count == 0 {
-				project.pendingFileLoads += 1;
-				add_work(*project.threadGroup, it, tprint("Load task %", it.fullName));
+				project_queue_file_load(it.locator);
 			}
 		}
 
@@ -257,26 +326,28 @@ project_update :: () {
 		project.loadProgress = .FILE_LOADING_IN_PROGRESS;
 	}
 
-	if project.loadProgress == .FILE_LOADING_IN_PROGRESS {
-
+	if project.threadGroupStarted {
 		results := get_completed_work(*project.threadGroup);
-
 		for results {
 			// for each loaded file you will need to copy it's data into the
 			// real document in the open documents table
+			file := cast(*Project.File, it);
+			file.queuedLoads -= 1;
 			project.pendingFileLoads -= 1;
 		}
+		if results.count > 0 then project_reap_tombstones();
+	}
 
-		if project.pendingFileLoads == 0 {
-			project.loadProgress = .COMPLETE;
-			log("Project loading complete");
-			push_notification("Project Loaded");
-		}
+	if project.loadProgress == .FILE_LOADING_IN_PROGRESS && project.pendingFileLoads == 0 {
+		project.loadProgress = .COMPLETE;
+		log("Project loading complete");
+		push_notification("Project Loaded");
+		project_replay_pending_reconciles();
 
 		// @todo: track the progress of the project load
 	}
 
-	if project.loadProgress != .COMPLETE {
+	if project_is_loading() {
 		requestRedraw = true;
 	}
 
@@ -312,46 +383,75 @@ project_update :: () {
 	}
 }
 
-// Reacts to a file watcher change for a path that is not currently an open
-// document (the shared fileWatcher's routing callback in main.jai only calls
-// this once it has confirmed the path isn't an open document).
-project_handle_file_change :: (change: *File_Change) {
-	if project.loadProgress != .COMPLETE then return;
+reconcile_project_entry :: (path: string) {
+	if project.loadProgress == .NONE return;
 
-	// is this actually a file we care about in the project?
-	if !should_ignore_file(change.full_path) {
-		if change.events & .MODIFIED {
-			success, fileLocator := table_find(*project.projectFileTable, change.full_path);
-			if success {
-				file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
-				project.pendingFileLoads += 1;
-				add_work(*project.threadGroup, file, tprint("Load task %", file.fullName));
-			}
+	if project_is_loading() {
+		if project.pendingReconciles.count < MAX_PENDING_RECONCILES {
+			array_add(*project.pendingReconciles, copy_string(path));
+		}
+		return;
+	}
+
+	if !path_is_within_project_folders(path) return;
+	if should_ignore_file(path) return;
+
+	found, locator := table_find(*project.projectFileTable, path);
+	exists, isDirectory := platform_path_stat(path);
+
+	// TODO: we don't protect for the case where the file content is the same
+	// so it reloads again here
+	// Good for keeping us in sync, but maybe this could be improved?
+	if exists && !isDirectory {
+		if found {
+			project_queue_file_load(locator);
 		}
 		else {
-			if change.events & .MOVED_FROM || change.events & .REMOVED {
-				success, fileLocator := table_find(*project.projectFileTable, change.full_path);
-				if success {
-					file := bucket_array_find_pointer(*project.projectFiles, fileLocator);
-					free_file(file);
-					destroy(*file.lock);
-					bucket_array_remove(*project.projectFiles, fileLocator);
-					table_remove(*project.projectFileTable, change.full_path);
-				}
-			
-			}
-			if change.events & .ADDED || change.events & .MOVED_TO {
-				newFile := Project.File.{ fullName = copy_string(change.full_path,, project_allocator()) };
-				init(*newFile.lock);
-				locator, entry := bucket_array_add(*project.projectFiles, newFile);
-				entry.locator = locator;
-				table_add(*project.projectFileTable, newFile.fullName, locator);
-
-				project.pendingFileLoads += 1;
-				add_work(*project.threadGroup, entry, tprint("Load task %", entry.fullName));
-			}
+			log("Project file added: %", path);
+			project_queue_file_load(project_add_file(path));
 		}
 	}
+	else if found {
+		log("Project file removed: %", path);
+		project_remove_file(locator);
+	}
+}
+
+MAX_PENDING_RECONCILES :: 8192;
+
+project_replay_pending_reconciles :: () {
+	for project.pendingReconciles {
+		reconcile_project_entry(it);
+		free(it);
+	}
+	array_reset(*project.pendingReconciles);
+}
+
+project_scan_directory :: (dir: string) {
+	if !project_is_loaded() return;
+	if !path_is_within_project_folders(dir) return;
+	if should_ignore_path(dir) return;
+
+	added := 0;
+
+	visit :: (info: *File_Visit_Info, addedCount: *int) {
+		if info.is_directory {
+			if should_ignore_path(info.full_name) then info.descend_into_directory = false;
+			return;
+		}
+		if should_ignore_file(info.full_name) return;
+		if table_contains(*project.projectFileTable, info.full_name) return;
+
+		alreadyOpen, _ := document_get_by_path(info.full_name);
+		if alreadyOpen return;
+
+		project_queue_file_load(project_add_file(info.full_name));
+		addedCount.* += 1;
+	}
+
+	visit_files(dir, recursive=true, *added, visit, visit_directories=true);
+
+	if added  log("Scanned new directory %: % project files added", dir, added);
 }
 
 init_thread_groups :: () {
@@ -432,6 +532,7 @@ project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *voi
 
 		for project.projectFiles.all_buckets[searchWork.bucketIndex].data {
 			if !project.projectFiles.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
+			if it.tombstoned then continue; // deleted on disk, only its memory is still here
 		    file := *it;
 
 			// @todo: currently 500 results per file is the max?? is that sensible?
