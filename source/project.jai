@@ -202,11 +202,17 @@ project_parser :: (projectFileName: string) -> bool, Project {
 				}
 				line = trim_right(line, "/");
 				line = trim_right(line, "\\");
-				array_add(*project.folders, copy_string(line,,project_allocator()));
+				folder := copy_string(line,,project_allocator()); 
+				path_overwrite_separators(folder, #char "/");
+				array_add(*project.folders, folder);
 			case .IGNORE;
-				array_add(*project.ignore, copy_string(line,,project_allocator()));
+				folder := copy_string(line,,project_allocator()); 
+				path_overwrite_separators(folder, #char "/");
+				array_add(*project.ignore, folder);
 			case .ALLOW;
-				array_add(*project.allow, copy_string(line,,project_allocator()));
+				folder := copy_string(line,,project_allocator()); 
+				path_overwrite_separators(folder, #char "/");
+				array_add(*project.allow, folder);
 		}
 	}
 
