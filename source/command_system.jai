@@ -383,8 +383,8 @@ input_handler :: (event: Input.Event) {
 				
 				if keyArgs.count < node.cmd.args.count {
 					// invoke the command palette if the command wants more arguments
-					command_palette_open(*focusedPanel);
 					focusedPanel.commandPalette.pendingCommand = node.cmd;
+					command_palette_open(*focusedPanel);
 				}
 				else {
 					node.cmd.wrapper(*focusedPanel, keyArgs);

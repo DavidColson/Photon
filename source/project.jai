@@ -27,7 +27,8 @@ Project :: struct {
 		queuedLoads: s32;
 		// Removed from the project, but a queud load is still holding it.
 		tombstoned: bool;
-	}
+	}	
+	
 	projectFiles: Bucket_Array(File, 128);
 	projectFileTable: Table(string, Bucket_Locator, given_compare_function=platform_path_equal, given_hash_function=platform_path_hash);
 

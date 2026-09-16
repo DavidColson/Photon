@@ -195,7 +195,11 @@ for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expa
 			case .B_VALID; doc = *slot.docB;
 			case; continue;
 		}
-		`it := doc.handle;
+		#if flags & .POINTER {
+			`it := *doc.handle;
+		} else {
+			`it := doc.handle;
+		}
 		`it_index := count;
 		count += 1;
 		#insert body;

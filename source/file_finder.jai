@@ -17,7 +17,7 @@ FileFinder :: struct {
 }
 
 file_finder_open :: (using panel: *Panel) {
-	NORMAL :: CommandConfig.{ prettyName = "Open file finder", keybinding = .["<space>f"] };
+	NORMAL :: CommandConfig.{ prettyName = "Open file finder" };
 	panel.activeDialog = .FILE_FINDER;
 	editorMode = .DIALOG;
 
@@ -49,26 +49,6 @@ file_finder_open :: (using panel: *Panel) {
 	fileFinder.input.onEditCallback = file_finder_input_field_on_edit;
 	fileFinder.input.userData = *fileFinder;
 } @command
-
-calculate_open_recency_bonus :: (document: DocumentHandle) -> s64 {
-	found, lastOpenTime := table_find(*fileOpenRecency, document);
-	if found {
-		timeSinceLastOpen := to_float64_seconds(current_time_consensus() - lastOpenTime);
-		normalized := clamp(pow(0.9995, timeSinceLastOpen), 0.0, 1.0);
-		return cast(s64, normalized * 16000);
-	}
-	return 0;
-}
-
-calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
-	fileAge := to_float64_seconds(current_time_consensus() - modtime);
-	// this is an exponential decay that ensures all files get some kind of recency bonus
-	// and the recency bonus decays out to zero for every file, so there is no "window"
-	// The 0.9998 value is picked such that files you've touched over the last 4-5 hours have meaningful values
-	// to sort, so you can expect a sensible ordering for your last day of work
-	normalized := clamp(pow(0.9998, fileAge), 0.0, 1.0);
-	return cast(s64, normalized * 12000);
-}
 
 compare_entries :: (e1: FileFinder.FileEntry, e2: FileFinder.FileEntry) -> s64 {
 	diff := e2.sortKey - e1.sortKey;

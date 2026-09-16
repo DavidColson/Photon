@@ -965,8 +965,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			}
 			
 			// Draw the list of suggestions, that are currently relevant
-			if panel.commandPalette.suggestionList.count > 0 {
-				elementHeight := cast(float, fontMetrics.characterHeight*2);
+			if panel.commandPalette.currentArgSuggestionKind > .NONE {
+				isFinderFile := panel.commandPalette.currentArgSuggestionKind == .FINDER_FILE;
+				elementHeight := cast(float, fontMetrics.characterHeight*(ifx isFinderFile then 3 else 2));
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
@@ -984,7 +985,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					
 					entryBox := box(ui_key("suggestion##%", it), .{
 						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)), childAlignment=.CENTER },
+						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
 						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 					});
 					signal := signal_from_box(entryBox);
@@ -997,7 +998,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						push_parent(entryBox); defer pop_parent();
 						
 						
-						if suggestion.displayMode == {
+						if panel.commandPalette.currentArgSuggestionKind == {
 						case .NORMAL;
 							suggestionLabel := box(ui_key("%##%", suggestion.name, it), .{
 								flags=.DRAW_TEXT_HIGHLIGHTS,
@@ -1035,6 +1036,26 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 									textPadding=em(0.3)
 								});
 							}
+						case .FINDER_FILE;
+							verticalBox := box(ui_key_nil, .{ layout=.{ width=grow(), height=grow(), childLayoutAxis=.Y }, });
+							{
+								push_parent(verticalBox); defer pop_parent();
+								key := ui_key("%##fileListEntryLabel%", path_filename(suggestion.name), it);
+								fileLabel := box(key, .{
+									flags=.DRAW_TEXT_HIGHLIGHTS,
+									layout=.{ width=text_content(), height=text_content() },
+								});
+								fileLabel.textHighlights = suggestion.filenameFuzzyMatches;
+								
+								key2 := ui_key("%##fileListPathLabel%", suggestion.name, it);
+								pathLabel := box(key2, .{
+									flags=.DRAW_TEXT_HIGHLIGHTS,
+									fontSize=em(0.7),
+									layout=.{ width=text_content(), height=text_content() },
+								});
+								pathLabel.textHighlights = suggestion.fuzzyMatches;
+							}
+							
 						}
 					}
 				}

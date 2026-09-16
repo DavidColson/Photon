@@ -11,18 +11,25 @@ CommandPalette :: struct {
 	// I don't particularly like this, we should refactor this to be nicer and clean up
 	// the memory properly
 	argList: [..]string;
+	currentArgSuggestionKind: SuggestionKind;
 	
-	fuzzySearchResultMemory : Flat_Pool;
+	// TODO: this could probably be a tagged union at some point
+	
+	SuggestionKind :: enum {
+		NONE;
+		NORMAL;
+		COMMAND;
+		FINDER_FILE;
+	}
 	Suggestion :: struct {
 		name: string;
 		sortKey: s64;
 		fuzzyMatches: []Highlight;
 		userData: *void;
-		DisplayMode :: enum {
-			NORMAL;
-			COMMAND;
-		}
-		displayMode: DisplayMode;
+		
+		// Specialized members used by the FINDER_FILE kind
+		isDocument: bool;
+		filenameFuzzyMatches: []Highlight;
 	}
 	
 	numToDisplay:s64; // number of items with positive sortkeys
@@ -30,20 +37,6 @@ CommandPalette :: struct {
 	selection: s32;
 	selectionChange: bool;
 	editorModeFilter: EditorMode;
-}
-
-TestEnum :: enum {
-	FIRST_VALUE;
-	SECOND_VALUE;
-}
-
-get_enum_pretty_names :: (enumType: *Type_Info_Enum) -> []string {
-	if enumType == type_info(TestEnum) {
-		return .[ "First Value", "Second Value" ];
-	}
-	else {
-		return enumType.names;
-	}
 }
 
 command_palette_open :: (using panel: *Panel) {
@@ -67,23 +60,24 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	
 	if pendingCommand == null {
 		// default mode, suggestions will be a list of commands
+		currentArgSuggestionKind = .COMMAND;
 		for * command: allCommands[editorModeFilter] {
 			if !(command.flags & .HIDDEN) {
 				suggestion := array_add(*suggestionList);
 				suggestion.sortKey = 10;
 				suggestion.name = command.prettyName;
 				suggestion.userData = command;
-				suggestion.displayMode = .COMMAND;
 				numToDisplay += 1;
 			}
 		}
 	}
 	else {
 		// show suggestions based on the current commands pending argument
-		pendingArgument := argList.count;
-		
-		if pendingCommand.args[pendingArgument].type.type == {
+		pendingArgument := pendingCommand.args[argList.count];
+		if pendingArgument.type.type == {
+			
 		case .BOOL;
+			currentArgSuggestionKind = .NORMAL;
 			suggestionTrue := array_add(*suggestionList);
 			suggestionTrue.sortKey = 10;
 			suggestionTrue.name = "true";
@@ -93,8 +87,10 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 			suggestionFalse.sortKey = 10;
 			suggestionFalse.name = "false";
 			numToDisplay += 1;
+			
 		case .ENUM;
-			enumType := cast(*Type_Info_Enum)pendingCommand.args[pendingArgument].type;
+			currentArgSuggestionKind = .NORMAL;
+			enumType := cast(*Type_Info_Enum)pendingArgument.type;
 			for get_enum_pretty_names(enumType) {
 				suggestion := array_add(*suggestionList);
 				suggestion.sortKey = 10;
@@ -102,10 +98,66 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 				suggestion.userData = *enumType.values[it_index];
 				numToDisplay += 1;
 			}
+			
+		case .STRUCT;
+			structTypeInfo := cast(*Type_Info_Struct, pendingArgument.type);
+			if structTypeInfo.name == "FinderFile" {
+				// file finder suggestions
+				currentArgSuggestionKind = .FINDER_FILE;
+				for * file: project.projectFiles {
+					if file.tombstoned then continue;
+					suggestion := array_add(*suggestionList);
+					suggestion.name = file.fullName;
+					suggestion.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
+					suggestion.userData = file;
+					suggestion.isDocument = false;
+					numToDisplay += 1;
+				}
+				for doc: openDocuments {
+					suggestion := array_add(*suggestionList);
+					suggestion.name = document_get_path(doc);
+					suggestion.sortKey = 10 + calculate_edit_recency_bonus(document_get_disk_last_modtime(doc)) + calculate_open_recency_bonus(doc);
+					docHandleCopy := New(DocumentHandle,,get_per_invocation_allocator(palette));
+					docHandleCopy.* = doc;
+					suggestion.userData = docHandleCopy;
+					suggestion.isDocument = true;
+					numToDisplay += 1;
+				}
+			}
+			
 		case;
 			// all other types don't have suggestions
+			currentArgSuggestionKind = .NONE;
 		}
 	}
+	
+	quick_sort(suggestionList, compare_entries);
+}
+
+calculate_open_recency_bonus :: (document: DocumentHandle) -> s64 {
+	found, lastOpenTime := table_find(*fileOpenRecency, document);
+	if found {
+		timeSinceLastOpen := to_float64_seconds(current_time_consensus() - lastOpenTime);
+		normalized := clamp(pow(0.9995, timeSinceLastOpen), 0.0, 1.0);
+		return cast(s64, normalized * 16000);
+	}
+	return 0;
+}
+
+calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
+	fileAge := to_float64_seconds(current_time_consensus() - modtime);
+	// this is an exponential decay that ensures all files get some kind of recency bonus
+	// and the recency bonus decays out to zero for every file, so there is no "window"
+	// The 0.9998 value is picked such that files you've touched over the last 4-5 hours have meaningful values
+	// to sort, so you can expect a sensible ordering for your last day of work
+	normalized := clamp(pow(0.9998, fileAge), 0.0, 1.0);
+	return cast(s64, normalized * 12000);
+}
+
+compare_entries :: (e1: CommandPalette.Suggestion, e2: CommandPalette.Suggestion) -> s64 {
+	diff := e2.sortKey - e1.sortKey;
+	if diff != 0 return diff;
+	return memcmp(e1.name.data, e2.name.data, min(e1.name.count, e2.name.count));
 }
 
 command_palette_filter_and_sort_suggestions :: (using palette: *CommandPalette, filter: string) {
@@ -114,24 +166,45 @@ command_palette_filter_and_sort_suggestions :: (using palette: *CommandPalette, 
 	
 	reset(*perSearchMem);
 	
-	numToDisplay = 0;
-	for * suggestion: suggestionList {
-		score,fuzzyMatches := fuzzy_search(suggestion.name, filter,,get_per_search_allocator(palette));
-		
-		suggestion.fuzzyMatches = fuzzyMatches;
-		suggestion.sortKey = score;
-		if suggestion.sortKey > 0 {
-			numToDisplay += 1;
+	if currentArgSuggestionKind == {
+	case .NORMAL; #through;
+	case .COMMAND;
+		numToDisplay = 0;
+		for * suggestion: suggestionList {
+			score,fuzzyMatches := fuzzy_search(suggestion.name, filter,,get_per_search_allocator(palette));
+			
+			suggestion.fuzzyMatches = fuzzyMatches;
+			suggestion.sortKey = score;
+			if suggestion.sortKey > 0 {
+				numToDisplay += 1;
+			}
 		}
+	case .FINDER_FILE;
+		numToDisplay = 0;
+		for * suggestion: suggestionList {
+			scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(suggestion.name), filter,,get_per_search_allocator(palette));
+			scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(suggestion.name), filter,,get_per_search_allocator(palette));
+			score := scoreFile + scorePath/5;
+			recencyBonus := 0;
+			if suggestion.isDocument {
+				doc := cast(*DocumentHandle, suggestion.userData);
+				recencyBonus = calculate_edit_recency_bonus(document_get_disk_last_modtime(doc)) + calculate_open_recency_bonus(doc);
+			}
+			else {
+				file := cast(*Project.File, suggestion.userData);
+				recencyBonus = calculate_edit_recency_bonus(file.diskLastModtime);
+			}
+			
+			suggestion.fuzzyMatches = fuzzyMatchesPath;
+			suggestion.filenameFuzzyMatches = fuzzyMatchesFile;
+			suggestion.sortKey = score + recencyBonus;
+			if suggestion.sortKey > 0 {
+				numToDisplay += 1;
+			}
+		}
+		
 	}
 	
-	// TODO: somehow add extra sorting information for items depending on their type??
-	
-	compare_entries :: (e1: CommandPalette.Suggestion, e2: CommandPalette.Suggestion) -> s64 {
-		diff := e2.sortKey - e1.sortKey;
-		if diff != 0 return diff;
-		return memcmp(e1.name.data, e2.name.data, min(e1.name.count, e2.name.count));
-	}
 	quick_sort(suggestionList, compare_entries);
 	
 	maxItems := numToDisplay - 1;
@@ -179,8 +252,8 @@ command_palette_execute_command :: (using panel: *Panel) {
 		// In this branch we are waiting for arguments
 		// we switch on the expected argument type
 		
-		pendingArgument := state.argList.count;
-		if state.pendingCommand.args[pendingArgument].type.type == {
+		pendingArgument := state.pendingCommand.args[state.argList.count];
+		if pendingArgument.type.type == {
 		case .BOOL;
 			if state.selection < 0 then return; // Invalid selection
 			arg := copy_string(state.suggestionList[state.selection].name);
@@ -202,7 +275,7 @@ command_palette_execute_command :: (using panel: *Panel) {
 			array_add(*state.argList, arg);
 			
 		case .INTEGER;
-			if state.pendingCommand.args[pendingArgument].type.runtime_size == 1 {
+			if pendingArgument.type.runtime_size == 1 {
 				// if the integer is a u8, I've aribrarily decided it should be treated as a char
 				// this may come back to bite me, but there we go
 				// we convert the char to a string of that number, which is a bit ick tbh
@@ -221,7 +294,20 @@ command_palette_execute_command :: (using panel: *Panel) {
 			if state.selection < 0 then return; // Invalid selection
 			arg := copy_string(state.suggestionList[state.selection].name);
 			array_add(*state.argList, arg);
-			
+		
+		case .STRUCT;
+			structTypeInfo := cast(*Type_Info_Struct, pendingArgument.type);
+			if structTypeInfo.name == "FinderFile" {
+				chosenFile := state.suggestionList[state.selection];
+				if chosenFile.isDocument {
+					// what the fuck do we do here??
+					// need to refactor this whole thing to not use string arguments
+					// and now!!
+				}
+				else {
+					
+				}
+			}
 		case;
 			assert(false, "Invalid argument type given");
 		}
@@ -322,6 +408,11 @@ command_palette_select_previous :: (using panel: *Panel) {
 	state.selection = clamp(state.selection-1, 0, xx maxItems);
 	state.selectionChange = true;
 } @command
+
+get_enum_pretty_names :: (enumType: *Type_Info_Enum) -> []string {
+	// Put in here overrides for enums that you want to have pretty visual names
+	return enumType.names;
+}
 
 #scope_file
 

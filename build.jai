@@ -306,11 +306,22 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 				else {
 					append(builder,    "cast(*");
 					
+					validStructType := false;
+					if argTypeInfo.type == .STRUCT {
+						structTypeInfo := cast(*Type_Info_Struct, argTypeInfo);
+						for structTypeInfo.notes {
+							if it == "command_arg" {
+								validStructType = true;
+							}
+						}
+					}
+					
 					if argTypeInfo.type != .INTEGER &&
 					argTypeInfo.type != .FLOAT &&
 					argTypeInfo.type != .BOOL &&
 					argTypeInfo.type != .ENUM &&
-					argTypeInfo.type != .STRING {
+					argTypeInfo.type != .STRING &&
+					!validStructType {
 						compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "Unsupported argument type in command");
 					}
 					
