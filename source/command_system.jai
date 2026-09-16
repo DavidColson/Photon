@@ -28,6 +28,20 @@ Command :: struct {
 	using config: CommandConfig;
 }
 
+// Stores everything, including owning the meomry to invoke a command
+// with a given set of arguments in the future
+// Use the various helpers below to use this safely
+DeferredCommand :: struct {
+	cmd: *Command;
+	panel: *Panel;
+	argMem: Flat_Pool;
+	args: []*void;
+}
+
+// we only support 5 right now, we'll see about that later
+pendingDeferredCommands: [5]DeferredCommand;
+pendingDeferredCommandsCount := 0;
+
 Option :: struct {
 	data: *void;
 	type: *Type_Info;
@@ -194,6 +208,67 @@ initialize_commands_and_keymap :: ()  {
 	keyMap.pendingKeyNode = *keyMap.root[editorMode];
 }
 
+create_deferred_command :: (command: *Command, panel: *Panel) -> DeferredCommand {
+	defCommand: DeferredCommand;
+	defCommand.panel = panel;
+	defCommand.cmd = command;
+	defCommand.args = NewArray(command.args.count, *void,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
+	return defCommand;
+}
+
+create_deferred_command :: (command: *Command, panel: *Panel, args: .. Any) -> DeferredCommand {
+	assert(args.count <= command.args.count, "Can't create a deferred command with more arguments than the command actually expects");
+	
+	defCommand: DeferredCommand;
+	defCommand.panel = panel;
+	defCommand.cmd = command;
+	defCommand.args = NewArray(command.args.count, *void,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
+	for args {
+		defCommand.args[it_index] = it.value_pointer;
+	}
+	return defCommand;
+}
+
+deferred_command_set_argument :: (defCommand: *DeferredCommand, index: int, arg: Any) {
+	assert(index < defCommand.cmd.args.count, "Not a valid argument index in the command you are using");
+	assert(arg.type == defCommand.cmd.args[index].type, "Mismatching type in given argument for a deferred command");
+	defCommand.args[index] = arg.value_pointer;
+}
+
+deferred_command_invoke :: (defCommand: *DeferredCommand) {
+	defCommand.cmd.wrapper(defCommand.panel, defCommand.args);
+	reset(*defCommand.argMem);
+	defCommand.args = .[];
+}
+
+queue_command :: (command: *Command, panel: *Panel, args: .. Any) {
+	pendingDeferredCommands[pendingDeferredCommandsCount] = create_deferred_command(command, panel, ..args);
+	pendingDeferredCommandsCount += 1;
+}
+
+flush_pending_commands :: () {
+	for 0..pendingDeferredCommandsCount-1 {
+		deferred_command_invoke(*pendingDeferredCommands[it]);
+	}
+	pendingDeferredCommandsCount = 0;
+	// if the command changed the mode we need to reset the root keymap
+	keyMap.pendingKeyNode = *keyMap.root[editorMode];
+}
+
+find_command_by_name :: (commandName: string) -> *Command {
+	// TODO: you could even do this at build time no?
+	// quick and easy but you may want to accelerate with a map?
+	for editorMode: 0..EDITOR_MODE_NUM {
+		for * allCommands[editorMode] {
+			if it.name == commandName {
+				return it;
+			}
+		}
+	}
+	return null;
+}
+
+// TODO: remove this
 execute_command :: (panel: *Panel, command: Command, args: []string) {
 	// Our input here is the command that was invoked either via a keybinding or via 
 	// an entry in the command palette

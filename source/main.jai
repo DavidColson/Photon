@@ -89,25 +89,11 @@ asyncWorker: Async;
 logger: LoggerData;
 startTime: Apollo_Time;
 
-// allows UI to safely execute key commands
-DeferredCommand :: struct {
-	panel: *Panel;
-	// TODO: we don't support sending args, but we theoretically could
-	// just have a little pool of memory with the args in it stored in here
-	// TODO: commands are stored in arrays, with no direct lookup, so for now
-	// we just store the string here and we'll look it up before we call it
-	// if it ever becomes a problem just put them in a table
-	commandName: string;
-}
-deferredCommands: [5]DeferredCommand;
-pendingDeferredCommands := 0;
-
 // this is used to set the codebox's initial scroll offset before it's been created
 // potentially a nicer way to do this??
 codeScrollInitialOffset := 0.0;
 codeScrollInitialBounds := 0.0;
 
-// some deferred actions, might want a nicer way to do things like this at some point
 queuePrintHighlightDebug := false;
 
 // current project (only one active at a time)
@@ -282,23 +268,8 @@ update :: (deltaTime: float64) {
 
 	build_ui();
 
-	for 0..pendingDeferredCommands-1 {
-		deferredCommand := *deferredCommands[it];
-		command: *Command;
-		for allCommands {
-			for * it {
-				if it.name == deferredCommand.commandName {
-					command = it;
-					break;
-				}
-			}
-		}
-		execute_command(deferredCommand.panel, command, .[]);
-		// if the command changed the mode we need to reset the root keymap
-		keyMap.pendingKeyNode = *keyMap.root[editorMode];
-	}
-	pendingDeferredCommands = 0;
-
+	flush_pending_commands();
+	
 	// after ui has taken any inputs it wants, we'll give the rest to the default input handler
 	for uiState.events {
 		input_handler(it);
@@ -991,8 +962,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.commandPalette.selection = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, "command_palette_execute_command"};
-						pendingDeferredCommands += 1;
+						queue_command(find_command_by_name("command_palette_execute_command"), panel);
 					}
 					{
 						push_parent(entryBox); defer pop_parent();
@@ -1189,8 +1159,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.filesystemNav.selectedItem = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, "filesystem_nav_action_item"};
-						pendingDeferredCommands += 1;
+						queue_command(find_command_by_name("filesystem_nav_action_item"), panel);
 					}
 					{
 						push_parent(entryBox); defer pop_parent();
@@ -1210,8 +1179,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.filesystemNav.selectedItem = xx it;
-						deferredCommands[pendingDeferredCommands] =.{panel, "filesystem_nav_action_item"};
-						pendingDeferredCommands += 1;
+						queue_command(find_command_by_name("filesystem_nav_action_item"), panel);
 					}
 					{
 						push_parent(entryBox); defer pop_parent();
@@ -1321,8 +1289,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 				signal := signal_from_box(entryBox);
 				if signal.pressed {
 					panel.projectSearcher.selectedEntry = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, "project_search_open_result"};
-					pendingDeferredCommands += 1;
+					queue_command(find_command_by_name("project_search_open_result"), panel);
 				}
 
 				{
@@ -1486,8 +1453,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 
 				if signal_from_box(entryBox).pressed {
 					panel.fileFinder.selectedEntry = xx it;
-					deferredCommands[pendingDeferredCommands] =.{panel, "file_finder_select_file"};
-					pendingDeferredCommands += 1;
+					queue_command(find_command_by_name("file_finder_select_file"), panel);
 				}
 
 				{
