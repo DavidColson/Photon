@@ -6,12 +6,20 @@ CommandPalette :: struct {
 	perInvocationMem : Flat_Pool;
 	perSearchMem : Flat_Pool;
 	input: InputField;
-	pendingCommand: *Command;
-	// TODO: argList memory is handled differently because it must exist during command invocation
-	// I don't particularly like this, we should refactor this to be nicer and clean up
-	// the memory properly
-	argList: [..]string;
+	
+	// stuff for pending command mode
+	pendingCommandMode := false;
+	pendingCommand: DeferredCommand;
+	currentArgIndex := 0;
 	currentArgSuggestionKind: SuggestionKind;
+	
+	// TO REMOVE
+	// pendingCommand: *Command;
+	// // TODO: argList memory is handled differently because it must exist during command invocation
+	// // I don't particularly like this, we should refactor this to be nicer and clean up
+	// // the memory properly
+	// argList: [..]string;
+	
 	
 	// TODO: this could probably be a tagged union at some point
 	
@@ -45,7 +53,6 @@ command_palette_open :: (using panel: *Panel) {
 	commandPalette.editorModeFilter = editorMode;
 	editorMode = .DIALOG;
 	
-	commandPalette.argList.allocator = get_per_invocation_allocator(*commandPalette);
 	commandPalette.suggestionList.allocator = get_per_invocation_allocator(*commandPalette);
 
 	command_palette_populate_suggestions(*commandPalette);
@@ -58,7 +65,7 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	array_reset(*suggestionList);
 	numToDisplay = 0;
 	
-	if pendingCommand == null {
+	if pendingCommandMode == false {
 		// default mode, suggestions will be a list of commands
 		currentArgSuggestionKind = .COMMAND;
 		for * command: allCommands[editorModeFilter] {
@@ -73,7 +80,7 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	}
 	else {
 		// show suggestions based on the current commands pending argument
-		pendingArgument := pendingCommand.args[argList.count];
+		pendingArgument := pendingCommand.cmd.args[currentArgIndex];
 		if pendingArgument.type.type == {
 			
 		case .BOOL;
@@ -236,11 +243,7 @@ command_palette_reset :: (panel: *Panel) {
 // Used when the dialog is dismissed without a command having run to completion 
 command_palette_cancel :: (panel: *Panel) {
 	using panel.commandPalette;
-	for argList {
-		free(it);
-	}
-	array_reset(*argList);
-	pendingCommand = null;
+	cancel_deferred_command(*pendingCommand);
 	command_palette_reset(panel);
 }
 
@@ -248,11 +251,15 @@ command_palette_execute_command :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ };
 	state := *commandPalette;
 	
-	if state.pendingCommand {
+	if state.pendingCommandMode {
 		// In this branch we are waiting for arguments
 		// we switch on the expected argument type
 		
-		pendingArgument := state.pendingCommand.args[state.argList.count];
+		pendingArgument := state.pendingCommand.cmd.args[state.currentArgIndex];
+		
+		// TODO: for Dave later, this is where the meat is, instead of putting string args in the arg list
+		// you can just take the literal data type and set it in the pending arg
+		
 		if pendingArgument.type.type == {
 		case .BOOL;
 			if state.selection < 0 then return; // Invalid selection
@@ -324,7 +331,7 @@ command_palette_execute_command :: (using panel: *Panel) {
 				free(it);
 			}
 			array_reset(*state.argList);
-			state.pendingCommand = null;
+			state.pendingCommandMode = false;
 		}
 		else {
 			input_field_reset_keeping_memory(*state.input);
@@ -352,7 +359,9 @@ command_palette_execute_command :: (using panel: *Panel) {
 		}
 		else {
 			// We need commands, so enter pending command mode
-			state.pendingCommand = cmd;
+			state.pendingCommandMode = true;
+			state.pendingCommand = create_deferred_command(cmd, panel);
+			state.currentArgIndex = 0;
 			input_field_reset_keeping_memory(*state.input);
 			command_palette_populate_suggestions(*commandPalette);
 		}

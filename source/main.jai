@@ -898,13 +898,13 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			{
 				push_parent(inputBox); defer pop_parent();
 				
-				if panel.commandPalette.pendingCommand {
-					pendingCommandLabel := box(ui_key("%", panel.commandPalette.pendingCommand.prettyName), .{
+				if panel.commandPalette.pendingCommandMode {
+					pendingCommandLabel := box(ui_key("%", panel.commandPalette.pendingCommand.cmd.prettyName), .{
 						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					
-					for panel.commandPalette.argList {
+					for panel.commandPalette.pendingCommand.args {
 						box(ui_key("%##%", it, it_index), .{
 							flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 							layout=.{ width=text_content(), height=text_content() },
@@ -912,10 +912,10 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					}
 				}
 				
-				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommand {
-					currentArg := panel.commandPalette.argList.count;
+				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
+					currentArg := panel.commandPalette.currentArgIndex;
 					// TODO: capitalize and undo camelcase on this name
-					box(ui_key("%", panel.commandPalette.pendingCommand.args[currentArg].name), .{
+					box(ui_key("%", panel.commandPalette.pendingCommand.cmd.args[currentArg].name), .{
 						flags=.DRAW_TEXT,
 						layout=.{ width=text_content(), height=text_content() },
 					});

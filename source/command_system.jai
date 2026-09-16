@@ -239,11 +239,18 @@ deferred_command_invoke :: (defCommand: *DeferredCommand) {
 	defCommand.cmd.wrapper(defCommand.panel, defCommand.args);
 	reset(*defCommand.argMem);
 	defCommand.args = .[];
+	defCommand.cmd = null;
 }
 
 queue_command :: (command: *Command, panel: *Panel, args: .. Any) {
 	pendingDeferredCommands[pendingDeferredCommandsCount] = create_deferred_command(command, panel, ..args);
 	pendingDeferredCommandsCount += 1;
+}
+
+cancel_deferred_command :: (defCommand: *DeferredCommand) {
+	reset(*defCommand.argMem);
+	defCommand.args = .[];
+	defCommand.cmd = null;
 }
 
 flush_pending_commands :: () {
@@ -458,7 +465,9 @@ input_handler :: (event: Input.Event) {
 				
 				if keyArgs.count < node.cmd.args.count {
 					// invoke the command palette if the command wants more arguments
-					focusedPanel.commandPalette.pendingCommand = node.cmd;
+					focusedPanel.commandPalette.pendingCommandMode = true;
+					focusedPanel.commandPalette.pendingCommand = create_deferred_command(node.cmd, *focusedPanel);
+					focusedPanel.commandPalette.currentArgIndex = 0;
 					command_palette_open(*focusedPanel);
 				}
 				else {

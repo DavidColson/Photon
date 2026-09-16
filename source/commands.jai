@@ -1734,14 +1734,14 @@ dialog_backward_delete :: (using panel: *Panel) {
 			#through;
 		case .COMMAND_PALETTE;
 			if commandPalette.input.text.count == 0 {
-				if commandPalette.argList.count > 0 {
-					free(commandPalette.argList[commandPalette.argList.count-1]);
-					commandPalette.argList.count -= 1;
+				if commandPalette.currentArgIndex > 0 {
+					commandPalette.currentArgIndex -= 1;
 					command_palette_populate_suggestions(*commandPalette);
 					return;
 				}
-				else if commandPalette.pendingCommand {
-					commandPalette.pendingCommand = null;
+				else if commandPalette.pendingCommandMode {
+					commandPalette.pendingCommandMode = false;
+					cancel_deferred_command(*commandPalette.pendingCommand);
 					command_palette_populate_suggestions(*commandPalette);
 				}
 			}
