@@ -224,7 +224,7 @@ create_deferred_command :: (command: *Command, panel: *Panel, args: .. Any) -> D
 	defCommand.cmd = command;
 	defCommand.args = NewArray(command.args.count, *void,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
 	for args {
-		defCommand.args[it_index] = it.value_pointer;
+		deferred_command_set_argument(*defCommand, it_index, it);
 	}
 	return defCommand;
 }
@@ -232,12 +232,24 @@ create_deferred_command :: (command: *Command, panel: *Panel, args: .. Any) -> D
 deferred_command_set_argument :: (defCommand: *DeferredCommand, index: int, arg: Any) {
 	assert(index < defCommand.cmd.args.count, "Not a valid argument index in the command you are using");
 	assert(arg.type == defCommand.cmd.args[index].type, "Mismatching type in given argument for a deferred command");
-	defCommand.args[index] = arg.value_pointer;
+	
+	if arg.type.type == .STRING {
+		// deep copy the string contents
+		copied := copy_string(cast(*string, arg.value_pointer).*,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
+		// allocate the actual string data structure
+		defCommand.args[index] = New(string,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
+		memcpy(defCommand.args[index], *copied, size_of(string));
+	}
+	else {
+		// value types, just copy the value pointer directly
+		defCommand.args[index] = alloc(arg.type.runtime_size,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
+		memcpy(defCommand.args[index], arg.value_pointer, arg.type.runtime_size);
+	}
 }
 
 deferred_command_invoke :: (defCommand: *DeferredCommand) {
 	defCommand.cmd.wrapper(defCommand.panel, defCommand.args);
-	reset(*defCommand.argMem);
+	fini(*defCommand.argMem);
 	defCommand.args = .[];
 	defCommand.cmd = null;
 }
@@ -248,7 +260,7 @@ queue_command :: (command: *Command, panel: *Panel, args: .. Any) {
 }
 
 cancel_deferred_command :: (defCommand: *DeferredCommand) {
-	reset(*defCommand.argMem);
+	fini(*defCommand.argMem);
 	defCommand.args = .[];
 	defCommand.cmd = null;
 }
@@ -466,8 +478,13 @@ input_handler :: (event: Input.Event) {
 				if keyArgs.count < node.cmd.args.count {
 					// invoke the command palette if the command wants more arguments
 					focusedPanel.commandPalette.pendingCommandMode = true;
+					cancel_deferred_command(*focusedPanel.commandPalette.pendingCommand);
 					focusedPanel.commandPalette.pendingCommand = create_deferred_command(node.cmd, *focusedPanel);
-					focusedPanel.commandPalette.currentArgIndex = 0;
+					// keep the args the keybinding already gave us, the palette only asks for the rest
+					for keyArgs {
+						deferred_command_set_argument(*focusedPanel.commandPalette.pendingCommand, it_index, Any.{type_info(u8), it});
+					}
+					focusedPanel.commandPalette.currentArgIndex = keyArgs.count;
 					command_palette_open(*focusedPanel);
 				}
 				else {

@@ -904,8 +904,22 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						layout=.{ width=text_content(), height=text_content() },
 					});
 					
-					for panel.commandPalette.pendingCommand.args {
-						box(ui_key("%##%", it, it_index), .{
+					// only arguments before currentArgIndex are filled in, later slots are null or stale
+					pendingCommand := *panel.commandPalette.pendingCommand;
+					for 0..panel.commandPalette.currentArgIndex-1 {
+						argType := pendingCommand.cmd.args[it].type;
+						argValue := pendingCommand.args[it];
+						if !argValue then continue;
+
+						valueText: string;
+						if argType == type_info(u8) {
+							// u8 arguments are chars
+							valueText = string.{1, cast(*u8, argValue)};
+						}
+						else {
+							valueText = tprint("%", Any.{argType, argValue});
+						}
+						box(ui_key("%##pendingArg%", valueText, it), .{
 							flags=.DRAW_TEXT | .DRAW_BACKGROUND,
 							layout=.{ width=text_content(), height=text_content() },
 						});

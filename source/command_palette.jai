@@ -13,16 +13,6 @@ CommandPalette :: struct {
 	currentArgIndex := 0;
 	currentArgSuggestionKind: SuggestionKind;
 	
-	// TO REMOVE
-	// pendingCommand: *Command;
-	// // TODO: argList memory is handled differently because it must exist during command invocation
-	// // I don't particularly like this, we should refactor this to be nicer and clean up
-	// // the memory properly
-	// argList: [..]string;
-	
-	
-	// TODO: this could probably be a tagged union at some point
-	
 	SuggestionKind :: enum {
 		NONE;
 		NORMAL;
@@ -111,12 +101,14 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 			if structTypeInfo.name == "FinderFile" {
 				// file finder suggestions
 				currentArgSuggestionKind = .FINDER_FILE;
+				
 				for * file: project.projectFiles {
 					if file.tombstoned then continue;
 					suggestion := array_add(*suggestionList);
 					suggestion.name = file.fullName;
 					suggestion.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
-					suggestion.userData = file;
+					suggestion.userData = New(Bucket_Locator,,get_per_invocation_allocator(palette));
+					memcpy(suggestion.userData, *file.locator, size_of(Bucket_Locator));
 					suggestion.isDocument = false;
 					numToDisplay += 1;
 				}
@@ -234,16 +226,22 @@ command_palette_reset :: (panel: *Panel) {
 	array_reset(*suggestionList);
 	reset(*perInvocationMem);
 	reset(*perSearchMem);
-
+	
 	// input field manages it's own memory
 	input_field_reset_keeping_memory(*input);
 	panel.activeDialog = .NONE;
 }
 
-// Used when the dialog is dismissed without a command having run to completion 
+command_palette_has_valid_selection :: (state: *CommandPalette) -> bool {
+	return state.selection >= 0 && state.selection < state.numToDisplay && state.selection < state.suggestionList.count;
+}
+
+// Used when the dialog is dismissed without a command having run to completion
 command_palette_cancel :: (panel: *Panel) {
 	using panel.commandPalette;
 	cancel_deferred_command(*pendingCommand);
+	pendingCommandMode = false;
+	currentArgIndex = 0;
 	command_palette_reset(panel);
 }
 
@@ -256,82 +254,125 @@ command_palette_execute_command :: (using panel: *Panel) {
 		// we switch on the expected argument type
 		
 		pendingArgument := state.pendingCommand.cmd.args[state.currentArgIndex];
-		
-		// TODO: for Dave later, this is where the meat is, instead of putting string args in the arg list
-		// you can just take the literal data type and set it in the pending arg
-		
 		if pendingArgument.type.type == {
 		case .BOOL;
-			if state.selection < 0 then return; // Invalid selection
-			arg := copy_string(state.suggestionList[state.selection].name);
-			array_add(*state.argList, arg);
+			if !command_palette_has_valid_selection(state) then return;
+			if state.suggestionList[state.selection].name == "true" {
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, true);
+			}
+			else {
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, false);
+			}
 			
 		case .STRING;
 			// string doesn't need validation
 			// TODO: it probably does tbh
-			arg := copy_string(string.{state.input.text.count, state.input.text.data});
-			array_add(*state.argList, arg);
+			deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, string.{state.input.text.count, state.input.text.data});
 			
 		case .FLOAT;
-			// Theoretically wasteful as we convert to float again later
-			// but it's probably fine tbh, validation is useful
 			argStr := string.{state.input.text.count, state.input.text.data};
-			_, success := string_to_float64(argStr);
-			if !success then return;
-			arg := copy_string(string.{state.input.text.count, state.input.text.data});
-			array_add(*state.argList, arg);
-			
-		case .INTEGER;
-			if pendingArgument.type.runtime_size == 1 {
-				// if the integer is a u8, I've aribrarily decided it should be treated as a char
-				// this may come back to bite me, but there we go
-				// we convert the char to a string of that number, which is a bit ick tbh
-				if state.input.text.count > 1 return;
-				array_add(*state.argList, sprint("%", state.input.text.data.*));
+			if pendingArgument.type.runtime_size == 4 {
+				val, success := string_to_float(argStr);
+				if !success then return;
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+			}
+			else if pendingArgument.type.runtime_size == 8 {
+				val, success := string_to_float64(argStr);
+				if !success then return;
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
 			}
 			else {
-				argStr := string.{state.input.text.count, state.input.text.data};
-				_, success := string_to_int(argStr);
-				if !success then return;
-				arg := copy_string(string.{state.input.text.count, state.input.text.data});
-				array_add(*state.argList, arg);
+				assert(false, "Unsupported float argument type");
+				return;
 			}
-			
+
+		case .INTEGER;
+			if pendingArgument.type == type_info(u8) {
+				// if the integer is a u8, I've aribrarily decided it should be treated as a char
+				// this may come back to bite me, but there we go
+				if state.input.text.count != 1 return;
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, state.input.text.data.*);
+			}
+			else {
+
+				argStr := string.{state.input.text.count, state.input.text.data};
+				if pendingArgument.type == {
+				case type_info(s8);
+					val, success := string_to_int(argStr, 10, s8);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(u16);
+					val, success := string_to_int(argStr, 10, u16);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(s16);
+					val, success := string_to_int(argStr, 10, s16);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(u32);
+					val, success := string_to_int(argStr, 10, u32);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(s32);
+					val, success := string_to_int(argStr, 10, s32);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(u64);
+					val, success := string_to_int(argStr, 10, u64);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case type_info(s64);
+					val, success := string_to_int(argStr, 10, s64);
+					if !success then return;
+					deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, val);
+				case;
+					assert(false, "Unsupported integer argument type");
+					return;
+				}
+			}
+
 		case .ENUM;
-			if state.selection < 0 then return; // Invalid selection
-			arg := copy_string(state.suggestionList[state.selection].name);
-			array_add(*state.argList, arg);
-		
+			if !command_palette_has_valid_selection(state) then return;
+			deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, Any.{pendingArgument.type, state.suggestionList[state.selection].userData});
+
 		case .STRUCT;
 			structTypeInfo := cast(*Type_Info_Struct, pendingArgument.type);
 			if structTypeInfo.name == "FinderFile" {
+				if !command_palette_has_valid_selection(state) then return;
 				chosenFile := state.suggestionList[state.selection];
+				
+				arg: FinderFile;
+				arg.isDocument = chosenFile.isDocument;
 				if chosenFile.isDocument {
-					// what the fuck do we do here??
-					// need to refactor this whole thing to not use string arguments
-					// and now!!
+					arg.documentHandle = cast(*DocumentHandle, chosenFile.userData).*;
 				}
 				else {
-					
+					arg.projectHandle = cast(*Bucket_Locator, chosenFile.userData);
 				}
+				deferred_command_set_argument(*state.pendingCommand, state.currentArgIndex, arg);
+			}
+			else {
+				assert(false, "Unsupported struct argument type");
+				return;
 			}
 		case;
 			assert(false, "Invalid argument type given");
+			return;
 		}
-		
+
+		state.currentArgIndex += 1;
+
 		// we now have enough arguments to actually invoke the command
-		if state.argList.count == state.pendingCommand.args.count {
+		if state.currentArgIndex == state.pendingCommand.cmd.args.count {
+			command := state.pendingCommand;
+			state.pendingCommand = .{};
+			state.pendingCommandMode = false;
+			state.currentArgIndex = 0;
+
 			// reset before executing the command, incase the command opens a dialog
 			command_palette_reset(panel);
 			editorMode = .NORMAL;
-			
-			execute_command(panel, state.pendingCommand, state.argList);
-			
-			for state.argList {
-				free(it);
-			}
-			array_reset(*state.argList);
-			state.pendingCommandMode = false;
+			deferred_command_invoke(*command);
 		}
 		else {
 			input_field_reset_keeping_memory(*state.input);
@@ -341,7 +382,8 @@ command_palette_execute_command :: (using panel: *Panel) {
 	else {
 		// In this branch we haven't picked what command we want to execute yet, so 
 		// here we do just that
-		
+
+		if !command_palette_has_valid_selection(state) then return;
 		cmd := cast(*Command, state.suggestionList[state.selection].userData); 
 		
 		// if it requires no args, just execute it now
@@ -350,16 +392,12 @@ command_palette_execute_command :: (using panel: *Panel) {
 			command_palette_reset(panel);
 			editorMode = .NORMAL;
 			
-			execute_command(panel, cmd, .[]);
-			
-			for state.argList {
-				free(it);
-			}
-			array_reset(*state.argList);
+			cmd.wrapper(panel, .[]);
 		}
 		else {
 			// We need commands, so enter pending command mode
 			state.pendingCommandMode = true;
+			cancel_deferred_command(*state.pendingCommand);
 			state.pendingCommand = create_deferred_command(cmd, panel);
 			state.currentArgIndex = 0;
 			input_field_reset_keeping_memory(*state.input);
@@ -423,6 +461,20 @@ get_enum_pretty_names :: (enumType: *Type_Info_Enum) -> []string {
 	return enumType.names;
 }
 
+// proposed interface for argument handlers (such as FinderFile or Path)
+/*
+ArgHandler :: struct {
+	populate:   (palette: *CommandPalette, argType: *Type_Info);
+	filter:     (palette: *CommandPalette, filter: string);           // may repopulate (Path)
+	resolve:    (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult, Any; // this should return the resolved argument in palette invocation memory, it will be copied to the pending command afterward
+	backspace:  (palette: *CommandPalette) -> handled: bool;          // optional (Path segment delete)
+	rowHeightLines: s32 = 2;                                          // drawing hint
+	kind: SuggestionKind;                                             // drawing hint for main.jai
+}
+ResolveResult :: enum { REJECT; STAY; COMMIT; }
+get_arg_handler :: (t: *Type_Info) -> *ArgHandler
+*/
+	
 #scope_file
 
 get_per_search_allocator :: (state: *CommandPalette) -> Allocator {

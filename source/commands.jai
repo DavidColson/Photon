@@ -1811,7 +1811,20 @@ FinderFile :: struct @command_arg {
 
 find_file :: (panel: *Panel, file: FinderFile) {
 	NORMAL :: CommandConfig.{ prettyName = "Find file", keybinding = .["<space>f"] };
-	log("Found a file...");
+	if file.isDocument {
+		panel_set_active_document(panel, file.documentHandle);
+	}
+	else {
+		// the list was built when the dialog opened, so the file may have been deleted since
+		projectFile := bucket_array_find_pointer(*project.projectFiles, file.projectHandle);
+		if projectFile == null || projectFile.tombstoned {
+			push_notification("File Does Not Exist");
+			return;
+		}
+		doc := document_get_or_open(projectFile.fullName, noLoad = true);
+		document_load_from_project(doc, projectFile);
+		panel_set_active_document(panel, doc);
+	}
 } @command
 
 save_file :: (panel: *Panel) {
