@@ -223,8 +223,11 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 		return builder_to_string(*builder);
 	}
 	
+	// custom struct argument type -> name of it's arg handler
+	argHandlers: Table(string, string);
+
 	for header: (.*)commands {
-		
+
 		EditorMode :: enum {
 			NORMAL;
 			INSERT;
@@ -310,8 +313,18 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 					if argTypeInfo.type == .STRUCT {
 						structTypeInfo := cast(*Type_Info_Struct, argTypeInfo);
 						for structTypeInfo.notes {
-							if it == "command_arg" {
+							if begins_with(it, "command_arg") {
+								// the note must name the arg handler, i.e. @command_arg(myArgHandler)
+								handlerName := it;
+								advance(*handlerName, "command_arg".count);
+								if handlerName.count < 3 || handlerName[0] != #char "(" || handlerName[handlerName.count-1] != #char ")" {
+									compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, tprint("@command_arg struct % must name its argument handler, e.g. @command_arg(myArgHandler)", structTypeInfo.name));
+									continue;
+								}
+								handlerName = slice(handlerName, 1, handlerName.count-2);
+
 								validStructType = true;
+								table_set(*argHandlers, copy_string(node_to_string(arg.type_inst)), copy_string(handlerName));
 							}
 						}
 					}
@@ -340,7 +353,11 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 			append(builder, "    });\n");
 		}
 	}
-	
+
+	// register the arg handlers of custom struct argument types
+	for handlerName, typeName: argHandlers {
+		append(builder, tprint("    table_add(*argHandlerTable, type_info(%), *%);\n", typeName, handlerName));
+	}
 }
 
 #run,stallable Build();

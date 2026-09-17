@@ -950,9 +950,9 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			}
 			
 			// Draw the list of suggestions, that are currently relevant
-			if panel.commandPalette.currentArgSuggestionKind > .NONE {
-				isFinderFile := panel.commandPalette.currentArgSuggestionKind == .FINDER_FILE;
-				elementHeight := cast(float, fontMetrics.characterHeight*(ifx isFinderFile then 3 else 2));
+			argHandler := panel.commandPalette.currentHandler;
+			if argHandler && argHandler.populate {
+				elementHeight := cast(float, fontMetrics.characterHeight*argHandler.rowHeightLines);
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
@@ -980,66 +980,11 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					}
 					{
 						push_parent(entryBox); defer pop_parent();
-						
-						
-						if panel.commandPalette.currentArgSuggestionKind == {
-						case .NORMAL;
-							suggestionLabel := box(ui_key("%##%", suggestion.name, it), .{
-								flags=.DRAW_TEXT_HIGHLIGHTS,
-								layout=.{ width=text_content(), height=text_content() },
-							});
-							suggestionLabel .textHighlights = suggestion.fuzzyMatches;
-							
-							box(ui_key_nil, .{ layout=.{width=grow()}});
-							
-						case .COMMAND;
-							
-							// find the normal mode mapping
-							// @todo: should we show bindings for all modes?
-							command := cast(*Command, suggestion.userData);
-							mappingStr := "";
-							for command.keybinding {
-								// TODO
-								// if it.mode == .NORMAL then mappingStr = it;
-								mappingStr = it;
-							}
-							
-							commandLabel := box(ui_key("%##%", suggestion.name, it), .{
-								flags=.DRAW_TEXT_HIGHLIGHTS,
-								layout=.{ width=text_content(), height=text_content() },
-							});
-							commandLabel.textHighlights = suggestion.fuzzyMatches;
-							
-							box(ui_key_nil, .{ layout=.{width=grow()}});
-							
-							if mappingStr {
-								box(ui_key("%##%", mappingStr, it), .{
-									flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-									layout=.{ width=text_content(), height=text_content() },
-									palette=.{ background=style.backgroundMid },
-									textPadding=em(0.3)
-								});
-							}
-						case .FINDER_FILE;
-							verticalBox := box(ui_key_nil, .{ layout=.{ width=grow(), height=grow(), childLayoutAxis=.Y }, });
-							{
-								push_parent(verticalBox); defer pop_parent();
-								key := ui_key("%##fileListEntryLabel%", path_filename(suggestion.name), it);
-								fileLabel := box(key, .{
-									flags=.DRAW_TEXT_HIGHLIGHTS,
-									layout=.{ width=text_content(), height=text_content() },
-								});
-								fileLabel.textHighlights = suggestion.filenameFuzzyMatches;
-								
-								key2 := ui_key("%##fileListPathLabel%", suggestion.name, it);
-								pathLabel := box(key2, .{
-									flags=.DRAW_TEXT_HIGHLIGHTS,
-									fontSize=em(0.7),
-									layout=.{ width=text_content(), height=text_content() },
-								});
-								pathLabel.textHighlights = suggestion.fuzzyMatches;
-							}
-							
+						if argHandler.drawSuggestion {
+							argHandler.drawSuggestion(*panel.commandPalette, *suggestion, it, selected);
+						}
+						else {
+							default_draw_suggestion(*panel.commandPalette, *suggestion, it, selected);
 						}
 					}
 				}

@@ -1801,14 +1801,6 @@ open_file_in_working_dir :: (panel: *Panel) {
 	filesystem_nav_open(*panel.filesystemNav, false, get_working_directory());
 } @command
 
-// special data type representing a file
-// either loaded or in the project for the find file command below
-FinderFile :: struct @command_arg {
-	isDocument: bool;
-	documentHandle: DocumentHandle;
-	projectHandle: Bucket_Locator;
-}
-
 find_file :: (panel: *Panel, file: FinderFile) {
 	NORMAL :: CommandConfig.{ prettyName = "Find file", keybinding = .["<space>f"] };
 	if file.isDocument {

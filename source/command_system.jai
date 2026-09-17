@@ -266,6 +266,8 @@ cancel_deferred_command :: (defCommand: *DeferredCommand) {
 }
 
 flush_pending_commands :: () {
+	if pendingDeferredCommandsCount == 0 then return;
+
 	for 0..pendingDeferredCommandsCount-1 {
 		deferred_command_invoke(*pendingDeferredCommands[it]);
 	}
