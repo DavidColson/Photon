@@ -1,7 +1,6 @@
 DialogType :: enum u8 {
 	NONE;
 	COMMAND_PALETTE;
-	FILESYSTEM_NAVIGATOR;
 	FILE_FINDER;
 	PROJECT_SEARCH;
 	SEARCH;
@@ -1022,173 +1021,6 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 		}
 	}
 
-	if panel.activeDialog == .FILESYSTEM_NAVIGATOR {
-		fileNavContainer := box(ui_key_nil, .{
-			flags=.DRAW_BACKGROUND,
-			layout=.{ 
-				childLayoutAxis = .Y,
-				width=fixed(panel.layoutRect.w / 2),
-				height=fit(),
-				padding= padding_all(em(0.4)),
-			},
-			palette=.{ background=style.backgroundLight },
-			cornerRadius=corner_rad_all(em(0.5)),
-			fixedX=panel.layoutRect.x+(panel.layoutRect.w-(panel.layoutRect.w/2))/2,
-			fixedY=em(3.0)
-		});
-		{
-			push_parent(fileNavContainer); defer pop_parent();
-
-			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
-			inputBox := box(ui_key_nil, .{
-				flags=.DRAW_BACKGROUND,
-				layout=.{
-					width=grow(),
-					height=fixed(fontMetrics.lineSpacing+em(0.8)),
-					childLayoutAxis=.X,
-					padding=padding_all(em(0.4)),
-					childGap=em(0.2)
-				},
-				cornerRadius=corner_rad_all(em(0.2)),
-				palette=.{ background=style.backgroundLighter },
-				textPadding=em(0.5)
-			});
-
-			// draw existing path sections
-			{
-				push_parent(inputBox); defer pop_parent();
-
-				for panel.filesystemNav.currentPath {
-					pathSectionLabel := box(ui_key("%##path_section%", it, it_index), .{
-						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-						layout=.{ width=text_content(), height=text_content() },
-					});
-				}
-
-				inputArea := box(ui_key("fileNavInput"), .{
-					flags=0,
-					layout=.{
-						width=grow(),
-						height=fixed(xx fontMetrics.lineSpacing),
-						childLayoutAxis=.X
-					},
-				});
-
-				inputArea.customDrawFunction = custom_draw_input_field;
-				inputArea.customDrawUdata = cast(*void, *panel.filesystemNav.input);
-			}
-
-			elementHeight := cast(float, fontMetrics.characterHeight*2);
-			rangeStart, rangeEnd := scroll_list_begin(ui_key("fileNav_fileList"),ui_key("filesystemNavScroller"),
-								panel.layoutRect.h/2,
-								elementHeight,
-								panel.filesystemNav.numToDisplay,
-								panel.filesystemNav.selectedItem,
-								panel.filesystemNav.selectedItemChanged);
-
-			if panel.filesystemNav.selectedItemChanged then panel.filesystemNav.selectedItemChanged = false;
-
-			for rangeStart..rangeEnd {
-				directoryItem := panel.filesystemNav.itemList[it];
-				if directoryItem.sortKey == 0 continue;
-
-				if directoryItem.saveItem == true {
-					builder: String_Builder;
-					builder.allocator = temp;
-					init_string_builder(*builder);
-
-					append(*builder, "Save As - ");
-					for panel.filesystemNav.currentPath {
-						append(*builder, it);
-						if (it_index != panel.filesystemNav.currentPath.count-1)  append(*builder, "/");
-					}
-					append(*builder, "/");
-					append(*builder, input_field_get_text(*panel.filesystemNav.input));
-
-					entryBox := box(ui_key("savefileItem"), .{
-						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-						layout=.{
-							width=grow(),
-							height=fixed(elementHeight),
-							padding=padding_all(em(0.2)),
-							childAlignment=.CENTER
-						},
-						palette=.{ background=style.backgroundLighter },
-					});
-					signal := signal_from_box(entryBox);
-					if signal.pressed {
-						panel.filesystemNav.selectedItem = xx it;
-						queue_command(find_command_by_name("filesystem_nav_action_item"), panel);
-					}
-					{
-						push_parent(entryBox); defer pop_parent();
-						itemLabel := box(ui_key("%", builder_to_string(*builder,,temp)), .{
-							flags=.DRAW_TEXT_HIGHLIGHTS,
-							layout=.{ width=text_content(), height=text_content() },
-						});
-					}
-				}
-				else {
-					selected := it == panel.filesystemNav.selectedItem;
-					entryBox := box(ui_key("directoryItem##%", it), .{
-						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
-						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
-					});
-					signal := signal_from_box(entryBox);
-					if signal.pressed {
-						panel.filesystemNav.selectedItem = xx it;
-						queue_command(find_command_by_name("filesystem_nav_action_item"), panel);
-					}
-					{
-						push_parent(entryBox); defer pop_parent();
-
-						box(ui_key("%##%", ifx directoryItem.isDirectory then style.iconFolder else style.iconFile, it), .{
-							flags=.DRAW_TEXT,
-							layout=.{ width=text_content(), height=text_content() },
-							font=fontIcons
-						});
-
-						itemLabel := box(ui_key("%##commandEntry%", directoryItem.name, it), .{
-							flags=.DRAW_TEXT_HIGHLIGHTS,
-							layout=.{ width=text_content(), height=text_content() },
-						});
-						itemLabel.textHighlights = directoryItem.fuzzyMatches;
-					}
-				}
-			}
-
-			scroll_list_end(); 
-
-			hintsBox := box(ui_key("hintsBox"), .{
-				flags=.DRAW_SIDE_TOP,
-				layout=.{ 
-					childLayoutAxis = .X,
-					width=grow(),
-					height=fit(),
-				},
-				borderThickness=1.0
-			});
-			{
-				push_parent(hintsBox); defer pop_parent();
-
-				spacer(.X, grow());
-
-				textCol := uiState.defaultPalette.text;
-				textCol.w = 0.6;
-				box(ui_key("<up><down> to navigate <enter> to open file/directory <escape> to dismiss"), .{
-					flags=.DRAW_TEXT,
-					layout=.{ width=text_content(), height=text_content() },
-					textAlignment=.CENTER,
-					textPadding=em(0.5),
-					palette=.{text = textCol}
-				});
-
-				spacer(.X, grow());
-			}
-		}
-	}
-
 	if panel.activeDialog == .PROJECT_SEARCH {
 		searcherWidth := panel.layoutRect.w * 0.8;
 		searcherContainer := box(ui_key_nil, .{
@@ -1498,16 +1330,35 @@ custom_draw_spinner :: (box: *UIBox, udata: *void) {
 
 custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	inputField:*InputField = cast(*InputField)udata;
+	text := string.{inputField.text.count, inputField.text.data};
 
 	// draw the input field text
-	box.textRun = generate_text_run(string.{inputField.text.count, inputField.text.data}, xx box.fontSize, box.font,,temp);
+	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
 	metrics := get_font_metrics(box.font, xx box.fontSize);
 	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
 	xPos := box.rect.x;
 
 	xPos += box.textPadding;
 	xPos = floor(xPos);
-	draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+
+	if inputField.isPath {
+		// the path is drawn as plain text, but the segment being edited is brighter than the rest
+		// so it's clear where the suggestions are coming from
+		directory := path_strip_filename(text);
+		leaf := path_filename(text);
+
+		dimmed := box.palette.text;
+		dimmed.w *= 0.6;
+
+		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
+		draw_text_run(directoryRun, xPos, yPos, dimmed);
+
+		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
+		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.palette.text);
+	}
+	else {
+		draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+	}
 
 	// calculate cursor position
 	cursorOffsetX := generate_text_run(string.{inputField.cursor, inputField.text.data}, xx box.fontSize, box.font,,temp).width;
@@ -2279,6 +2130,10 @@ InputField :: struct {
 	cursor: s32;
 	onEditCallback: (*void, string);
 	userData: *void;
+
+	// when set the text is a path, so everything but the segment being edited is dimmed
+	// and ctrl+backspace deletes a whole segment
+	isPath: bool;
 }
 
 input_field_reset :: (inputField: *InputField) {
@@ -2308,6 +2163,16 @@ get_app_base_path :: () -> string {
 		exePath := path_strip_filename(get_path_of_running_executable());
 		return tprint("%../../", exePath);
 	}
+}
+
+// normalizes separators and ensures there's no trailing slash
+path_normalized :: (path: string) -> string {
+	result := copy_string(path);
+	path_overwrite_separators(result, #char "/");
+	while result.count > 1 && result[result.count-1] == #char "/" {
+		result.count -= 1;
+	}
+	return result;
 }
 
 assertion_failed :: (loc: Source_Code_Location, message: string) -> bool {
@@ -2377,7 +2242,6 @@ Input :: #import "Input";
 
 #load "rect.jai";
 #load "command_palette.jai";
-#load "filesystem_navigator.jai";
 #load "file_finder.jai";
 #load "command_system.jai";
 #load "commands.jai";

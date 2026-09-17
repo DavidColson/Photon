@@ -380,7 +380,7 @@ document_debug_print_tree :: (handle: DocumentHandle) {
 	pretty_print_tree(doc.tree);
 }
 
-document_get_or_open :: (path: string, noLoad := false, async := true) -> DocumentHandle {
+document_get_or_open :: (path: string, noLoad := false, async := true, allowMissing := false) -> DocumentHandle {
 	lock(*openDocuments.lock);
 
 	// check if this file is already open
@@ -391,7 +391,8 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 	}
 
 	// check if the file even exists
-	if !file_exists(path) {
+	missing := !file_exists(path);
+	if missing && !allowMissing {
 		unlock(*openDocuments.lock);
 		push_notification("File Does Not Exist");
 		return .{};
@@ -413,13 +414,74 @@ document_get_or_open :: (path: string, noLoad := false, async := true) -> Docume
 
 	unlock(*openDocuments.lock);
 
-	if !noLoad {
+	if missing {
+		// there's nothing to load, this is a new file that only exists once it's saved
+		document_init_empty(doc.handle);
+	}
+	else if !noLoad {
 		document_load_from_disk(doc.handle, async);
 	}
 
 	watch_directory_for_document(doc.path);
 
 	return doc.handle;
+}
+
+// sets up a document with no content, for files that don't exist on disk yet
+document_init_empty :: (docHandle: DocumentHandle) {
+	slot := bucket_array_find_pointer(*openDocuments.documents, docHandle.locator);
+	doc: *Document;
+	if slot.state == {
+	case .A_VALID; doc = *slot.docB;
+	case .B_VALID; doc = *slot.docA;
+	case;          doc = *slot.docA;
+	}
+
+	doc.handle = docHandle;
+	if !doc.path then doc.path = copy_string(slot.docA.path);
+
+	_, lang := get_language(path_extension(doc.path));
+	doc.language = lang;
+
+	doc.bufferMemory.alignment = 1; // important!! make this hard to miss
+
+	// buffer[1].text.data has to point at the bottom of the add buffer memory, and for that the
+	// pool needs initializing, so allocate a byte we don't use (same trick as document_load_from_project)
+	text := copy_string(" ",,buffer_allocator(doc));
+	doc.buffers[0].text.data = text.data;
+	doc.buffers[0].text.count = 0;
+	doc.buffers[1].text.data = doc.buffers[0].text.data + 1;
+	doc.buffers[1].text.count = 0;
+
+	lineStarts := *doc.buffers[0].lineStarts;
+	lineStarts.allocator = other_allocator(doc);
+	array_add(lineStarts, 0);
+
+	lineStarts2 := *doc.buffers[1].lineStarts;
+	lineStarts2.allocator = other_allocator(doc);
+	array_add(lineStarts2, 0);
+
+	firstPiece: Document.Piece;
+	firstPiece.length = 0;
+	firstPiece.lineFeedCount = 0;
+	firstPiece.start = .{0,0};
+	firstPiece.end = .{0,0};
+	firstPiece.bufferIndex = 0;
+
+	doc.tree = make_rb_tree(tree_allocator(doc), firstPiece);
+
+	// setup initial undo point
+	commit_history(doc);
+	doc.undoStack[doc.undoStack.count-1].saved = true;
+
+	if slot.state == {
+	case .A_VALID; slot.state = .B_VALID; document_reset(*slot.docA);
+	case .B_VALID; slot.state = .A_VALID; document_reset(*slot.docB);
+	case;          slot.state = .A_VALID; document_reset(*slot.docB);
+	}
+
+	calculate_longest_line(doc);
+	document_reparse_ts_tree(doc.handle);
 }
 
 document_get_slot :: (handle: DocumentHandle) -> *DocumentSlot {

@@ -13,6 +13,10 @@ CommandPalette :: struct {
 	currentArgIndex := 0;
 	currentHandler: *ArgHandler;
 
+	// free for the current arg handler to keep state that lives across populates/filters
+	// lives in per invocation memory, and is cleared whenever we move to another argument
+	handlerData: *void;
+
 	Suggestion :: struct {
 		name: string;
 		sortKey: s64;
@@ -53,12 +57,14 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	if pendingCommandMode == false {
 		// default mode, suggestions will be a list of commands
 		currentHandler = *commandArgHandler;
+		input.isPath = currentHandler.pathInput;
 		command_populate(palette, null);
 	}
 	else {
 		// show suggestions based on the current commands pending argument
 		pendingArgument := pendingCommand.cmd.args[currentArgIndex];
 		currentHandler = get_arg_handler(pendingArgument.type);
+		input.isPath = currentHandler.pathInput;
 		if currentHandler.populate {
 			currentHandler.populate(palette, pendingArgument.type);
 		}
@@ -112,6 +118,8 @@ command_palette_reset :: (panel: *Panel) {
 	selection = 0;
 	numToDisplay = 0;
 	currentHandler = null;
+	handlerData = null;
+	input.isPath = false;
 
 	// reset memory
 	// note we don't reset the arg list, this must be done after a command is executed
@@ -169,6 +177,8 @@ command_palette_execute_command :: (using panel: *Panel) {
 		}
 
 		state.currentArgIndex += 1;
+		// the next argument gets a fresh handler state
+		state.handlerData = null;
 
 		// we now have enough arguments to actually invoke the command
 		if state.currentArgIndex == state.pendingCommand.cmd.args.count {
@@ -213,16 +223,18 @@ command_palette_execute_command :: (using panel: *Panel) {
 		}
 	}
 
-	// how to handle path arguments?
-	// Paths will be strings like anything else, but they'll have some special editing features
-	// They're simply rendered as text, but with a highlight for the final segments, similar to file pilot
-	// The populate_suggestions box will read the _current_ path string, and populate based on that path string
-	// (minus the final text after the last separator which will be used for sorting)
-	// When we're editing a path ctrl backspace will delete the whole last path segment
-	// enter, or tab, when the path is not a valid file, will populate the next path segment with what is selected, rather than actuall commit the argument
-
-
 } @command
+
+// replaces the contents of the palette input field, putting the cursor at the end
+// note this does not run the edit callback, callers are expected to repopulate themselves
+command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
+	input := *palette.input;
+	input.text.count = 0;
+	for 0..text.count-1 {
+		array_add(*input.text, text[it]);
+	}
+	input.cursor = xx input.text.count;
+}
 
 command_palette_select_next :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ };
@@ -279,6 +291,10 @@ ArgHandler :: struct {
 
 	// how high is a suggestion in the UI
 	rowHeightLines: s32 = 2;
+
+	// if set, the input field is treated as a path, dimming everything but the segment being edited
+	// and enabling ctrl+backspace to delete a whole path segment
+	pathInput: bool;
 }
 
 ResolveResult :: enum { REJECT; STAY; COMMIT; }
@@ -500,8 +516,7 @@ char_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult
 	return .COMMIT, Any.{argType, value};
 }
 
-// special data type representing a file
-// either loaded or in the project, for the find file command
+// Special argument used to create the file finder command
 
 FinderFile :: struct @command_arg(finderFileArgHandler) {
 	isDocument: bool;
@@ -602,6 +617,255 @@ finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPa
 		layout=.{ width=text_content(), height=text_content() },
 	});
 	pathLabel.textHighlights = suggestion.fuzzyMatches;
+}
+
+// Filepath argument used for all the commands that require file browsing
+// of some kind, very customizable
+
+FilePath :: struct {
+	path: string;
+	// false when the path doesn't exist yet, i.e. the user asked us to create it
+	exists: bool;
+}
+
+// the variations only differ in where they start the path off, so they all name the same handler
+// and the behaviour that does differ is looked up from the argument type in path_arg_config
+SystemPath      :: struct @command_arg(pathArgHandler) { using base: FilePath; }
+WorkingDirPath  :: struct @command_arg(pathArgHandler) { using base: FilePath; }
+ProjectPath     :: struct @command_arg(pathArgHandler) { using base: FilePath; }
+DocumentDirPath :: struct @command_arg(pathArgHandler) { using base: FilePath; }
+
+// path_commit writes the value through a *FilePath, so the variations must all be laid out like one
+#assert size_of(SystemPath) == size_of(FilePath);
+#assert size_of(WorkingDirPath) == size_of(FilePath);
+#assert size_of(ProjectPath) == size_of(FilePath);
+#assert size_of(DocumentDirPath) == size_of(FilePath);
+
+pathArgHandler := ArgHandler.{ populate = path_populate, filter = path_filter, resolve = path_resolve, drawSuggestion = path_draw_suggestion, pathInput = true };
+
+PathArgConfig :: struct {
+	start: enum { SYSTEM; WORKING_DIR; PROJECT; DOCUMENT_DIR; };
+	createLabel := "Create";
+	createAtTop := false;
+}
+
+path_arg_config :: (argType: *Type_Info) -> PathArgConfig {
+	if argType == type_info(WorkingDirPath)  return .{ start = .WORKING_DIR };
+	if argType == type_info(ProjectPath)     return .{ start = .PROJECT };
+	if argType == type_info(DocumentDirPath) return .{ start = .DOCUMENT_DIR, createLabel = "Save as", createAtTop = true };
+	return .{ start = .SYSTEM };
+}
+
+PathArgEntry :: struct {
+	Kind :: enum { FILE; DIRECTORY; DRIVE; PROJECT_FOLDER; CREATE; }
+	kind: Kind;
+	// what the input field becomes when this entry is picked
+	fullPath: string;
+}
+
+// comfortably above any fuzzy search score, but nowhere near overflowing a subtraction of two keys
+CREATE_ENTRY_TOP_SORT_KEY :: 1_000_000_000;
+
+PathArgState :: struct {
+	argType: *Type_Info;
+	config: PathArgConfig;
+	// the directory the current suggestion list was built from, so we know when to rebuild it
+	listedDir: string;
+}
+
+path_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
+	
+	path_seed_input :: (palette: *CommandPalette, config: PathArgConfig) {
+		if palette.input.text.count > 0 then return;
+		
+		start: string;
+		if config.start == {
+		case .WORKING_DIR;
+			start = path_normalized(get_working_directory(),,temp);
+		case .PROJECT;
+			// with several folders we show them as a list instead, so there's nothing to seed
+			if project.folders.count == 1 then start = path_normalized(project.folders[0],,temp);
+		case .DOCUMENT_DIR;
+			if palette.pendingCommand.panel {
+				documentPath := document_get_path(palette.pendingCommand.panel.document);
+				if documentPath then start = path_normalized(path_strip_filename(documentPath),,temp);
+			}
+		}
+		
+		if start then command_palette_set_input_text(palette, tprint("%/", start));
+	}
+	
+	state := cast(*PathArgState, handlerData);
+	if !state {
+		state = New(PathArgState,,get_per_invocation_allocator(palette));
+		state.argType = argType;
+		state.config = path_arg_config(argType);
+		handlerData = state;
+		path_seed_input(palette, state.config);
+	}
+
+	text := input_field_get_text(*input);
+	dir := path_strip_filename(text);
+	
+	path_add_suggestion :: (using palette: *CommandPalette, name: string, kind: PathArgEntry.Kind, fullPath: string) {
+		suggestion := array_add(*suggestionList);
+		suggestion.name = name;
+		suggestion.sortKey = 10;
+		
+		entry := New(PathArgEntry,,get_per_invocation_allocator(palette));
+		entry.kind = kind;
+		entry.fullPath = copy_string(fullPath,,get_per_invocation_allocator(palette));
+		suggestion.userData = entry;
+	}
+
+	if !dir {
+		// at the very top of the path there is no real directory to list, so we show
+		// the project folders if there's a choice to make, and the drives otherwise
+		if state.config.start == .PROJECT && project.folders.count > 1 {
+			for project.folders {
+				folder := path_normalized(it,,get_per_invocation_allocator(palette));
+				path_add_suggestion(palette, folder, .PROJECT_FOLDER, tprint("%/", folder));
+			}
+		}
+		else {
+			for platform_enumerate_logical_drives() {
+				drive := copy_string(it,,get_per_invocation_allocator(palette));
+				path_add_suggestion(palette, drive, .DRIVE, tprint("%/", drive));
+			}
+		}
+	}
+	else {
+		visitor :: (info: *File_Visit_Info, palette: *CommandPalette) {
+			name := copy_string(info.short_name,,get_per_invocation_allocator(palette));
+			directory := path_strip_filename(input_field_get_text(*palette.input));
+			if info.is_directory {
+				path_add_suggestion(palette, name, .DIRECTORY, tprint("%1%2/", directory, name));
+			}
+			else {
+				path_add_suggestion(palette, name, .FILE, tprint("%1%2", directory, name));
+			}
+		}
+		if platform_is_path_directory(dir) {
+			visit_files(dir, false, palette, visitor, visit_directories=true);
+		}
+
+		// the create entry is always in the list, the filter decides whether it's actually shown
+		path_add_suggestion(palette, "", .CREATE, "");
+	}
+
+	state.listedDir = copy_string(dir,,get_per_invocation_allocator(palette));
+	selection = 0;
+
+	path_filter(palette, text);
+}
+
+path_filter :: (using palette: *CommandPalette, filter: string) {
+	state := cast(*PathArgState, handlerData);
+	if !state return;
+
+	dir := path_strip_filename(filter);
+	leaf := path_filename(filter);
+
+	if !platform_path_equal(dir, state.listedDir) {
+		// the user moved to another directory, by typing a separator, pasting a path
+		// or deleting a segment, so the whole list needs rebuilding
+		array_reset(*suggestionList);
+		path_populate(palette, state.argType);
+		return;
+	}
+
+	leafAlreadyExists := false;
+	for * suggestion: suggestionList {
+		entry := cast(*PathArgEntry, suggestion.userData);
+		if entry.kind == .CREATE then continue;
+
+		if platform_path_equal(suggestion.name, leaf) then leafAlreadyExists = true;
+
+		score, fuzzyMatches := fuzzy_search(suggestion.name, leaf,,get_per_search_allocator(palette));
+		suggestion.fuzzyMatches = fuzzyMatches;
+		// with nothing typed everything scores the same, so nudge directories above files
+		suggestion.sortKey = max(score, 0) + ifx leaf.count == 0 && entry.kind != .FILE then 1 else 0;
+	}
+
+	for * suggestion: suggestionList {
+		entry := cast(*PathArgEntry, suggestion.userData);
+		if entry.kind != .CREATE then continue;
+
+		if leaf.count > 0 && dir.count > 0 && !leafAlreadyExists {
+			// deliberately not S64_MAX, the sort compares entries by subtracting their keys
+			// and that would overflow
+			suggestion.sortKey = ifx state.config.createAtTop then CREATE_ENTRY_TOP_SORT_KEY else 1;
+		}
+		else {
+			suggestion.sortKey = 0;
+		}
+	}
+}
+
+path_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult, Any {
+	text := input_field_get_text(*palette.input);
+
+	path_commit :: (palette: *CommandPalette, argType: *Type_Info, path: string, exists: bool) -> ResolveResult, Any {
+		value := alloc(argType.runtime_size,,get_per_invocation_allocator(palette));
+		filePath := cast(*FilePath, value);
+		filePath.path = copy_string(path,,get_per_invocation_allocator(palette));
+		path_overwrite_separators(filePath.path, #char "/");
+		filePath.exists = exists;
+		return .COMMIT, Any.{argType, value};
+	}
+	
+	if command_palette_has_valid_selection(palette) {
+		suggestion := palette.suggestionList[palette.selection];
+		entry := cast(*PathArgEntry, suggestion.userData);
+		if entry.kind == {
+		case .CREATE;
+			result, value := path_commit(palette, argType, text, false); return result, value;
+		case .FILE;
+			result, value := path_commit(palette, argType, entry.fullPath, true); return result, value;
+		case;
+			// directories, drives and project folders take us one level deeper instead of committing
+			command_palette_set_input_text(palette, entry.fullPath);
+			return .STAY, Any.{};
+		}
+	}
+
+	// nothing in the list is selected, so all we have to go on is the typed path
+	exists, isDirectory := platform_path_stat(text);
+	if exists && !isDirectory {
+		result, value := path_commit(palette, argType, text, true); return result, value;
+	}
+	if exists {
+		command_palette_set_input_text(palette, tprint("%/", trim_right(text, "/\\")));
+		return .STAY, Any.{};
+	}
+	return .REJECT, Any.{};
+}
+
+path_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
+	entry := cast(*PathArgEntry, suggestion.userData);
+
+	if entry.kind == .CREATE {
+		state := cast(*PathArgState, palette.handlerData);
+		label := tprint("% %", state.config.createLabel, input_field_get_text(*palette.input));
+		box(ui_key("%##pathCreateEntry%", label, index), .{
+			flags=.DRAW_TEXT,
+			layout=.{ width=text_content(), height=text_content() },
+		});
+		return;
+	}
+
+	isDirectory := entry.kind != .FILE;
+	box(ui_key("%##pathEntryIcon%", ifx isDirectory then style.iconFolder else style.iconFile, index), .{
+		flags=.DRAW_TEXT,
+		layout=.{ width=text_content(), height=text_content() },
+		font=fontIcons
+	});
+
+	itemLabel := box(ui_key("%##pathEntryLabel%", suggestion.name, index), .{
+		flags=.DRAW_TEXT_HIGHLIGHTS,
+		layout=.{ width=text_content(), height=text_content() },
+	});
+	itemLabel.textHighlights = suggestion.fuzzyMatches;
 }
 
 #scope_file

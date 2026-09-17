@@ -244,6 +244,27 @@ deferred_command_set_argument :: (defCommand: *DeferredCommand, index: int, arg:
 		// value types, just copy the value pointer directly
 		defCommand.args[index] = alloc(arg.type.runtime_size,,Allocator.{flat_pool_allocator_proc, *defCommand.argMem});
 		memcpy(defCommand.args[index], arg.value_pointer, arg.type.runtime_size);
+
+		if arg.type.type == .STRUCT {
+			// the struct itself has been copied, but any strings in it still point at the caller's memory
+			// which will usually be freed before the command actually runs, so deep copy them too
+			deep_copy_struct_strings(cast(*Type_Info_Struct, arg.type), defCommand.args[index], *defCommand.argMem);
+		}
+	}
+}
+
+deep_copy_struct_strings :: (structType: *Type_Info_Struct, data: *void, mem: *Flat_Pool) {
+	for member: structType.members {
+		if member.flags & .CONSTANT then continue;
+
+		memberData := data + member.offset_in_bytes;
+		if member.type.type == {
+		case .STRING;
+			str := cast(*string, memberData);
+			str.* = copy_string(str.*,,Allocator.{flat_pool_allocator_proc, mem});
+		case .STRUCT;
+			deep_copy_struct_strings(cast(*Type_Info_Struct, member.type), memberData, mem);
+		}
 	}
 }
 
@@ -287,52 +308,6 @@ find_command_by_name :: (commandName: string) -> *Command {
 		}
 	}
 	return null;
-}
-
-// TODO: remove this
-execute_command :: (panel: *Panel, command: Command, args: []string) {
-	// Our input here is the command that was invoked either via a keybinding or via 
-	// an entry in the command palette
-	// and then a list of string arguments that the user typed into the command palette
-	
-	// our goal is to parse the arguments into the actual type required
-	// and then invoke the command's wrapper
-	
-	// parse the given arguments into actual data values
-	argsOut := NewArray(command.args.count, *void,, temp);
-	for command.args {
-		if it_index < args.count && args[it_index] {
-			size := it.type.runtime_size;
-			// we do this because our strings come from UI, they have no quotes around them, so set_value_from_string fails to parse them
-			if it.type.type == .STRING {
-				argsOut[it_index] = *args[it_index];
-			}
-			else {
-				argsOut[it_index] = talloc(size);
-				success := set_value_from_string(Any.{it.type, argsOut[it_index]}, args[it_index]);
-				if !success {
-					log_error("In command %, failed to convert argument % \"%\" to type %",
-						command.name, it_index, it.name, it.type.type);
-					return;
-				}
-			}
-		} else {
-			log_error("In command %, no value provided for argument % \"%\"",
-				command.name, it_index, it.name);
-			return;
-		}
-	}
-	
-	command.wrapper(panel, argsOut);
-}
-
-set_option :: () {
-	// TODO: this should take a string name of the option plus a string expression to set it to
-	// It can lookup the option in the options table, and then parse and set the value
-	// Likely the primary use case for this will be config files
-	// so it would just amount to pulling the strings out of the config file and calling this function 
-	
-	// maybe we will make a set/get command as well which can do a similar thing with autocomplete
 }
 
 input_handler :: (event: Input.Event) {

@@ -1668,8 +1668,6 @@ dialog_select_next :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_select_next(panel);
-		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_select_next(panel);
 		case .FILE_FINDER;
 			file_finder_select_next(panel);
 		case .PROJECT_SEARCH;
@@ -1684,8 +1682,6 @@ dialog_select_previous :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_select_previous(panel);
-		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_select_previous(panel);
 		case .FILE_FINDER;
 			file_finder_select_previous(panel);
 		case .PROJECT_SEARCH;
@@ -1700,8 +1696,6 @@ dialog_action_item :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_execute_command(panel);
-		case .FILESYSTEM_NAVIGATOR;
-			filesystem_nav_action_item(panel);
 		case .FILE_FINDER;
 			file_finder_select_file(panel);
 		case .SEARCH;
@@ -1718,29 +1712,22 @@ dialog_backward_delete :: (using panel: *Panel) {
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
 		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
-		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
 
 	if activeDialog == {
-		case .FILESYSTEM_NAVIGATOR; 
-			state := *filesystemNav;
-			if state.currentPath.count > 0 && state.input.text.count == 0 {
-				state.currentPath.count -= 1;
-				filesystem_nav_refresh_directory_list(state);
-				return;
-			}
-			#through;
 		case .COMMAND_PALETTE;
 			if commandPalette.input.text.count == 0 {
 				if commandPalette.currentArgIndex > 0 {
 					commandPalette.currentArgIndex -= 1;
+					commandPalette.handlerData = null;
 					command_palette_populate_suggestions(*commandPalette);
 					return;
 				}
 				else if commandPalette.pendingCommandMode {
 					commandPalette.pendingCommandMode = false;
+					commandPalette.handlerData = null;
 					cancel_deferred_command(*commandPalette.pendingCommand);
 					command_palette_populate_suggestions(*commandPalette);
 				}
@@ -1761,15 +1748,42 @@ dialog_backward_delete :: (using panel: *Panel) {
 	}
 } @command
 
+dialog_backward_delete_segment :: (using panel: *Panel) {
+	DIALOG :: CommandConfig.{ prettyName = "Dialog backward delete path segment", keybinding = .["ctrl+<backspace>"] };
+
+	// this only means something while editing a path, anything else deletes a character as usual
+	if activeDialog != .COMMAND_PALETTE || !commandPalette.input.isPath || commandPalette.input.text.count == 0 {
+		dialog_backward_delete(panel);
+		return;
+	}
+
+	inputField := *commandPalette.input;
+	text := input_field_get_text(inputField);
+
+	// a trailing separator belongs to the segment we're deleting, so drop it before looking for the previous one
+	if text[text.count-1] == #char "/" || text[text.count-1] == #char "\\" {
+		text.count -= 1;
+	}
+	text.count = path_strip_filename(text).count;
+
+	inputField.text.count = text.count;
+	inputField.cursor = xx text.count;
+	if inputField.onEditCallback {
+		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
+	}
+} @command
+
 dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 	inputField := *commandPalette.input;
 	if activeDialog == {
 		case .FILE_FINDER; inputField = *fileFinder.input;
 		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
-		case .FILESYSTEM_NAVIGATOR; inputField = *filesystemNav.input;
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
+
+	// control characters (ctrl+backspace sends 0x7f for instance) are not text
+	if char.count == 1 && (char.bytes[0] < 0x20 || char.bytes[0] == 0x7f) then return;
 
 	for 0..char.count-1 {
 		array_add(*inputField.text, char.bytes[it]);
@@ -1789,17 +1803,26 @@ quit :: (panel: *Panel) {
 	pendingQuit = true;
 } @command
 
-open_file :: (panel: *Panel) {
+open_file :: (panel: *Panel, file: SystemPath) {
 	NORMAL :: CommandConfig.{ prettyName = "Open file", keybinding = .["<space>o"] };
-	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
-	filesystem_nav_open(*panel.filesystemNav);
+	open_path(panel, file.base);
 } @command
 
-open_file_in_working_dir :: (panel: *Panel) {
+open_file_in_working_dir :: (panel: *Panel, file: WorkingDirPath) {
 	NORMAL :: CommandConfig.{ prettyName = "Open file at working directory", keybinding = .["<space>O"] };
-	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
-	filesystem_nav_open(*panel.filesystemNav, false, get_working_directory());
+	open_path(panel, file.base);
 } @command
+
+open_file_in_project :: (panel: *Panel, file: ProjectPath) {
+	NORMAL :: CommandConfig.{ prettyName = "Open file in project" };
+	open_path(panel, file.base);
+} @command
+
+open_path :: (panel: *Panel, file: FilePath) {
+	// a file that doesn't exist yet gets an empty document, it lands on disk when you save it
+	doc := document_get_or_open(file.path, allowMissing = !file.exists);
+	panel_set_active_document(panel, doc);
+}
 
 find_file :: (panel: *Panel, file: FinderFile) {
 	NORMAL :: CommandConfig.{ prettyName = "Find file", keybinding = .["<space>f"] };
@@ -1824,10 +1847,9 @@ save_file :: (panel: *Panel) {
 	document_save(panel.document, document_get_path(panel.document));
 } @command
 
-save_file_as :: (panel: *Panel) {
+save_file_as :: (panel: *Panel, file: DocumentDirPath) {
 	NORMAL :: CommandConfig.{ prettyName = "Save file as", keybinding = .["ctrl+shift+s"] };
-	panel.activeDialog = .FILESYSTEM_NAVIGATOR;
-	filesystem_nav_open(*panel.filesystemNav, true);
+	document_save(panel.document, file.path);
 } @command
 
 p4_checkout_file :: (panel: *Panel) {
