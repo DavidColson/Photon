@@ -74,6 +74,8 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 }
 
 compare_entries :: (e1: CommandPalette.Suggestion, e2: CommandPalette.Suggestion) -> s64 {
+	if e1.sortKey == 0 && e2.sortKey == 0 return 0;
+	
 	diff := e2.sortKey - e1.sortKey;
 	if diff != 0 return diff;
 	return memcmp(e1.name.data, e2.name.data, min(e1.name.count, e2.name.count));
@@ -94,10 +96,12 @@ command_palette_filter_and_sort_suggestions :: (using palette: *CommandPalette, 
 		}
 	}
 
-	command_palette_count_and_sort(palette);
-
-	maxItems := numToDisplay - 1;
-	selection = clamp(selection-1, 0, xx maxItems);
+	if currentHandler && currentHandler.asyncFilter == false {
+		command_palette_count_and_sort(palette);
+		
+		maxItems := numToDisplay - 1;
+		selection = clamp(selection-1, 0, xx maxItems);
+	}
 }
 
 command_palette_count_and_sort :: (using palette: *CommandPalette) {
@@ -120,6 +124,9 @@ command_palette_reset :: (panel: *Panel) {
 	currentHandler = null;
 	handlerData = null;
 	input.isPath = false;
+	// need nicer way for this arg handler to protect against write after free
+	fileFinderState.currentGen += 1;
+	fileFinderState.pendingWork = 0;
 
 	// reset memory
 	// note we don't reset the arg list, this must be done after a command is executed
@@ -295,6 +302,10 @@ ArgHandler :: struct {
 	// if set, the input field is treated as a path, dimming everything but the segment being edited
 	// and enabling ctrl+backspace to delete a whole path segment
 	pathInput: bool;
+	
+	// If true, sorting suggestions will be deferred until after async jobs are done
+	// note you must do this manually
+	asyncFilter: bool;
 }
 
 ResolveResult :: enum { REJECT; STAY; COMMIT; }
@@ -522,6 +533,7 @@ FinderFile :: struct @command_arg(finderFileArgHandler) {
 	isDocument: bool;
 	documentHandle: DocumentHandle;
 	projectHandle: Bucket_Locator;
+	recencyBonus: s64;
 }
 
 finderFileArgHandler := ArgHandler.{
@@ -529,7 +541,28 @@ finderFileArgHandler := ArgHandler.{
 	filter = finder_file_filter,
 	drawSuggestion = finder_file_draw_suggestion,
 	rowHeightLines = 3,
+	asyncFilter = true,
 };
+
+FileFinderState :: struct {
+	threads: Thread_Group;
+	initialized := false;
+	
+	currentGen: s64;
+	pendingWork: s64;
+	sortPending: bool;
+	
+	WorkItem :: struct {
+		filter: string;
+		gen: s64;
+		sortKey: s64;
+		filenameMatches: []Highlight;
+		pathMatches: []Highlight;
+		suggestion: *CommandPalette.Suggestion;
+	}
+}
+
+fileFinderState: FileFinderState;
 
 calculate_open_recency_bonus :: (document: DocumentHandle) -> s64 {
 	found, lastOpenTime := table_find(*fileOpenRecency, document);
@@ -552,6 +585,26 @@ calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
 }
 
 finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
+	if !fileFinderState.initialized {
+		numCpus := get_number_of_processors();
+		assert(numCpus >= 1);
+		if numCpus > 200  numCpus = 200;
+		#if (OS == .WINDOWS) || (OS == .LINUX) {
+			numCpus /= 2;
+		}
+		numThreads := max(numCpus - 2, 1);
+		
+		init(*fileFinderState.threads, numThreads, finder_file_filter_thread_proc);
+		fileFinderState.threads.name    = "File Finder";
+		fileFinderState.threads.logging = false;
+		start(*fileFinderState.threads);
+		fileFinderState.initialized = true;
+		fileFinderState.sortPending = false;
+	}
+	
+	fileFinderState.currentGen += 1;
+	fileFinderState.pendingWork = 0;
+	
 	for * file: project.projectFiles {
 		if file.tombstoned then continue;
 		suggestion := array_add(*suggestionList);
@@ -560,6 +613,7 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		finderFile := New(FinderFile,,get_per_invocation_allocator(palette));
 		finderFile.isDocument = false;
 		finderFile.projectHandle = file.locator;
+		finderFile.recencyBonus = calculate_edit_recency_bonus(file.diskLastModtime);
 		suggestion.payload = finderFile;
 	}
 	for doc: openDocuments {
@@ -569,33 +623,95 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		finderFile := New(FinderFile,,get_per_invocation_allocator(palette));
 		finderFile.isDocument = true;
 		finderFile.documentHandle = doc;
+		finderFile.recencyBonus = calculate_edit_recency_bonus(document_get_disk_last_modtime(doc)) + calculate_open_recency_bonus(doc);
 		suggestion.payload = finderFile;
 	}
 }
 
-finder_file_filter :: (using palette: *CommandPalette, filter: string) {
-	for * suggestion: suggestionList {
-		scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(suggestion.name), filter,,get_per_search_allocator(palette));
-		scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(suggestion.name), filter,,get_per_search_allocator(palette));
-		score := scoreFile + scorePath/5;
-
-		recencyBonus := 0;
-		finderFile := cast(*FinderFile, suggestion.payload);
-		if finderFile.isDocument {
-			recencyBonus = calculate_edit_recency_bonus(document_get_disk_last_modtime(finderFile.documentHandle)) + calculate_open_recency_bonus(finderFile.documentHandle);
+finder_file_collect_thread_work :: (palette: *CommandPalette) {
+	results := get_completed_work(*fileFinderState.threads);
+	for results {
+		workItem := cast(*FileFinderState.WorkItem, it);
+		
+		// discard results from old search queries
+		if workItem.gen != fileFinderState.currentGen {
+			array_reset(*workItem.filenameMatches);
+			array_reset(*workItem.pathMatches);
+			free(workItem.filter);
+			free(workItem);
+			continue;
 		}
-		else {
-			file := bucket_array_find_pointer(*project.projectFiles, finderFile.projectHandle);
-			if file then recencyBonus = calculate_edit_recency_bonus(file.diskLastModtime);
-		}
-
-		// filename matches are stored separately so we can highlight the filename and path labels independently
+		
+		suggestion := workItem.suggestion;
+		suggestion.sortKey = workItem.sortKey;
+		
+		// copy matches into suggestion
 		filenameMatches := New([]Highlight,,get_per_search_allocator(palette));
-		filenameMatches.* = fuzzyMatchesFile;
+		filenameMatches.* = array_copy(workItem.filenameMatches,,get_per_search_allocator(palette));
 		suggestion.userData = filenameMatches;
+		suggestion.fuzzyMatches = array_copy(workItem.pathMatches,,get_per_search_allocator(palette));
+		
+		// free memory allocated on threads
+		array_reset(*workItem.filenameMatches);
+		array_reset(*workItem.pathMatches);
+		free(workItem.filter);
+		free(workItem);
+		fileFinderState.pendingWork -= 1;
+	}
+	
+	if fileFinderState.pendingWork == 0 && fileFinderState.sortPending {
+		command_palette_count_and_sort(palette);
+		maxItems := palette.numToDisplay - 1;
+		palette.selection = clamp(palette.selection-1, 0, xx maxItems);
+		fileFinderState.sortPending = false;
+	}
+}
 
-		suggestion.fuzzyMatches = fuzzyMatchesPath;
-		suggestion.sortKey = ifx score > 0 then score + recencyBonus else 0;
+// Proposal: We move threading of command palette filtering to a core feature of the command palette
+// Such that for the simple case, we simply invoke the functions directly, rather than thread them
+// So the arg handlers don't actually know it's threaded at all
+
+// Okay we're gonna multithread the whole command palette
+// [ ] Filter should change to run per suggestion, doing a search and writing the results back to the suggestion
+// [ ] Add a prefilter and postfilter function to do what pathArgHandler required.
+// [ ] On prefilter we should increment the generation, and the actual arg handler function can rebuild the suggestion list and should return the filter string, modified if required
+// [ ] Postfilter runs on the main thread after all results are retrieved, after we call it we run the sort
+// [ ] Move command palette to own the thread group
+// [ ] Push work into the thread group in big batches to minimize "add_work" overhead
+// [ ] Command palette thread proc will work through the block of suggestions (a range), calling filter on each
+// [ ] Give each thread a memory pool, and set it in context.allocator in the thread proc
+// [ ] Reset the thread pools on dispatch such that they survive one whole generation and we don't need to copy the results after a search (leave them in the arena until the next run)
+// [ ] An update function will wait for results and write them back to the suggestion list
+// [ ] When the suggestion list is small, run all three phases on the main thread
+
+finder_file_filter_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
+	workItem := cast(*FileFinderState.WorkItem, work);
+	
+	// Do fuzzy searching
+	scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(workItem.suggestion.name), workItem.filter);
+	scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(workItem.suggestion.name), workItem.filter);
+	score := scoreFile + scorePath/5;
+	
+	// Write output to work item
+	fileData := cast(*FinderFile, workItem.suggestion.payload);
+	workItem.filenameMatches = fuzzyMatchesFile;
+	workItem.pathMatches = fuzzyMatchesPath;
+	workItem.sortKey = ifx score > 0 then score + fileData.recencyBonus else 0;
+	return .CONTINUE;
+	
+}
+
+finder_file_filter :: (using palette: *CommandPalette, filter: string) {
+	fileFinderState.currentGen += 1;
+	fileFinderState.pendingWork = 0;
+	fileFinderState.sortPending = true;
+	for * suggestion: suggestionList {
+		workItem := New(FileFinderState.WorkItem);
+		workItem.gen = fileFinderState.currentGen;
+		workItem.filter = copy_string(filter);
+		workItem.suggestion = suggestion;
+		add_work(*fileFinderState.threads, workItem);
+		fileFinderState.pendingWork += 1;
 	}
 }
 

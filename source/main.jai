@@ -259,7 +259,8 @@ update :: (deltaTime: float64) {
 
 	watcher_update();
 	project_update();
-
+	finder_file_collect_thread_work(*focusedPanel.commandPalette);
+	
 	newDpiScale := platform_get_dpi_scale(window);
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
 		dpiScale = newDpiScale;
