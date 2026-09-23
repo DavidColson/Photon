@@ -583,7 +583,9 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		}
 		numThreads := max(numCpus - 1, 1); 
 		
-		fileFinderState.threadMemory = NewArray(numThreads, Flat_Pool);
+		// TODO: move this to the pools maybe??
+		// Or at least query the number of pools you need from the pool
+		fileFinderState.threadMemory = NewArray(numThreads + 2, Flat_Pool);
 		
 		init(*fileFinderState.threads, numThreads, finder_file_filter_thread_proc);
 		fileFinderState.threads.name    = "File Finder";
@@ -645,31 +647,6 @@ finder_file_filter_work_group :: (workItem: *FileFinderState.WorkItem, memoryInd
 	}
 }
 
-parallel_for :: (items: []$T, global: *$G, $proc: (*T, int, *G) -> ()) {
-	// Do magic
-	
-	// Firstly we need to split up the items into sections reliably to give to each thread
-	
-	// Then we want to have some global set of threads ready and waiting here
-	// We'll push work to there work queues
-	
-	// Then we can run the work ourselves here
-	
-	// Then we need a semaphore to wait on for when all the threads are done
-	
-	
-	
-	
-	// In the async file, make a new constuct, which is very similar to async, but it spins up N threads
-	// more like thread group
-	
-	// Instead of polling for completed work, we will have an atomic integer of pending work
-	// atomic increment on push
-	// atomic decrement on finished
-	// The thread which decrements this value to zero will signal a semaphre
-	// we'll provide a function like wait_for_all_tasks which waits on that semaphore
-}
-
 finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 	// Okay so this proof of concept works alarmingly well
 	// Lets refactor this into something better
@@ -679,6 +656,10 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 	// Stop work items leaking
 	// Simplify running code on the main thread as well
 	// Simplify distributing work in a reliable way
+	
+	for fileFinderState.threadMemory {
+		reset(*it);
+	}
 	
 	// Ideal interface
 	filter_suggestion :: (suggestion: *CommandPalette.Suggestion, threadIndex: s64, filter: *string) {
@@ -700,15 +681,13 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 		suggestion.fuzzyMatches = fuzzyMatchesPath;
 		suggestion.sortKey = ifx score > 0 then score + fileData.recencyBonus else 0;
 	}
-	parallel_for(suggestionList, *filter, filter_suggestion);
+	parallel_for(*parallelPool, suggestionList, *filter, filter_suggestion);
 	
 	
+	/*
 	
 	// Actually working code below
 	
-	for fileFinderState.threadMemory {
-		reset(*it);
-	}
 	
 	// TODO: is the remainder safe??
 	groupSize := palette.suggestionList.count / fileFinderState.threadMemory.count;
@@ -743,6 +722,7 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 	// Once we've got all pending work back
 	// The results are already written to the suggestions, so we're good to go
 	// Sorting can continue as before
+	*/
 }
 
 finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {

@@ -87,6 +87,7 @@ lastTime:float64 = 0.0;
 asyncWorker: Async;
 logger: LoggerData;
 startTime: Apollo_Time;
+parallelPool: ParallelForPool;
 
 // this is used to set the codebox's initial scroll offset before it's been created
 // potentially a nicer way to do this??
@@ -178,6 +179,7 @@ main :: () {
 	init_ui();
 	initialize_commands_and_keymap();
 	init_async(*asyncWorker);
+	init_parallel_for_pool(*parallelPool);
 	init(*openDocuments.lock);
 	init(*languagesMutex);
 
