@@ -541,7 +541,6 @@ finderFileArgHandler := ArgHandler.{
 };
 
 FileFinderState :: struct {
-	threads: Thread_Group;
 	threadMemory: []Flat_Pool;
 	initialized := false;
 	
@@ -587,11 +586,6 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		// Or at least query the number of pools you need from the pool
 		fileFinderState.threadMemory = NewArray(numThreads + 2, Flat_Pool);
 		
-		init(*fileFinderState.threads, numThreads, finder_file_filter_thread_proc);
-		fileFinderState.threads.name    = "File Finder";
-		fileFinderState.threads.logging = false;
-		start(*fileFinderState.threads);
-		
 		fileFinderState.initialized = true;
 	}
 	
@@ -618,45 +612,7 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	}
 }
 
-finder_file_filter_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
-	workItem := cast(*FileFinderState.WorkItem, work);
-	finder_file_filter_work_group(workItem, thread.worker_info.worker_index);
-	return .CONTINUE;
-}
-
-finder_file_filter_work_group :: (workItem: *FileFinderState.WorkItem, memoryIndex:s64) {
-	context.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *fileFinderState.threadMemory[memoryIndex]};
-	
-	for * suggestion: workItem.suggestionList {
-		
-		// Do fuzzy searching
-		scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(suggestion.name), workItem.filter);
-		scorePath, fuzzyMatchesPath := fuzzy_search(path_strip_filename(suggestion.name), workItem.filter);
-		score := scoreFile + scorePath/5;
-		
-		// Write output directly to suggestion
-		// Note that we know our range of suggestions will not be touched during this work
-		// as the main thread is waiting for us
-		filenameMatches := New([]Highlight);
-		filenameMatches.* = fuzzyMatchesFile;
-		suggestion.userData = filenameMatches;
-		
-		fileData := cast(*FinderFile, suggestion.payload);
-		suggestion.fuzzyMatches = fuzzyMatchesPath;
-		suggestion.sortKey = ifx score > 0 then score + fileData.recencyBonus else 0;
-	}
-}
-
 finder_file_filter :: (using palette: *CommandPalette, filter: string) {
-	// Okay so this proof of concept works alarmingly well
-	// Lets refactor this into something better
-	
-	// Goals
-	// Shared group of threads for all parallel fors in the program
-	// Stop work items leaking
-	// Simplify running code on the main thread as well
-	// Simplify distributing work in a reliable way
-	
 	for fileFinderState.threadMemory {
 		reset(*it);
 	}
@@ -682,47 +638,6 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 		suggestion.sortKey = ifx score > 0 then score + fileData.recencyBonus else 0;
 	}
 	parallel_for(*parallelPool, suggestionList, *filter, filter_suggestion);
-	
-	
-	/*
-	
-	// Actually working code below
-	
-	
-	// TODO: is the remainder safe??
-	groupSize := palette.suggestionList.count / fileFinderState.threadMemory.count;
-	groupCounter := 0;
-	pendingCounter := 0;
-	while groupCounter < palette.suggestionList.count {
-		workItem := New(FileFinderState.WorkItem);
-		workItem.filter = filter;
-		workItem.suggestionList.data = palette.suggestionList.data+groupCounter;
-		workItem.suggestionList.count = min(palette.suggestionList.count - groupCounter, groupSize);
-		add_work(*fileFinderState.threads, workItem);
-		pendingCounter += 1;
-		groupCounter += groupSize;
-	}
-	
-	completedWork : [..]*void;
-	completedWork.allocator = temp;
-	
-	// Now we do the work ourselves here
-	// TODO: easier said than done
-	
-	// Wait for all results to come in
-	while pendingCounter > 0 {
-		sleep_milliseconds(1); // bad way to do this
-		
-		results := get_completed_work(*fileFinderState.threads);
-		for results {
-			pendingCounter -= 1;
-		}
-	}
-	
-	// Once we've got all pending work back
-	// The results are already written to the suggestions, so we're good to go
-	// Sorting can continue as before
-	*/
 }
 
 finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
