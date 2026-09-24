@@ -164,8 +164,16 @@ ParallelForPool :: struct {
 		start: s64;
 		end: s64;
 	}
-	
+
+	// Per thread data, index is local to this pool (0 is the main thread, workers are 1..threads.count)
+	// unlike Thread.index which is global across all threads in the program
+	Worker :: struct {
+		pool: *ParallelForPool;
+		index: s64;
+	}
+
 	threads: []Thread;
+	workers: []Worker;
 	workAvailable: Semaphore;
 	done: Semaphore;
 	taskListMutex: Mutex;
@@ -192,15 +200,16 @@ pop_task :: (pool: *ParallelForPool) -> *ParallelForPool.Task {
 }
 
 parallel_pool_thread_entry :: (thread: *Thread) -> s64 {
-	pool := cast(*ParallelForPool, thread.data);
+	worker := cast(*ParallelForPool.Worker, thread.data);
+	pool := worker.pool;
 
 	while !pool.shutdown {
 		task: *ParallelForPool.Task;
 		wait_for(*pool.workAvailable);
 		if pool.shutdown break;
-		
+
 		task = pop_task(pool);
-		if task then run_task(pool, task, thread.index);
+		if task then run_task(pool, task, worker.index);
 	}
 	return 0;
 }
@@ -227,14 +236,20 @@ init_parallel_for_pool :: (using pool: *ParallelForPool) {
 	init(*pool.workAvailable);
 	init(*pool.taskListMutex);
 	
-	// TODO: thread index is global, need to make a local worker index
-	// or otherwise some way to index memory pools!!!
 	threads = NewArray(numThreads, Thread);
+	workers = NewArray(numThreads, ParallelForPool.Worker);
 	for * threads {
-		it.data = cast(*void, pool);
+		worker := *workers[it_index];
+		worker.pool = pool;
+		worker.index = it_index + 1; // 0 is reserved for the main thread
+		it.data = cast(*void, worker);
 		thread_init(it, parallel_pool_thread_entry);
 		thread_start(it);
 	}
+}
+
+parallel_for_pool_thread_count :: (pool: *ParallelForPool) -> s64 {
+	return pool.threads.count + 1;
 }
 
 parallel_for :: (pool: *ParallelForPool, items: []$T, userData: *$G, $proc: (*T, int, *G) -> ()) {

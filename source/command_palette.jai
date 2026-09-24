@@ -574,18 +574,8 @@ calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
 
 finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	if !fileFinderState.initialized {
-		numCpus := get_number_of_processors();
-		assert(numCpus >= 1);
-		if numCpus > 200  numCpus = 200;
-		#if (OS == .WINDOWS) || (OS == .LINUX) {
-			numCpus /= 2;
-		}
-		numThreads := max(numCpus - 1, 1); 
-		
-		// TODO: move this to the pools maybe??
-		// Or at least query the number of pools you need from the pool
-		fileFinderState.threadMemory = NewArray(numThreads + 2, Flat_Pool);
-		
+		fileFinderState.threadMemory = NewArray(parallel_for_pool_thread_count(*parallelPool), Flat_Pool);
+
 		fileFinderState.initialized = true;
 	}
 	
@@ -619,7 +609,7 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 	
 	// Ideal interface
 	filter_suggestion :: (suggestion: *CommandPalette.Suggestion, threadIndex: s64, filter: *string) {
-		context.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *fileFinderState.threadMemory[threadIndex]};
+		push_allocator(flat_pool_allocator_proc, *fileFinderState.threadMemory[threadIndex]);
 		
 		// Do fuzzy searching
 		scoreFile, fuzzyMatchesFile := fuzzy_search(path_filename(suggestion.name), filter.*);
