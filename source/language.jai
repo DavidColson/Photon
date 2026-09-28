@@ -804,17 +804,21 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 				open := get_coordinate_from_offset(handle, openStartOffset);
 				closeStartOffset := ts_node_start_byte(closeDelimiter);
 				close := get_coordinate_from_offset(handle, closeStartOffset);
-				
+
+				closedBeforeLine := !ts_node_is_null(closeDelimiter) && !ts_node_is_missing(closeDelimiter) && close.line < lineNumber;
+
 				// this is a hanging indent, we treat this as though it's a normal indent.begin
 				if openIsLastOnLine {
-					if !(closeIsLastOnLine && close.line < lineNumber) {
+					if !closedBeforeLine {
 						indentLevel += tabSize;
 					}
 				}
 				// in this case it's an aligned indent, and we will indent to align with the open delimiter
 				else {
-					if closeIsLastOnLine && close.line != open.line && close.line < lineNumber {
-						indentLevel = max(indentLevel - tabSize, 0);
+					if closedBeforeLine {
+						if closeIsLastOnLine && close.line != open.line {
+							indentLevel = max(indentLevel - tabSize, 0);
+						}
 					}
 					else {
 						// This is an absolute position, so set it and bail.
