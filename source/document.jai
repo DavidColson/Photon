@@ -184,6 +184,10 @@ DocumentTable :: struct {
 }
 openDocuments: DocumentTable;
 
+operator == :: (a: DocumentHandle, b: DocumentHandle) -> bool {
+	return a.locator.bucket_index == b.locator.bucket_index && a.locator.slot_index == b.locator.slot_index && a.directCopy == b.directCopy;
+}
+
 // lets you iterate every currently open document, yielding a DocumentHandle for each
 for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expand {
 	count := 0;

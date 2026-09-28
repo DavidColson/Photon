@@ -50,6 +50,8 @@ Panel :: struct {
 fileOpenRecency : Table(DocumentHandle, Apollo_Time, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
 
 panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
+	if doc == panel.document then return;
+	
 	// Save the scroll offset of the old document so we can come back to it
 	success, codeBox := find_box(ui_key("code"));
 	if success {
