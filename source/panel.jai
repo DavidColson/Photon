@@ -159,6 +159,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 
 		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, 0, codeBox.viewBounds.x);
 	}
+	panel.lastScrolledCursorHead = panel.cursor.head;
 }
 
 // targetLine will be the top edge of the panel, such that target line = 0 will leave you scrolled
@@ -181,6 +182,7 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 		metrics := get_font_metrics(fontCode, xx style.fontSize);
 		codeScrollInitialOffset = cast(float, -targetLine * metrics.lineSpacing);
 	}
+	panel.lastScrolledCursorHead = panel.cursor.head;
 }
 
 panel_calculate_visible_lines :: (panel: *Panel, useAnimTarget:bool=false) -> s64, s64 {

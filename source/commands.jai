@@ -1407,8 +1407,6 @@ next_search_result :: (using panel: *Panel) {
 		if matchLine < startVisibleLine || matchLine >= (startVisibleLine+pageSize) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2);
 		}
-
-		panel.lastScrolledCursorHead = panel.cursor.head;
 	}
 } @command
 
@@ -1442,8 +1440,6 @@ previous_search_result :: (using panel: *Panel) {
 		if matchLine < startVisibleLine || matchLine >= (startVisibleLine+pageSize) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2);
 		}
-
-		panel.lastScrolledCursorHead = panel.cursor.head;
 	}
 } @command
 
