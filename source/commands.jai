@@ -1850,8 +1850,13 @@ save_file_as :: (panel: *Panel, file: DocumentDirPath) {
 
 p4_checkout_file :: (panel: *Panel) {
 	NORMAL :: CommandConfig.{ prettyName = "P4 checkout file", keybinding = .[] };
-	result, output, error := run_command("p4", "edit", document_get_path(panel.document), capture_and_return_output=true);
-	log("%", output);
+	
+	p4_checkout_task :: (data: *void) {
+		doc := cast(*DocumentHandle, data);
+		result, output, error := run_command("p4", "edit", document_get_path(doc), capture_and_return_output=true);
+		log("%", output);
+	}
+	push_task(*asyncWorker, *panel.document, p4_checkout_task, null);
 } @command
 
 print_piece_chain_debug :: (using panel: *Panel) {
