@@ -579,16 +579,18 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		fileFinderState.initialized = true;
 	}
 	
-	for * file: project.projectFiles {
-		if file.tombstoned then continue;
-		suggestion := array_add(*suggestionList);
-		suggestion.name = file.fullName;
-		suggestion.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
-		finderFile := New(FinderFile,,get_per_invocation_allocator(palette));
-		finderFile.isDocument = false;
-		finderFile.projectHandle = file.locator;
-		finderFile.recencyBonus = calculate_edit_recency_bonus(file.diskLastModtime);
-		suggestion.payload = finderFile;
+	if !project_is_loading() {
+		for * file: project.projectFiles {
+			if file.tombstoned then continue;
+			suggestion := array_add(*suggestionList);
+			suggestion.name = file.fullName;
+			suggestion.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
+			finderFile := New(FinderFile,,get_per_invocation_allocator(palette));
+			finderFile.isDocument = false;
+			finderFile.projectHandle = file.locator;
+			finderFile.recencyBonus = calculate_edit_recency_bonus(file.diskLastModtime);
+			suggestion.payload = finderFile;
+		}
 	}
 	for doc: openDocuments {
 		suggestion := array_add(*suggestionList);
