@@ -832,14 +832,14 @@ find_in_files_filter :: (using palette: *CommandPalette, filter: string) {
 		filter := data.filter.*;
 		hasMatches, results := search(doc.handle, .NOCASE, 0, filter, false);
 		
+		path := copy_string(doc.path);
+		
 		for result: results {
 			if data.results[threadIndex].count >= 500 break;
 			coordinate := get_coordinate_from_offset(doc.handle, result.start);
 			line := get_line_content(doc.handle, coordinate.line);
 			matchStart := result.start - line.startByteOffset;
 			preview, previewStart, matchRange := make_match_preview(line.text, matchStart, matchStart + (result.end - result.start));
-			
-			path := copy_string(doc.path);
 			
 			suggestion := array_add(*data.results[threadIndex]);
 			suggestion.name = path;
