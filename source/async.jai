@@ -321,4 +321,5 @@ parallel_for_raw :: (pool: *ParallelForPool, dataCount: s64, data: *void, userDa
 		run_task(pool, task, 0);
 	}
 	
-	wait_for(*pool.done);}
+	wait_for(*pool.done);
+}
