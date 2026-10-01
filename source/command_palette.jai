@@ -291,10 +291,16 @@ ArgHandler :: struct {
 	// This will be called while the UI is being constructed, it will be expected to draw
 	// the UI for a single entry in the suggestion list, inside the entry's box
 	// this is optional, if not given the suggestion name is drawn with fuzzy highlights
-	drawSuggestion:	(palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool);
+	drawSuggestion:	(palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal);
 
 	// how high is a suggestion in the UI
-	rowHeightLines: s32 = 2;
+	rowHeightLines: float = 2;
+	
+	// How wide are the suggestions as a percent of the panel
+	rowWidthPercent: float = 0.5; 
+	
+	// padding around each suggestion in the UI (em)
+	suggestionPadding: float = 0.2;
 
 	// if set, the input field is treated as a path, dimming everything but the segment being edited
 	// and enabling ctrl+backspace to delete a whole path segment
@@ -345,7 +351,7 @@ default_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveRes
 	return .COMMIT, Any.{argType, palette.suggestionList[palette.selection].payload};
 }
 
-default_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
+default_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
 	suggestionLabel := box(ui_key("%##%", suggestion.name, index), .{
 		flags=.DRAW_TEXT_HIGHLIGHTS,
 		layout=.{ width=text_content(), height=text_content() },
@@ -373,7 +379,7 @@ command_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	}
 }
 
-command_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
+command_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
 	// find the normal mode mapping
 	// @todo: should we show bindings for all modes?
 	command := cast(*Command, suggestion.payload);
@@ -543,11 +549,6 @@ finderFileArgHandler := ArgHandler.{
 FileFinderState :: struct {
 	threadMemory: []Flat_Pool;
 	initialized := false;
-	
-	WorkItem :: struct {
-		filter: string;
-		suggestionList: []CommandPalette.Suggestion;
-	}
 }
 
 fileFinderState: FileFinderState;
@@ -575,7 +576,6 @@ calculate_edit_recency_bonus :: (modtime: Apollo_Time) -> s64 {
 finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	if !fileFinderState.initialized {
 		fileFinderState.threadMemory = NewArray(parallel_for_pool_thread_count(*parallelPool), Flat_Pool);
-
 		fileFinderState.initialized = true;
 	}
 	
@@ -632,7 +632,7 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 	parallel_for(*parallelPool, suggestionList, *filter, filter_suggestion);
 }
 
-finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
+finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
 	verticalBox := box(ui_key_nil, .{ layout=.{ width=grow(), height=grow(), childLayoutAxis=.Y }, });
 	push_parent(verticalBox); defer pop_parent();
 
@@ -650,6 +650,389 @@ finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPa
 		layout=.{ width=text_content(), height=text_content() },
 	});
 	pathLabel.textHighlights = suggestion.fuzzyMatches;
+}
+
+// Special argument that drives the find in files dialog
+// The argument will populate the suggestions with results from searching in many files and deliver to the user
+// a filehandle and location in the file of the found result
+
+FindInFiles :: struct @command_arg(findInFilesArgHandler) {
+	// file the result was found in
+	isDocument: bool;
+	documentHandle: DocumentHandle;
+	projectHandle: Bucket_Locator;
+	
+	// result information
+	matchLine: string;
+	lineNum: s64;
+	lineOffset: s64;
+	filePath: string;
+	matchRange: Document.Range;
+}
+
+findInFilesArgHandler := ArgHandler.{ populate = find_in_files_populate, filter = find_in_files_filter, drawSuggestion = find_in_files_draw_suggestion, suggestionPadding=0.0, rowWidthPercent=0.8 };
+
+FindInFilesState :: struct {
+	threadMemory: []Flat_Pool;
+	initialized := false;
+}
+
+findInFilesState: FindInFilesState;
+
+find_in_files_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
+	// Not used, but tells the command palette we have suggestions that we want to filter on
+	
+	if !findInFilesState.initialized {
+		findInFilesState.threadMemory = NewArray(parallel_for_pool_thread_count(*parallelPool), Flat_Pool);
+		findInFilesState.initialized = true;
+	}
+}
+
+find_in_files_filter :: (using palette: *CommandPalette, filter: string) {
+	for findInFilesState.threadMemory {
+		reset(*it);
+	}
+	
+	SharedData :: struct {
+		// An array for each thread to put it's results in, we'll merge them at the end
+		results: [][..]CommandPalette.Suggestion;
+		filter: *string;
+	}
+	
+	sharedData: SharedData;
+	sharedData.results = NewArray(parallel_for_pool_thread_count(*parallelPool), [..]CommandPalette.Suggestion,,temp); 
+	sharedData.filter = *filter;
+	
+	FIND_IN_FILES_CONTEXT_BEFORE :: 64;
+	FIND_IN_FILES_CONTEXT_AFTER  :: 256;
+	
+	make_match_preview :: (line: string, matchStart: s64, matchEnd: s64) -> preview: string, previewStart: s64, matchRange: Document.Range {
+		is_utf8_continuation_byte :: inline (c: u8) -> bool {
+			return (c & 0xC0) == 0x80;
+		}
+		
+		matchEnd = min(matchEnd, line.count);
+		
+		// drop the line ending, we don't want to draw it
+		lineEnd := line.count;
+		while lineEnd > matchEnd && (line[lineEnd-1] == #char "\n" || line[lineEnd-1] == #char "\r") {
+			lineEnd -= 1;
+		}
+		
+		windowStart := max(0, matchStart - FIND_IN_FILES_CONTEXT_BEFORE);
+		windowEnd   := min(lineEnd, matchEnd   + FIND_IN_FILES_CONTEXT_AFTER);
+		
+		while windowStart < matchStart && (line[windowStart] == #char " " || line[windowStart] == #char "\t") {
+			windowStart += 1;
+		}
+		
+		// don't cut a utf8 codepoint in half at either end of the window
+		while windowStart < matchStart && is_utf8_continuation_byte(line[windowStart]) {
+			windowStart += 1;
+		}
+		while windowEnd > matchEnd && windowEnd < lineEnd && is_utf8_continuation_byte(line[windowEnd]) {
+			windowEnd -= 1;
+		}
+		
+		preview := alloc_string(windowEnd - windowStart);
+		memcpy(preview.data, line.data + windowStart, preview.count);
+		return preview, windowStart, .{ matchStart - windowStart, matchEnd - windowStart };
+	}	
+	
+	filter_project_files :: (file: *Project.File, threadIndex: s64, data: *SharedData) {
+		push_allocator(flat_pool_allocator_proc, *findInFilesState.threadMemory[threadIndex]);
+		
+		if file.tombstoned then return; // deleted on disk, only its memory is still here
+		
+		lock(*file.lock);
+		defer unlock(*file.lock);
+		
+		filter := data.filter.*;
+		// @todo: 500 results per thread is a bit of an odd limit
+		searchCursor := 0;
+		while searchCursor < file.content.count && data.results[threadIndex].count < 500 {
+			result := find_index_from_left_nocase_fast(file.content, filter, searchCursor);
+			if result >= 0 {
+				// found match
+				// for each result we need to binary search the list of line starts for the file
+				low := 0; // line 0
+				high := file.lineStarts.count-1; // max line
+				mid := 0;
+				midStartOffset := 0;
+				midEndOffset := 0;
+				while low <= high {
+					mid = low + ((high - low) / 2);
+					midStartOffset = file.lineStarts[mid];
+					
+					if mid == high {
+						if mid+1 < file.lineStarts.count {
+							midEndOffset = file.lineStarts[mid+1];
+						}
+						else {
+							midEndOffset = file.content.count;
+						}
+						break;
+					}
+					
+					midEndOffset = file.lineStarts[mid+1];
+					
+					// target is before the mid line
+					if result < midStartOffset {
+						high = mid - 1;
+					}
+					// result is at or above the end of mid line
+					else if result >= midEndOffset {
+						low = mid + 1;
+					}
+					else {
+						break;
+					}
+				}
+				
+				line := string.{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
+				preview, previewStart, matchRange := make_match_preview(line, result - midStartOffset, result - midStartOffset + filter.count);
+				
+				suggestion := array_add(*data.results[threadIndex]);
+				suggestion.name = file.fullName;
+				suggestion.sortKey = 10; // TODO: sorting based on recency etc
+				
+				searchResult := New(FindInFiles);
+				searchResult.matchLine = preview;
+				searchResult.lineNum = mid;
+				searchResult.lineOffset = midStartOffset + previewStart;
+				searchResult.filePath = file.fullName;
+				searchResult.projectHandle = file.locator;
+				searchResult.matchRange = matchRange;
+				searchResult.isDocument = false;
+				suggestion.payload = searchResult;
+				
+				searchCursor = result + filter.count;
+			}
+			else {
+				searchCursor = file.content.count; // end the search
+			}
+		}
+	}
+	
+	filter_documents :: (documentSlot: *DocumentSlot, threadIndex: s64, data: *SharedData) {
+		push_allocator(flat_pool_allocator_proc, *findInFilesState.threadMemory[threadIndex]);
+		
+		doc: *Document;
+		if documentSlot.state == {
+		case .INVALID;
+			return;
+		case .A_VALID;
+			doc = *documentSlot.docA;
+		case .B_VALID;
+			doc = *documentSlot.docB;
+		case;
+			return;
+		}
+		
+		filter := data.filter.*;
+		hasMatches, results := search(doc.handle, .NOCASE, 0, filter, false);
+		
+		for result: results {
+			if data.results[threadIndex].count >= 500 break;
+			coordinate := get_coordinate_from_offset(doc.handle, result.start);
+			line := get_line_content(doc.handle, coordinate.line);
+			matchStart := result.start - line.startByteOffset;
+			preview, previewStart, matchRange := make_match_preview(line.text, matchStart, matchStart + (result.end - result.start));
+			
+			path := copy_string(doc.path);
+			
+			suggestion := array_add(*data.results[threadIndex]);
+			suggestion.name = path;
+			suggestion.sortKey = 10; // TODO: sorting based on recency etc
+			
+			searchResult := New(FindInFiles);
+			searchResult.matchLine = preview;
+			searchResult.lineNum = coordinate.line;
+			searchResult.lineOffset = line.startByteOffset + previewStart;
+			searchResult.filePath = path;
+			searchResult.matchRange = matchRange;
+			searchResult.isDocument = true;
+			searchResult.documentHandle = doc.handle;
+			suggestion.payload = searchResult;
+		}
+	}
+	parallel_for(*parallelPool, openDocuments.documents, *sharedData, filter_documents);
+	
+	if !project_is_loading() {
+		parallel_for(*parallelPool, project.projectFiles, *sharedData, filter_project_files);
+	}
+	
+	// copy all the results from each threads pool into the final suggestion list
+	totalCount:= 0;
+	for sharedData.results {
+		totalCount += it.count;
+	}
+	
+	array_resize(*palette.suggestionList, totalCount);
+	
+	counter := 0;
+	for sharedData.results {
+		memcpy(palette.suggestionList.data + counter, it.data, it.count * size_of(CommandPalette.Suggestion));
+		counter += it.count;
+	}
+}
+
+find_in_files_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
+	searchResult := cast(*FindInFiles, suggestion.payload);
+	
+	custom_draw_search_result :: (box: *UIBox, udata: *void) {
+		searchResult:*FindInFiles = cast(*FindInFiles)udata;
+		
+		line := searchResult.matchLine;
+		
+		box.textRun = generate_text_run(line, xx box.fontSize, box.font,,temp);
+		metrics := get_font_metrics(box.font, xx box.fontSize);
+		yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
+		xPos := box.rect.x;
+		
+		xPos += box.textPadding;
+		xPos = floor(xPos);
+		
+		// calculate coordinate of match range
+		matchStartX := generate_text_run(string.{searchResult.matchRange.start, line.data}, xx box.fontSize, box.font,,temp).width;
+		matchEndX := generate_text_run(string.{searchResult.matchRange.end, line.data}, xx box.fontSize, box.font,,temp).width;
+		
+		submit_instance(.{
+			dstRect = .{
+				xPos + matchStartX,
+				yPos-metrics.typicalDescender-metrics.lineSpacing,
+				matchEndX - matchStartX,
+				xx metrics.lineSpacing
+			},
+			color = style.textSelection2,
+			cornerRadii = box.cornerRadius,
+		});
+		
+		
+		// draw the text run with syntax highlights!!
+		
+		fileExt := path_extension(searchResult.filePath);
+		success, language := get_language(fileExt);
+		if success {
+			lineStart := searchResult.lineOffset;
+			lineEnd   := searchResult.lineOffset + searchResult.matchLine.count;
+			
+			highlights: [..]Highlight;
+			haveHighlights := false;
+			
+			// TODO: queue these reparses on async so we don't get any hitches on the main thread during scrolling
+			if searchResult.isDocument {
+				// The file is open as a document, reuse its syntax tree
+				tsTree := document_get_ts_tree(searchResult.documentHandle);
+				if tsTree {
+					highlights = compute_highlights(language, ts_tree_root_node(tsTree), lineStart, lineEnd, searchResult.documentHandle);
+					haveHighlights = true;
+				}
+			}
+			else {
+				// for project files we'll trigger a syntax parse and cache the result
+				file := bucket_array_find_or_null(*project.projectFiles, searchResult.projectHandle);
+				if file && !file.tombstoned {
+					lock(*file.lock);
+					defer unlock(*file.lock);
+					
+					if file.tsTree == null && file.content.count > 0 {
+						parser := ts_parser_new();
+						defer ts_parser_delete(parser);
+						ts_parser_set_language(parser, language.treesitterLang);
+						file.tsTree = ts_parser_parse_string(parser, null, file.content.data, xx file.content.count);
+					}
+					
+					if file.tsTree {
+						highlights = compute_highlights(language, ts_tree_root_node(file.tsTree), lineStart, lineEnd, file.content);
+						haveHighlights = true;
+					}
+				}
+			}
+			
+			if haveHighlights {
+				base := searchResult.lineOffset;
+				currentHighlightIndex : s64 = 0;
+				for box.textRun.instances {
+					byteOffset := base + box.textRun.byteOffsets[it_index];
+					color := highlight_color_at(highlights, byteOffset, *currentHighlightIndex);
+					
+					instance := it;
+					instance.dstRect.x = round(xPos + instance.dstRect.x);
+					instance.dstRect.y = round(yPos + instance.dstRect.y);
+					instance.color = color;
+					submit_instance(instance);
+				}
+			}
+			else {
+				draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+			}
+		}
+		else {
+			draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+		}
+	}
+	
+	
+	fileNameBox := box(ui_key("##filenameBox%", index), .{
+		flags=.CLIP_CONTENTS,
+		layout=.{ width=percent(0.2), height=grow(), childLayoutAxis=.X, childAlignment=.CENTER },
+	});
+	{
+		push_parent(fileNameBox); defer pop_parent();
+		
+		fileName := path_filename(searchResult.filePath);
+		key := ui_key("%##searcherFileName%", fileName, index);
+		fileLabel := box(key, .{
+			flags=.DRAW_TEXT,
+			layout=.{ width=text_content(), height=text_content() },
+		});
+		
+		filePath := searchResult.filePath;
+		for project.folders {
+			if begins_with_nocase(filePath, it) {
+				filePath = slice(filePath, it.count, filePath.count-it.count);
+				filePath = slice(filePath, 0, filePath.count - fileName.count);
+				break;
+			}
+		}
+		
+		textCol := uiState.defaultPalette.text;
+		textCol.w = 0.6;
+		filePathLabel := box(ui_key("%##searcherFilePath%", filePath, index), .{
+			flags=.DRAW_TEXT,
+			layout=.{ width=text_content(), height=text_content() },
+			palette=.{ text=textCol },
+			fontSize=em(0.8)
+		});
+	}
+	
+	key1 := ui_key("% ##searcherLineNum%", searchResult.lineNum+1, index);
+	lineNumLabel := box(key1, .{
+		flags=.DRAW_TEXT,
+		layout=.{ width=fixed(em(2.0)), height=grow() },
+		font=fontCode,
+		textAlignment=.RIGHT,
+		palette=.{ background= ifx selected then style.backgroundLighter else style.backgroundMid },
+	});
+	
+	color := style.backgroundMid;
+	if selected {
+		color = style.backgroundLighter;
+	}
+	if signal.hovering {
+		color = style.hotHighlight;
+	}
+	key2 := ui_key("##searcherResult%", index);
+	searchResultLabel := box(key2, .{
+		flags=.DRAW_TEXT | .DRAW_BACKGROUND,
+		layout=.{ width=grow(), height=grow() },
+		font=fontCode,
+		palette=.{ background=color },
+	});
+	
+	searchResultLabel.customDrawFunction = custom_draw_search_result;
+	searchResultLabel.customDrawUdata = cast(*void, suggestion.payload);
 }
 
 // Filepath argument used for all the commands that require file browsing
@@ -874,7 +1257,7 @@ path_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult
 	return .REJECT, Any.{};
 }
 
-path_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool) {
+path_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
 	entry := cast(*PathArgEntry, suggestion.userData);
 
 	if entry.kind == .CREATE {

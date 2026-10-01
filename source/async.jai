@@ -209,7 +209,10 @@ parallel_pool_thread_entry :: (thread: *Thread) -> s64 {
 		if pool.shutdown break;
 
 		task = pop_task(pool);
-		if task then run_task(pool, task, worker.index);
+		if task {
+			run_task(pool, task, worker.index);
+			reset_temporary_storage();
+		}
 	}
 	return 0;
 }
@@ -259,20 +262,37 @@ parallel_for :: (pool: *ParallelForPool, items: []$T, userData: *$G, $proc: (*T,
 		data := cast(*T, batch.items);
 		for i: start..end-1  proc(*data[i], threadIndex, cast(*G, batch.userData));
 	}	
-	// Firstly we need to split up the items into sections reliably to give to each thread
+	parallel_for_raw(pool, items.count, items.data, userData, execute_range);
+}
+
+parallel_for :: (pool: *ParallelForPool, items: Bucket_Array($T, $N), userData: *$G, $proc: (*T, int, *G) -> ()) {
+	if items.count == 0 return;
 	
+	execute_range :: (batch: *ParallelForPool.Batch, start: s64, end: s64, threadIndex: s64) {
+		bucketArray := cast(*Bucket_Array(T, N), batch.items);
+		for i: start..end-1 {
+			bucket := i / N;
+			slot := i % N;
+			if !bucketArray.all_buckets[bucket].occupied[slot] then continue;
+			proc(*bucketArray.all_buckets[bucket].data[slot], threadIndex, cast(*G, batch.userData));
+		}
+	}	
+	parallel_for_raw(pool, items.all_buckets.count * N, *items, userData, execute_range);
+}
+
+parallel_for_raw :: (pool: *ParallelForPool, dataCount: s64, data: *void, userData: *void, proc: #type (batch: *ParallelForPool.Batch, start: s64, end: s64, threadIndex: s64)) {
 	batch: ParallelForPool.Batch;
-	batch.proc = execute_range;
-	batch.items = items.data;
+	batch.proc = proc;
+	batch.items = data;
 	batch.userData = userData;
 	
 	pool.currentBatch = *batch;
 	
 	// Distribute work
 	// We do a few per thread to try balance out the work a bit more, probably worth experimenting with it
-	numTasks := min(items.count, (pool.threads.count + 1) * 4);
-	itemsPerTask := (items.count + numTasks - 1) / numTasks; // integer division with round up
-	numTasks = (items.count + itemsPerTask - 1) / itemsPerTask;
+	numTasks := min(dataCount, (pool.threads.count + 1) * 4);
+	itemsPerTask := (dataCount + numTasks - 1) / numTasks; // integer division with round up
+	numTasks = (dataCount + itemsPerTask - 1) / itemsPerTask;
 	// After the above two operaitons itemsPerTask * numTasks should equal items.count
 	
 	tasks := NewArray(numTasks, ParallelForPool.Task,,temp);
@@ -280,7 +300,7 @@ parallel_for :: (pool: *ParallelForPool, items: []$T, userData: *$G, $proc: (*T,
 	
 	for * task: tasks {
 		task.start = it_index * itemsPerTask;
-		task.end = min(task.start + itemsPerTask, items.count);
+		task.end = min(task.start + itemsPerTask, dataCount);
 		
 		// Push task to list
 		lock(*pool.taskListMutex);
@@ -301,5 +321,4 @@ parallel_for :: (pool: *ParallelForPool, items: []$T, userData: *$G, $proc: (*T,
 		run_task(pool, task, 0);
 	}
 	
-	wait_for(*pool.done);
-}
+	wait_for(*pool.done);}

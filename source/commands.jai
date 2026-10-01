@@ -1827,7 +1827,7 @@ find_file :: (panel: *Panel, file: FinderFile) {
 	}
 	else {
 		// the list was built when the dialog opened, so the file may have been deleted since
-		projectFile := bucket_array_find_pointer(*project.projectFiles, file.projectHandle);
+		projectFile := bucket_array_find_or_null(*project.projectFiles, file.projectHandle);
 		if projectFile == null || projectFile.tombstoned {
 			push_notification("File Does Not Exist");
 			return;
@@ -1836,6 +1836,31 @@ find_file :: (panel: *Panel, file: FinderFile) {
 		document_load_from_project(doc, projectFile);
 		panel_set_active_document(panel, doc);
 	}
+} @command
+
+find_in_files :: (panel: *Panel, result: FindInFiles) {
+	NORMAL :: CommandConfig.{ prettyName = "Find in files", keybinding = .[""] };
+	if result.isDocument {
+		panel_set_active_document(panel, result.documentHandle);
+	}
+	else {
+		// the list was built when the dialog opened, so the file may have been deleted since
+		projectFile := bucket_array_find_or_null(*project.projectFiles, result.projectHandle);
+		if projectFile == null || projectFile.tombstoned {
+			push_notification("File Does Not Exist");
+			return;
+		}
+		doc := document_get_or_open(projectFile.fullName, noLoad = true);
+		document_load_from_project(doc, projectFile);
+		panel_set_active_document(panel, doc);
+	}
+	
+	panel.cursor.head = result.lineOffset + result.matchRange.end;
+	panel.cursor.anchor = result.lineOffset + result.matchRange.start;
+	
+	// force set the initial scroll such that the result is in the center of the view
+	startVisibleLine, range := panel_calculate_visible_lines(panel);
+	panel_scroll_to_line(panel, result.lineNum-range/2);
 } @command
 
 save_file :: (panel: *Panel) {

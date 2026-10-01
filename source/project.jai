@@ -323,6 +323,12 @@ project_update :: () {
 		start(*project.searchThreads);
 		project.threadGroupStarted = true;
 
+		// Delete any files that got opened properly while we did the file scan
+		for doc: openDocuments {
+			found, locator := table_find(*project.projectFileTable, document_get_path(doc));
+			if found  project_remove_file(locator);
+		}
+		
 		for * project.projectFiles {
 			if it.content.count == 0 {
 				project_queue_file_load(it.locator);

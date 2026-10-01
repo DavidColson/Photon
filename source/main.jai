@@ -864,17 +864,23 @@ build_ui_panel :: (panel: *Panel) {
 
 build_ui_panel_dialogs :: (panel: *Panel) {
 	if panel.activeDialog == .COMMAND_PALETTE {
+		
+		paletteWidth := panel.layoutRect.w * 0.5;
+		if panel.commandPalette.currentHandler {
+			paletteWidth = panel.layoutRect.w * panel.commandPalette.currentHandler.rowWidthPercent;
+		}
+		
 		commandPaletteContainer := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND,
 			layout=.{ 
 				childLayoutAxis = .Y,
-				width=fixed(panel.layoutRect.w / 2),
+				width=fixed(paletteWidth),
 				height=fit(),
 				padding= padding_all(em(0.4)),
 			},
 			palette=.{ background=style.backgroundLight },
 			cornerRadius=corner_rad_all(em(0.5)),
-			fixedX=panel.layoutRect.x+(panel.layoutRect.w-(panel.layoutRect.w/2))/2,
+			fixedX=panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2,
 			fixedY=em(3.0)
 		});
 		{
@@ -953,7 +959,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 			// Draw the list of suggestions, that are currently relevant
 			argHandler := panel.commandPalette.currentHandler;
 			if argHandler && argHandler.populate {
-				elementHeight := cast(float, fontMetrics.characterHeight*argHandler.rowHeightLines);
+				elementHeight := fontMetrics.characterHeight*argHandler.rowHeightLines;
 				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
@@ -971,7 +977,7 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					
 					entryBox := box(ui_key("suggestion##%", it), .{
 						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(0.2)) },
+						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(argHandler.suggestionPadding)) },
 						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
 					});
 					signal := signal_from_box(entryBox);
@@ -982,10 +988,10 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 					{
 						push_parent(entryBox); defer pop_parent();
 						if argHandler.drawSuggestion {
-							argHandler.drawSuggestion(*panel.commandPalette, *suggestion, it, selected);
+							argHandler.drawSuggestion(*panel.commandPalette, *suggestion, it, selected, signal);
 						}
 						else {
-							default_draw_suggestion(*panel.commandPalette, *suggestion, it, selected);
+							default_draw_suggestion(*panel.commandPalette, *suggestion, it, selected, signal);
 						}
 					}
 				}
@@ -2174,6 +2180,13 @@ path_normalized :: (path: string) -> string {
 	while result.count > 1 && result[result.count-1] == #char "/" {
 		result.count -= 1;
 	}
+	return result;
+}
+
+bucket_array_find_or_null :: ( using array: *Bucket_Array, locator: Bucket_Locator) -> *array.type {
+	bucket := all_buckets[locator.bucket_index];
+	if bucket.occupied[locator.slot_index] == false return null;
+	result := *bucket.data[locator.slot_index];
 	return result;
 }
 

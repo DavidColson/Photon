@@ -424,8 +424,14 @@ document_get_or_open :: (path: string, noLoad := false, async := true, allowMiss
 	}
 	else if !noLoad {
 		document_load_from_disk(doc.handle, async);
+		
+		// a path is either a document or a project file, never both
+		if project.loadProgress != .FILE_SCAN_IN_PROGRESS {
+			found, locator := table_find(*project.projectFileTable, doc.path);
+			if found  project_remove_file(locator);
+		}
 	}
-
+	
 	watch_directory_for_document(doc.path);
 
 	return doc.handle;
