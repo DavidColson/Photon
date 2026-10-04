@@ -10,8 +10,7 @@ Project :: struct {
 
 	folders: [..]string;
 	ignore: [..]string;
-	allow: [..]string;
-
+	
 	File :: struct {
 		fullName: string;
 		content: string;
@@ -123,7 +122,6 @@ ProjectFileSections :: enum {
 	NONE;
 	FOLDERS;
 	IGNORE;
-	ALLOW;
 }
 
 project_parser :: (projectFileName: string) -> bool, Project {
@@ -136,7 +134,6 @@ project_parser :: (projectFileName: string) -> bool, Project {
 	project.loadProgress = .WAITING_FOR_FILE_SCAN;
 	project.folders.allocator = project_allocator();
 	project.ignore.allocator = project_allocator();
-	project.allow.allocator = project_allocator();
 
 	currentSection := ProjectFileSections.NONE;
 
@@ -159,8 +156,6 @@ project_parser :: (projectFileName: string) -> bool, Project {
 					currentSection = .FOLDERS;
 				case "ignore";
 					currentSection = .IGNORE;
-				case "allow";
-					currentSection = .ALLOW;
 				case;
 					error(handler, "Unknown section");
 					return false, .{};
@@ -191,10 +186,6 @@ project_parser :: (projectFileName: string) -> bool, Project {
 				folder := copy_string(line,,project_allocator()); 
 				path_overwrite_separators(folder, #char "/");
 				array_add(*project.ignore, folder);
-			case .ALLOW;
-				folder := copy_string(line,,project_allocator()); 
-				path_overwrite_separators(folder, #char "/");
-				array_add(*project.allow, folder);
 		}
 	}
 
@@ -206,13 +197,7 @@ should_ignore_path :: (path: string) -> bool {
 	// we assume paths are all allowed
 	shouldBeIgnored := false;
 
-	// first we check if it's allowed
-	for project.allow {
-		result := find_index_from_left_fast(path, it);
-		if result > 0 then shouldBeIgnored = false;
-	}
-	
-	// then check if it's additionally been ignored
+	// check if it's been ignored
 	for project.ignore {
 		result := find_index_from_left_fast(path, it);
 		if result > 0 then shouldBeIgnored = true;
