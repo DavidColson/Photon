@@ -1951,17 +1951,22 @@ normalize_line_endings_common :: (document: DocumentHandle, targetEndings: Docum
 	return end - range.end;
 }
 
-normalize_line_endings_lf :: (using panel: *Panel) {
-	NORMAL :: CommandConfig.{ prettyName = "Normalize line endings to LF" };
+NormalizedLineEndings :: enum {
+	CRLF;
+	LF;
+}
+
+normalize_line_endings :: (using panel: *Panel, endings: NormalizedLineEndings) {
+	NORMAL :: CommandConfig.{ prettyName = "Normalize line endings" };
 	begin_edit(document);
-	normalize_line_endings_common(document, .LF, .{0, S64_MAX});
+	
+	if endings == {
+	case .CRLF;
+		normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
+	case .LF;
+		normalize_line_endings_common(document, .LF, .{0, S64_MAX});
+	}
+	
 	end_edit(document);
 } @command
 
-normalize_line_endings_crlf :: (using panel: *Panel) {
-	NORMAL :: CommandConfig.{ prettyName = "Normalize line endings to CRLF" };
-	begin_edit(document);
-	normalize_line_endings_common(document, .CRLF, .{0, S64_MAX});
-	end_edit(document);
-} @command
-	
