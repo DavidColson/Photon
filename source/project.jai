@@ -46,25 +46,6 @@ Project :: struct {
 	threadGroupStarted: bool;
     lineStartTempArrays: [ ][..]s64;
 	pendingReconciles: [..]string; // these are file change events that came in while we were building the project file list
-
-	SearchResult :: struct {
-		matchLine: string;
-		lineNum: s64;
-		lineOffset: s64;
-		filePath: string;
-		fileLocator: Bucket_Locator;
-		matchRange: Document.Range;
-		loaded: bool;
-	}
-
-	SearchWork :: struct {
-		loaded: bool;
-		bucketIndex: s64;
-		searchTerm: string;
-		results: [..]SearchResult;
-	}
-
-	searchThreads: Thread_Group;
 }
 
 project_allocator :: inline () -> Allocator {
@@ -320,7 +301,6 @@ project_update :: () {
 	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
 		init_thread_groups();
 		start(*project.threadGroup);
-		start(*project.searchThreads);
 		project.threadGroupStarted = true;
 
 		// Delete any files that got opened properly while we did the file scan
@@ -362,37 +342,6 @@ project_update :: () {
 
 	if project_is_loading() {
 		requestRedraw = true;
-	}
-
-	// Update the searcher thread if active
-	searchWork := get_completed_work(*project.searchThreads);
-	currentSearchTerm := string.{ focusedPanel.projectSearcher.input.text.count, focusedPanel.projectSearcher.input.text.data };
-	for work: searchWork  {
-		searchWork := cast(*Project.SearchWork, work);
-
-		// check to see if the search term is the current one, if not, it's from
-		// an old query and we can just discard the results
-		if searchWork.searchTerm == currentSearchTerm && focusedPanel.projectSearcher.results.count < 5000 {
-			for searchWork.results {
-				array_add(*focusedPanel.projectSearcher.results, it);
-				if it.loaded {
-					array_add(*focusedPanel.projectSearcher.resultsRequiringFree, it);
-				}
-			}
-		}
-		else {
-			// these results are being discarded (stale search term, or we've already hit the display cap),
-			// so free the matchLine strings that get_line_content heap-allocated for open-document matches
-			// (unloaded-file matches just slice into file.content and don't own their matchLine)
-			for searchWork.results {
-				if it.loaded {
-					free(it.matchLine);
-				}
-			}
-		}
-		array_reset(*searchWork.results);
-		free(searchWork.searchTerm);
-		free(searchWork);
 	}
 }
 
@@ -490,125 +439,6 @@ init_thread_groups :: () {
 	for * project.lineStartTempArrays {
 		it.allocator = temp;
 	}
-
-    init(*project.searchThreads, numThreads, project_search_thread_proc);
-    project.searchThreads.name    = "Project Searcher";
-    project.searchThreads.logging = false;
-}
-
-project_search_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {
-	searchWork:= cast(*Project.SearchWork, work);
-	array_reset(*searchWork.results);
-	
-	if searchWork.loaded {
-		// this is where we search currently open documents
-
-		// @todo: This actually iterates the real documents, which is pretty naughty tbh
-		// Ideally these would all be document copies made at the point of searching on the main thread
-		// something to sort out later
-		for openDocuments.documents.all_buckets[searchWork.bucketIndex].data {
-			if !openDocuments.documents.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
-
-			doc: *Document;
-			if it.state == {
-				case .INVALID;
-					continue;
-				case .A_VALID;
-					doc = *it.docA;
-				case .B_VALID;
-					doc = *it.docB;
-				case;
-					continue;
-			}
-
-			hasMatches, results := search(doc.handle, .NOCASE, 0, searchWork.searchTerm, false);
-			defer array_reset(*results);
-
-			for result: results {
-				coordinate := get_coordinate_from_offset(doc.handle, result.start);
-				line := get_line_content(doc.handle, coordinate.line);
-
-				searchResult: Project.SearchResult;
-				searchResult.matchLine = line.text;
-				searchResult.lineNum = coordinate.line;
-				searchResult.lineOffset = line.startByteOffset;
-				searchResult.filePath = doc.path;
-				searchResult.fileLocator = .{ xx searchWork.bucketIndex, xx it_index };
-				searchResult.matchRange = .{result.start - line.startByteOffset, (result.start - line.startByteOffset) + searchWork.searchTerm.count};
-				searchResult.loaded = true;
-				array_add(*searchWork.results, searchResult);
-			}
-		}
-	}
-	else {
-		// this is where we search unloaded project files
-
-		for project.projectFiles.all_buckets[searchWork.bucketIndex].data {
-			if !project.projectFiles.all_buckets[searchWork.bucketIndex].occupied[it_index] then continue;
-			if it.tombstoned then continue; // deleted on disk, only its memory is still here
-		    file := *it;
-
-			// @todo: currently 500 results per file is the max?? is that sensible?
-			searchCursor := 0;
-			while searchCursor < file.content.count && searchWork.results.count < 500 {
-				result := find_index_from_left_nocase_fast(file.content, searchWork.searchTerm, searchCursor);
-				if result > 0 {
-					// found match
-					// for each result we need to binary search the list of line starts for the file
-					low := 0; // line 0
-					high := file.lineStarts.count-1; // max line
-					mid := 0;
-					midStartOffset := 0;
-					midEndOffset := 0;
-					while low <= high {
-						mid = low + ((high - low) / 2);
-						midStartOffset = file.lineStarts[mid];
-
-						if mid == high {
-							if mid+1 < file.lineStarts.count {
-								midEndOffset = file.lineStarts[mid+1];
-							}
-							else {
-								midEndOffset = file.content.count;
-							}
-							break;
-						}
-
-						midEndOffset = file.lineStarts[mid+1];
-
-						// target is before the mid line
-						if result < midStartOffset {
-							high = mid - 1;
-						}
-						// result is at or above the end of mid line
-						else if result >= midEndOffset {
-							low = mid + 1;
-						}
-						else {
-							break;
-						}
-					}
-
-					// once complete, mid is now set to the line in which the match was found on
-					searchResult: Project.SearchResult; 
-					searchResult.matchLine = .{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
-					searchResult.lineNum = mid;
-					searchResult.lineOffset = midStartOffset;
-					searchResult.filePath = file.fullName;
-					searchResult.fileLocator = .{ xx searchWork.bucketIndex, xx it_index };
-					searchResult.matchRange = .{result - midStartOffset, (result - midStartOffset) + searchWork.searchTerm.count};
-					searchResult.loaded = false;
-					array_add(*searchWork.results, searchResult);
-
-					searchCursor = result + searchWork.searchTerm.count;
-				}
-				else {
-					searchCursor = file.content.count; // end the search
-				}
-			}
-		}
-	}
-	return .CONTINUE;
 }
 
 project_file_load_thread_proc :: (group: *Thread_Group, thread: *Thread, work: *void) -> Thread_Continue_Status {

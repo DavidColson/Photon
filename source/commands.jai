@@ -1664,10 +1664,6 @@ dialog_select_next :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_select_next(panel);
-		case .FILE_FINDER;
-			file_finder_select_next(panel);
-		case .PROJECT_SEARCH;
-			project_search_select_next(panel);
 		case .SEARCH; return;
 	}
 } @command
@@ -1678,10 +1674,6 @@ dialog_select_previous :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_select_previous(panel);
-		case .FILE_FINDER;
-			file_finder_select_previous(panel);
-		case .PROJECT_SEARCH;
-			project_search_select_previous(panel);
 		case .SEARCH; return;
 	}
 } @command
@@ -1692,12 +1684,8 @@ dialog_action_item :: (using panel: *Panel) {
 		case .NONE; return;
 		case .COMMAND_PALETTE;
 			command_palette_execute_command(panel);
-		case .FILE_FINDER;
-			file_finder_select_file(panel);
 		case .SEARCH;
 			confirm_document_search(panel);
-		case .PROJECT_SEARCH;
-			project_search_open_result(panel);
 	}
 } @command
 
@@ -1706,8 +1694,6 @@ dialog_backward_delete :: (using panel: *Panel) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog backward delete", keybinding = .["<backspace>"] };
 	inputField := *commandPalette.input;
 	if activeDialog == {
-		case .FILE_FINDER; inputField = *fileFinder.input;
-		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
@@ -1729,9 +1715,7 @@ dialog_backward_delete :: (using panel: *Panel) {
 				}
 			}
 			#through;
-		case .SEARCH; #through;
-		case .FILE_FINDER; #through;
-		case .PROJECT_SEARCH;
+		case .SEARCH;
 			before := inputField.text.count;
 			inputField.text.count -= 1;
 			inputField.cursor -= 1;
@@ -1772,8 +1756,6 @@ dialog_backward_delete_segment :: (using panel: *Panel) {
 dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 	inputField := *commandPalette.input;
 	if activeDialog == {
-		case .FILE_FINDER; inputField = *fileFinder.input;
-		case .PROJECT_SEARCH; inputField = *projectSearcher.input;
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
 	}
@@ -1800,17 +1782,17 @@ quit :: (panel: *Panel) {
 } @command
 
 open_file :: (panel: *Panel, file: SystemPath) {
-	NORMAL :: CommandConfig.{ prettyName = "Open file", keybinding = .["<space>o"] };
+	NORMAL :: CommandConfig.{ prettyName = "Open file", keybinding = .["<space>O"] };
 	open_path(panel, file.base);
 } @command
 
 open_file_in_working_dir :: (panel: *Panel, file: WorkingDirPath) {
-	NORMAL :: CommandConfig.{ prettyName = "Open file at working directory", keybinding = .["<space>O"] };
+	NORMAL :: CommandConfig.{ prettyName = "Open file at working directory" };
 	open_path(panel, file.base);
 } @command
 
 open_file_in_project :: (panel: *Panel, file: ProjectPath) {
-	NORMAL :: CommandConfig.{ prettyName = "Open file in project" };
+	NORMAL :: CommandConfig.{ prettyName = "Open file in project", keybinding = .["<space>o"] };
 	open_path(panel, file.base);
 } @command
 
@@ -1839,7 +1821,7 @@ find_file :: (panel: *Panel, file: FinderFile) {
 } @command
 
 find_in_files :: (panel: *Panel, result: FindInFiles) {
-	NORMAL :: CommandConfig.{ prettyName = "Find in files", keybinding = .[""] };
+	NORMAL :: CommandConfig.{ prettyName = "Find in files", keybinding = .["<space>s"] };
 	if result.isDocument {
 		panel_set_active_document(panel, result.documentHandle);
 	}
