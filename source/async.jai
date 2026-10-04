@@ -142,6 +142,7 @@ async_thread_entry :: (thread: *Thread) -> s64 {
 			task.next = null;
 			if task.workFunc then task.workFunc(task.data);
 			push_task(*async.completed, task);
+			reset_temporary_storage();
 		}
 	}
 	return 0;
