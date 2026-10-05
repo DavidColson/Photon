@@ -1247,7 +1247,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	// Draw cursor
 	if panel.activeDialog != .SEARCH && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
 		lineCopy := linesOnScreen[cursorLine - startVisibleLine];
-		lineCopy.text.count = panel.cursor.head - get_line_start(panel.document, cursorLine);
+		lineCopy.text.count = min(lineCopy.text.count, panel.cursor.head - get_line_start(panel.document, cursorLine));
 
 		// figuring out the width of the cursor requires knowing which vertical column of text
 		// we're in, including previous tabs

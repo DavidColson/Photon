@@ -134,7 +134,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 		// cursors X location
 		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursor.head);
 		lineContent := get_line_content(panel.document, cursorCoordinate.line,,temp);
-		lineContent.text.count = panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line);
+		lineContent.text.count = min(lineContent.text.count, panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line));
 		cursorX := ifx lineContent.text.count == 0 then 0 else generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
 
 		// @todo: should probably have a unified way of figuring out the visible box width
