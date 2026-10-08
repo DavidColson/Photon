@@ -36,7 +36,7 @@ CommandPalette :: struct {
 	editorModeFilter: EditorMode;
 }
 
-command_palette_open :: (using panel: *Panel) {
+command_palette_open :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Open Command Palette", keybinding = .[":"] };
 	panel.activeDialog = .COMMAND_PALETTE;
 	commandPalette.editorModeFilter = editorMode;
@@ -150,7 +150,7 @@ command_palette_cancel :: (panel: *Panel) {
 	command_palette_reset(panel);
 }
 
-command_palette_execute_command :: (using panel: *Panel) {
+command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 	DIALOG :: CommandConfig.{ };
 	state := *commandPalette;
 
@@ -214,7 +214,8 @@ command_palette_execute_command :: (using panel: *Panel) {
 			command_palette_reset(panel);
 			editorMode = .NORMAL;
 
-			cmd.wrapper(panel, .[]);
+			// TODO(multicursor): support multiple cursors here
+			cmd.wrapper(panel, *panel.cursors[0], .[]);
 		}
 		else {
 			// We need commands, so enter pending command mode
@@ -240,7 +241,7 @@ command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
 	input.cursor = xx input.text.count;
 }
 
-command_palette_select_next :: (using panel: *Panel) {
+command_palette_select_next :: (using panel: *Panel, cursor: *Cursor) {
 	DIALOG :: CommandConfig.{ };
 	state := *commandPalette;
 
@@ -249,7 +250,7 @@ command_palette_select_next :: (using panel: *Panel) {
 	state.selectionChange = true;
 } @command
 
-command_palette_select_previous :: (using panel: *Panel) {
+command_palette_select_previous :: (using panel: *Panel, cursor: *Cursor) {
 	DIALOG :: CommandConfig.{ };
 	state := *commandPalette;
 

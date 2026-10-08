@@ -18,12 +18,11 @@ Panel :: struct {
 	layoutRect: Rect;
 	optionsMenuOpen: bool;
 
-	// cursors
-	cursor: Cursor;
+	cursors: [..]Cursor;
 	lastScrolledCursorHead: s64;
 	
 	// for restoring selections with shrink_selection
-	// TODO: when we have multicursors this will need to be an array of an array of cursors
+	// TODO(multicursor): this will need to be an array of an array of cursors
 	// Probably we will refactor an array of cursors into a single "selection" object similar to helix
 	syntaxSelectionsHistory: [..]Cursor;
 
@@ -55,21 +54,23 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	if success {
 		location := table_find_pointer(*panel.documentLocations, panel.document);
 		if location {
+			// TODO(multicursor): save the whole set of cursors?
 			location.scrollOffset = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
-			location.cursor = panel.cursor;
+			location.cursor = panel.cursors[0];
 		}
 		else {
-			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursor});
+			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel.cursors[0]});
 		}
 	}
 
 	tempDoc := doc;
 	panel.previousDocument = panel.document;
 	panel.document = tempDoc;
-	panel.cursor = .{};
-	panel.cursor.head = 0;
-	panel.cursor.anchor = 0;
-	panel.cursor.virtualColumn = 0;
+	// TODO(multicursor): restore the whole set of cursors?
+	panel.cursors[0] = .{};
+	panel.cursors[0].head = 0;
+	panel.cursors[0].anchor = 0;
+	panel.cursors[0].virtualColumn = 0;
 	
 	table_set(*fileOpenRecency, panel.document, current_time_consensus());
 
@@ -79,7 +80,8 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		if location {
 			codeBox.viewOffset = location.scrollOffset;
 			codeBox.viewOffsetTarget = location.scrollOffset;
-			panel.cursor = location.cursor;
+			// TODO(multicursor): restore the whole set of cursors?
+			panel.cursors[0] = location.cursor;
 		}
 		else {
 			codeBox.viewOffset = .{};
@@ -90,14 +92,16 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		if location {
 			// @todo: initial offsets should support x
 			codeScrollInitialOffset = location.scrollOffset.y;
-			panel.cursor = location.cursor;
+			// TODO(multicursor): restore the whole set of cursors?
+			panel.cursors[0] = location.cursor;
 		}
 		else {
 			codeScrollInitialOffset = 0;
 		}
 	}
 
-	panel.lastScrolledCursorHead = panel.cursor.head;
+	// TODO(multicursor): does this make sense with multiple cursors?
+	panel.lastScrolledCursorHead = panel.cursors[0].head;
 }
 
 panel_reset_dialogs :: (panel: *Panel) {
@@ -118,7 +122,8 @@ panel_get_current_scrolled_line :: (panel: *Panel) -> s64 {
 }
 
 panel_scroll_to_cursor :: (panel: *Panel) {
-	currentLine := get_coordinate_from_offset(panel.document, panel.cursor.head).line;
+	// TODO(multicursor): what does this mean with multiple cursors?
+	currentLine := get_coordinate_from_offset(panel.document, panel.cursors[0].head).line;
 
 	startVisibleLine, range := panel_calculate_visible_lines(panel);
 	if currentLine < startVisibleLine {
@@ -132,9 +137,9 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 	success, codeBox := find_box(ui_key("code"));
 	if success {
 		// cursors X location
-		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursor.head);
+		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursors[0].head);
 		lineContent := get_line_content(panel.document, cursorCoordinate.line,,temp);
-		lineContent.text.count = min(lineContent.text.count, panel.cursor.head - get_line_start(panel.document, cursorCoordinate.line));
+		lineContent.text.count = min(lineContent.text.count, panel.cursors[0].head - get_line_start(panel.document, cursorCoordinate.line));
 		cursorX := ifx lineContent.text.count == 0 then 0 else generate_text_run(lineContent.text, xx codeBox.fontSize, codeBox.font,,temp).width;
 
 		// @todo: should probably have a unified way of figuring out the visible box width
@@ -157,7 +162,7 @@ panel_scroll_to_cursor :: (panel: *Panel) {
 
 		codeBox.viewOffsetTarget.x = clamp(codeBox.viewOffsetTarget.x, 0, codeBox.viewBounds.x);
 	}
-	panel.lastScrolledCursorHead = panel.cursor.head;
+	panel.lastScrolledCursorHead = panel.cursors[0].head;
 }
 
 // targetLine will be the top edge of the panel, such that target line = 0 will leave you scrolled
@@ -180,7 +185,9 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 		metrics := get_font_metrics(fontCode, xx style.fontSize);
 		codeScrollInitialOffset = cast(float, -targetLine * metrics.lineSpacing);
 	}
-	panel.lastScrolledCursorHead = panel.cursor.head;
+	
+	// TODO(multicursor): does this make sense with multiple cursors?
+	panel.lastScrolledCursorHead = panel.cursors[0].head;
 }
 
 panel_calculate_visible_lines :: (panel: *Panel, useAnimTarget:bool=false) -> s64, s64 {

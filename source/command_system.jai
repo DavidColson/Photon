@@ -24,7 +24,7 @@ Command :: struct {
 		type: *Type_Info;
 	}
 	args: []Argument_Input;
-	wrapper: (panel: *Panel, args: []*void);
+	wrapper: (panel: *Panel, cursor: *Cursor, args: []*void);
 	using config: CommandConfig;
 }
 
@@ -269,7 +269,8 @@ deep_copy_struct_strings :: (structType: *Type_Info_Struct, data: *void, mem: *F
 }
 
 deferred_command_invoke :: (defCommand: *DeferredCommand) {
-	defCommand.cmd.wrapper(defCommand.panel, defCommand.args);
+	// TODO(multicursor): support multiple cursors here
+	defCommand.cmd.wrapper(defCommand.panel, *defCommand.panel.cursors[0], defCommand.args);
 	fini(*defCommand.argMem);
 	defCommand.args = .[];
 	defCommand.cmd = null;
@@ -448,8 +449,9 @@ input_handler :: (event: Input.Event) {
 			
 			while keyMap.pendingCount > 0 {
 				anchor := 0;
+				// TODO(multicursor): support multiple cursors here
 				if node.cmd.flags & .EXTEND {
-					anchor = focusedPanel.cursor.anchor;
+					anchor = focusedPanel.cursors[0].anchor;
 				}
 				
 				if keyArgs.count < node.cmd.args.count {
@@ -462,14 +464,16 @@ input_handler :: (event: Input.Event) {
 						deferred_command_set_argument(*focusedPanel.commandPalette.pendingCommand, it_index, Any.{type_info(u8), it});
 					}
 					focusedPanel.commandPalette.currentArgIndex = keyArgs.count;
-					command_palette_open(*focusedPanel);
+					command_palette_open(*focusedPanel, *focusedPanel.cursors[0]);
 				}
 				else {
-					node.cmd.wrapper(*focusedPanel, keyArgs);
+					// TODO(multicursor): support multiple cursors here
+					node.cmd.wrapper(*focusedPanel, *focusedPanel.cursors[0], keyArgs);
 				}
 				
+				// TODO(multicursor): support multiple cursors here
 				if node.cmd.flags & .EXTEND {
-					focusedPanel.cursor.anchor = anchor;
+					focusedPanel.cursors[0].anchor = anchor;
 				}
 				
 				// register selection has some special behaviour as it's intended to be paired with 
