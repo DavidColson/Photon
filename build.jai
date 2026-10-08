@@ -272,7 +272,7 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 			// generate the list of args
 			append(builder, "        .[\n");
 			for arg, argIndex: header.arguments {
-				if argIndex == 0 then continue;
+				if argIndex <= 1 then continue;
 				append(builder, "            ");
 				append(builder, tprint(".{\"%\", type_info(", arg.name));
 				arg_type := arg.type_inst;
@@ -282,8 +282,8 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 			append(builder, "        ],\n");
 			
 			// generate the wrapper function
-			append(builder, "        (panel: *Panel, args: []*void) {\n");
-			append(builder, tprint("            assert(args.count == %);\n", header.arguments.count - 1));
+			append(builder, "        (panel: *Panel, cursor: *Cursor, args: []*void) {\n");
+			append(builder, tprint("            assert(args.count == %);\n", header.arguments.count - 2));
 			
 			append(builder, tprint("            %(\n", header.name));
 			for arg, argIndex: header.arguments {
@@ -305,6 +305,21 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 					}
 					if !firstArgIsPanel then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The first argument of a command must be of type \"*Panel\"");
 					append(builder, "panel,\n");
+				}
+				else if argIndex == 1 {
+					// We want to verify the second argument of all commands is actually a cursor
+					secondArgIsCursor := false;
+					if argTypeInfo.type == .POINTER {
+						pointer := cast(*Type_Info_Pointer)argTypeInfo;
+						if pointer.pointer_to.type == .STRUCT {
+							structInfo := cast(*Type_Info_Struct) pointer.pointer_to;
+							if structInfo.name == "Cursor" {
+								secondArgIsCursor = true;
+							}
+						}
+					}
+					if !secondArgIsCursor then compiler_report(arg.enclosing_load.fully_pathed_filename, arg.l0, arg.c0, "The second argument of a command must be of type \"*Cursor\"");
+					append(builder, "cursor,\n");
 				}
 				else {
 					append(builder,    "cast(*");
@@ -339,7 +354,7 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 					}
 					
 					print_expression(builder, arg.type_inst);
-					append(builder, tprint(", args[%]).*,\n", argIndex-1));
+					append(builder, tprint(", args[%]).*,\n", argIndex-2));
 				}
 			}
 			append(builder, "            );\n");

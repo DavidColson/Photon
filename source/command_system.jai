@@ -8,6 +8,7 @@ CommandFlags :: enum_flags u8 {
 	HIDDEN;
 	REPEATABLE;
 	EXTEND;
+	PER_CURSOR;
 }
 
 CommandConfig :: struct {
