@@ -46,6 +46,7 @@ command_palette_open :: (using panel: *Panel, cursor: *Cursor) {
 
 	command_palette_populate_suggestions(*commandPalette);
 
+	input_field_reset_keeping_memory(*commandPalette.input);
 	commandPalette.input.onEditCallback = command_palette_input_field_on_edit;
 	commandPalette.input.userData = *commandPalette;
 } @command
@@ -208,24 +209,12 @@ command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 		if !command_palette_has_valid_selection(state) then return;
 		cmd := cast(*Command, state.suggestionList[state.selection].payload);
 
-		// if it requires no args, just execute it now
-		if cmd.args.count == 0 {
-			// reset before executing the command, incase the command opens a dialog
-			command_palette_reset(panel);
-			editorMode = .NORMAL;
-
-			// TODO(multicursor): support multiple cursors here
-			cmd.wrapper(panel, *panel.cursors[0], .[]);
-		}
-		else {
-			// We need commands, so enter pending command mode
-			state.pendingCommandMode = true;
-			cancel_deferred_command(*state.pendingCommand);
-			state.pendingCommand = create_deferred_command(cmd, panel);
-			state.currentArgIndex = 0;
-			input_field_reset_keeping_memory(*state.input);
-			command_palette_populate_suggestions(*commandPalette);
-		}
+		// The command dispatcher will open the palette again if another argument is required, so we can just close the
+		// dialog and dispatch the command
+		
+		command_palette_reset(panel);
+		editorMode = .NORMAL;
+		command_dispatcher(cmd, 1, .[]);
 	}
 
 } @command

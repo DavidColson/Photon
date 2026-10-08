@@ -283,9 +283,9 @@ update :: (deltaTime: float64) {
 	array_reset_keeping_memory(*uiState.events);
 
 	// TODO(multicursor): what does this mean with multiple cursors?
-	if focusedPanel.cursors[0].head != focusedPanel.lastScrolledCursorHead {
+	if panel_get_primary_cursor(*focusedPanel).head != focusedPanel.lastScrolledCursorHead {
 		panel_scroll_to_cursor(*focusedPanel);
-		focusedPanel.lastScrolledCursorHead = focusedPanel.cursors[0].head;
+		focusedPanel.lastScrolledCursorHead = panel_get_primary_cursor(*focusedPanel).head;
 	}
 
 	// update notifications
@@ -610,8 +610,8 @@ build_ui_panel :: (panel: *Panel) {
 		spacer(.X, fixed(em(2.0)));
 
 		// location
-		cursorCoordinate := get_coordinate_from_offset(panel.document, panel.cursors[0].head);
-		box(ui_key("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel.cursors[0].head), .{
+		cursorCoordinate := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head);
+		box(ui_key("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head), .{
 			flags=.DRAW_TEXT,
 			layout=.{ width=text_content(), height=text_content() },
 		});
@@ -785,26 +785,26 @@ build_ui_panel :: (panel: *Panel) {
 			}
 		
 			if signal.pressed {
-				set_cursor_to_mouse_location (panel.document, *panel.cursors[0], numDocumentLines, codeBox);
-				panel.cursors[0].anchor = panel.cursors[0].head;
+				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
+				panel_get_primary_cursor(panel).anchor = panel_get_primary_cursor(panel).head;
 			}
 			
 			if signal.doubleClicked {
-				set_cursor_to_mouse_location (panel.document, *panel.cursors[0], numDocumentLines, codeBox);
-				move_prev_word_start(panel, *panel.cursors[0]);
-				move_word_end(panel, *panel.cursors[0]);
+				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
+				move_prev_word_start(panel, panel_get_primary_cursor(panel));
+				move_word_end(panel, panel_get_primary_cursor(panel));
 			}
 
 			if signal.holding {
-				set_cursor_to_mouse_location (panel.document, *panel.cursors[0], numDocumentLines, codeBox);
+				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
 				x, y, success := get_mouse_pointer_position(window, false);
 				if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
 					_, range := panel_calculate_visible_lines(panel);
-					currentLine := get_coordinate_from_offset(panel.document, panel.cursors[0].head).line;
+					currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
 					panel_scroll_to_line(panel, currentLine - range);
 				}
 				else if y < cast(int, codeBox.rect.y) {
-					currentLine := get_coordinate_from_offset(panel.document, panel.cursors[0].head).line;
+					currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
 					panel_scroll_to_line(panel, currentLine);
 				}
 			}
@@ -1128,9 +1128,6 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	metrics := get_font_metrics(box.font, xx box.fontSize);
 	documentLines := get_number_of_lines(panel.document);
 
-	// TODO(multicursor): what does this mean with multiple cursors?
-	cursorLine := get_coordinate_from_offset(panel.document, panel.cursors[0].head).line;
-
 	startVisibleLine : s64;
 	endVisibleLine : s64;
 	visibleLines: [..]string;
@@ -1163,17 +1160,19 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 
 	// Draw cursor selection
 	if panel.activeDialog != .SEARCH {
-		if panel.cursors[0].head != panel.cursors[0].anchor {
-			start := min(panel.cursors[0].head, panel.cursors[0].anchor);
-			end := max(panel.cursors[0].head, panel.cursors[0].anchor);
-			end = shift_offset_line_endings(panel.document, end + 1, .FORWARD);
-			draw_document_range(panel.document, start, end,
-								box.font,
-								xx box.fontSize,
-								textAreaX,
-								textAreaY,
-								linesOnScreen,
-								startVisibleLine);
+		for cursor: panel.cursors {
+			if cursor.head != cursor.anchor {
+				start := min(cursor.head, cursor.anchor);
+				end := max(cursor.head, cursor.anchor);
+				end = shift_offset_line_endings(panel.document, end + 1, .FORWARD);
+				draw_document_range(panel.document, start, end,
+									box.font,
+									xx box.fontSize,
+									textAreaX,
+									textAreaY,
+									linesOnScreen,
+									startVisibleLine);
+			}
 		}
 	}
 
@@ -1250,40 +1249,44 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// Draw cursor
-	if panel.activeDialog != .SEARCH && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
-		lineCopy := linesOnScreen[cursorLine - startVisibleLine];
-		lineCopy.text.count = min(lineCopy.text.count, panel.cursors[0].head - get_line_start(panel.document, cursorLine));
-
-		// figuring out the width of the cursor requires knowing which vertical column of text
-		// we're in, including previous tabs
-		col:=0;
-		for lineCopy.text {
-			if it != #char "\t" {
-				col += 1;
-			} else {
-				charsToTabstop := box.font.tabSize - col % box.font.tabSize;
-				col += charsToTabstop;
+	for cursor: panel.cursors {
+		cursorLine := get_coordinate_from_offset(panel.document, cursor.head).line;
+		
+		if panel.activeDialog != .SEARCH && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
+			lineCopy := linesOnScreen[cursorLine - startVisibleLine];
+			lineCopy.text.count = min(lineCopy.text.count, cursor.head - get_line_start(panel.document, cursorLine));
+			
+			// figuring out the width of the cursor requires knowing which vertical column of text
+			// we're in, including previous tabs
+			col:=0;
+			for lineCopy.text {
+				if it != #char "\t" {
+					col += 1;
+				} else {
+					charsToTabstop := box.font.tabSize - col % box.font.tabSize;
+					col += charsToTabstop;
+				}
 			}
-		}
-		cursorChar := get_char_at(panel.document, panel.cursors[0].head);
-		cursorRun := generate_text_run(cast(string) u8.[cursorChar], xx box.fontSize, box.font, col,,temp);
-
-		cursorX := textAreaX + generate_text_run(lineCopy.text, xx box.fontSize, box.font,,temp).width;
-		cursorY := textAreaY - metrics.typicalDescender + metrics.lineSpacing * (cursorLine-startVisibleLine-1);
-
-		submit_instance(.{
-			dstRect = .{
-				cursorX,
-				cursorY,
-				cursorRun.width,
-				xx metrics.lineSpacing
-			},
-			color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary,
-			shader = .RECTS
-		});
-
-		if cursorChar != 0 {
-			draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+			cursorChar := get_char_at(panel.document, cursor.head);
+			cursorRun := generate_text_run(cast(string) u8.[cursorChar], xx box.fontSize, box.font, col,,temp);
+			
+			cursorX := textAreaX + generate_text_run(lineCopy.text, xx box.fontSize, box.font,,temp).width;
+			cursorY := textAreaY - metrics.typicalDescender + metrics.lineSpacing * (cursorLine-startVisibleLine-1);
+			
+			submit_instance(.{
+				dstRect = .{
+					cursorX,
+					cursorY,
+					cursorRun.width,
+					xx metrics.lineSpacing
+				},
+				color = (ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary) * (ifx it_index != 0 then 0.9 else 1.0),
+				shader = .RECTS
+			});
+			
+			if cursorChar != 0 {
+				draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+			}
 		}
 	}
 	

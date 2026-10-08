@@ -270,8 +270,7 @@ deep_copy_struct_strings :: (structType: *Type_Info_Struct, data: *void, mem: *F
 }
 
 deferred_command_invoke :: (defCommand: *DeferredCommand) {
-	// TODO(multicursor): support multiple cursors here
-	defCommand.cmd.wrapper(defCommand.panel, *defCommand.panel.cursors[0], defCommand.args);
+	command_dispatcher(defCommand.cmd, 1, defCommand.args);
 	fini(*defCommand.argMem);
 	defCommand.args = .[];
 	defCommand.cmd = null;
@@ -310,6 +309,98 @@ find_command_by_name :: (commandName: string) -> *Command {
 		}
 	}
 	return null;
+}
+
+command_dispatcher :: (cmd: *Command, repeatCount: int, args: []*void) {
+	while repeatCount > 0 {
+		anchor := 0;
+		// TODO(multicursor): support multiple cursors here
+		if cmd.flags & .EXTEND {
+			anchor = panel_get_primary_cursor(*focusedPanel).anchor;
+		}
+		
+		if args.count < cmd.args.count {
+			
+			// invoke the command palette if the command wants more arguments
+			focusedPanel.commandPalette.pendingCommandMode = true;
+			cancel_deferred_command(*focusedPanel.commandPalette.pendingCommand);
+			focusedPanel.commandPalette.pendingCommand = create_deferred_command(cmd, *focusedPanel);
+			
+			// keep the args we've already been given, the palette only asks for the rest
+			for args {
+				deferred_command_set_argument(*focusedPanel.commandPalette.pendingCommand, it_index, Any.{type_info(u8), it});
+			}
+			focusedPanel.commandPalette.currentArgIndex = args.count;
+			command_palette_open(*focusedPanel, panel_get_primary_cursor(*focusedPanel));
+		}
+		else {
+			// I'm sorry to have put you through so many layers of abstraction before we actually call the command function itself,
+			// But needs must, we're here reluctantly to cover the various complex cases surrounding calling a command correctly
+			// The last thing to do is call it once per cursor if the command actually requires that
+			
+			if cmd.flags & .PER_CURSOR {
+				nCursors := focusedPanel.cursors.count; // Iterate only the current amount of cursors, incase the command adds more cursors
+  				for 0..nCursors-1 {
+					cursor := *focusedPanel.cursors[it];
+					cmd.wrapper(*focusedPanel, cursor, args);
+				}
+			}
+			else {
+				cmd.wrapper(*focusedPanel, panel_get_primary_cursor(*focusedPanel), args);
+			}
+		}
+		
+		// TODO(multicursor): support multiple cursors here
+		if cmd.flags & .EXTEND {
+			panel_get_primary_cursor(*focusedPanel).anchor = anchor;
+		}
+		
+		primaryCursorStart := range_start(panel_get_primary_cursor(*focusedPanel));
+		
+		// Sort the cursors
+		quick_sort(focusedPanel.cursors, (a, b) => min(a.head, a.anchor) - min(b.head, b.anchor));
+		
+		// Now we can iterate the cursors to find overlaps
+		write := 0;
+		for i:1..focusedPanel.cursors.count-1 {
+			last := *focusedPanel.cursors[write];
+			curr := focusedPanel.cursors[i];
+			
+			if range_start(curr) <= range_end(last) { // Cursors overlap
+				newStart := min(range_start(curr), range_start(last));
+				newEnd := max(range_end(curr), range_end(last));
+				// Merge into last, keeping its direction. A single char selection has no direction, so take curr's
+				forward := ifx last.anchor == last.head then curr.anchor <= curr.head else last.anchor < last.head;
+				if forward {
+					last.anchor = newStart;
+					last.head = newEnd;
+				}
+				else {
+					last.head = newStart;
+					last.anchor = newEnd;
+				}
+			} else {
+				write += 1;
+				focusedPanel.cursors[write] = curr;
+			}
+		}
+		focusedPanel.cursors.count = write + 1;
+		
+		// Update the primary cursor (this could be a binary search, but it's fine)
+		for focusedPanel.cursors {
+			if range_start(it) <= primaryCursorStart && primaryCursorStart <= range_end(it) {
+				focusedPanel.primaryCursor = it_index;
+				break;
+			}
+		}
+		
+		// register selection has some special behaviour as it's intended to be paired with 
+		// one other action
+		if cmd.name != "select_register" {
+			registers.selectedRegister = DEFAULT_REGISTER;
+		}
+		repeatCount -= 1;
+	}
 }
 
 input_handler :: (event: Input.Event) {
@@ -432,14 +523,11 @@ input_handler :: (event: Input.Event) {
 	if nodePtr {
 		node := nodePtr.*;
 		if node.cmd && keyMap.pendingArgs.count == node.nArgs {
-			// this is where we execute the actual command, subject to various
-			// flag modifiers
-
 			if keyMap.pendingCount == 0 then keyMap.pendingCount = 1;
 			if !(node.cmd.flags & .REPEATABLE) then keyMap.pendingCount = 1; 
 			
 			// Turn the list of pending keyargs to an array of void*
-			// so we can give it to the command wrapper
+			// so we can give it to the command dispatcher
 			keyArgs: []*void;
 			if keyMap.pendingArgs.count {
 				keyArgs = NewArray(keyMap.pendingArgs.count, *void,, temp);
@@ -448,42 +536,8 @@ input_handler :: (event: Input.Event) {
 				}
 			}
 			
-			while keyMap.pendingCount > 0 {
-				anchor := 0;
-				// TODO(multicursor): support multiple cursors here
-				if node.cmd.flags & .EXTEND {
-					anchor = focusedPanel.cursors[0].anchor;
-				}
-				
-				if keyArgs.count < node.cmd.args.count {
-					// invoke the command palette if the command wants more arguments
-					focusedPanel.commandPalette.pendingCommandMode = true;
-					cancel_deferred_command(*focusedPanel.commandPalette.pendingCommand);
-					focusedPanel.commandPalette.pendingCommand = create_deferred_command(node.cmd, *focusedPanel);
-					// keep the args the keybinding already gave us, the palette only asks for the rest
-					for keyArgs {
-						deferred_command_set_argument(*focusedPanel.commandPalette.pendingCommand, it_index, Any.{type_info(u8), it});
-					}
-					focusedPanel.commandPalette.currentArgIndex = keyArgs.count;
-					command_palette_open(*focusedPanel, *focusedPanel.cursors[0]);
-				}
-				else {
-					// TODO(multicursor): support multiple cursors here
-					node.cmd.wrapper(*focusedPanel, *focusedPanel.cursors[0], keyArgs);
-				}
-				
-				// TODO(multicursor): support multiple cursors here
-				if node.cmd.flags & .EXTEND {
-					focusedPanel.cursors[0].anchor = anchor;
-				}
-				
-				// register selection has some special behaviour as it's intended to be paired with 
-				// one other action
-				if node.cmd.name != "select_register" {
-					registers.selectedRegister = DEFAULT_REGISTER;
-				}
-				keyMap.pendingCount -= 1;
-			}
+			command_dispatcher(node.cmd, keyMap.pendingCount, keyArgs);
+			keyMap.pendingCount = 0;
 
 			keyMap.pendingKeyNode = *keyMap.root[editorMode];
 			array_reset_keeping_memory(*keyMap.pendingKeyString);

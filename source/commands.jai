@@ -760,6 +760,48 @@ flip_selection :: (using panel: *Panel, cursor: *Cursor) {
 	cursor.anchor = temp;
 } @command
 
+copy_selection_to_next_line :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Copy selection to next line", keybinding = .["C"], flags = .PER_CURSOR };
+	// Ideally this should work across all current cursors
+	
+	// Theres a few interesting cases to handle
+	// Multiple cursor all copy, if they overlap they get merged (we'll do that outside this command though)
+ 	
+	move_offset_to_next_suitable_line :: (document: DocumentHandle, offset: s64, stepSize: int) -> s64 {
+		coord := get_coordinate_from_offset(document, offset);
+		
+		lineIsSuitable := false;
+		while lineIsSuitable == false {
+			coord.line += stepSize;
+			start, end := get_line_range(document, coord.line, false);
+			lineLen := end - start;
+			
+			if coord.col <= lineLen {
+				lineIsSuitable = true;
+			}
+		}
+		
+		return get_offset_from_coordinate(document, coord);
+	}
+	
+	anchorLine := get_coordinate_from_offset(document, cursor.anchor).line;
+	headLine := get_coordinate_from_offset(document, cursor.head).line;
+	stepSize := abs(headLine - anchorLine) + 1;
+	
+	newHead := move_offset_to_next_suitable_line(document, cursor.head, stepSize);
+	newAnchor := move_offset_to_next_suitable_line(document, cursor.anchor, stepSize);
+	newCursor := array_add(*panel.cursors);
+	newCursor.head = newHead;
+	newCursor.anchor = newAnchor;
+} @command
+
+keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Keep primary selection", keybinding = .[","] };
+	panel.cursors[0] = panel_get_primary_cursor(panel).*;
+	panel.primaryCursor = 0;
+	array_resize(*panel.cursors, 1);
+} @command
+ 
 // Normal Mode Changes
 // ------------------------------
 
@@ -1476,7 +1518,7 @@ document_search_on_edit :: (userData: *void, input: string) {
 	panel.hasMatches = false;
 
 	// TODO(multicursor): support multiple cursors here
-	start := max(panel.cursors[0].head, panel.cursors[0].anchor);
+	start := max(panel_get_primary_cursor(panel).head, panel_get_primary_cursor(panel).anchor);
 	panel.hasMatches, panel.results = search(panel.document, .NOCASE, start, input);
 
 	// we do another search if we found nothing to wrap from the start
@@ -1538,7 +1580,7 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 insert_mode_handle_text_input :: (char: Utf8_Char) {
 	textToInsert := to_string(*char);
 	// TODO(multicursor): support multiple cursors here
-	insert_mode_insert_string(textToInsert, *focusedPanel.cursors[0]);
+	insert_mode_insert_string(textToInsert, panel_get_primary_cursor(*focusedPanel));
 }
 
 insert_mode_line_break :: (using panel: *Panel, cursor: *Cursor) {
