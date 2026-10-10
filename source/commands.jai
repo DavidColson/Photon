@@ -742,7 +742,6 @@ select_prev_sibling :: (using panel: *Panel, cursor: *Cursor) {
 
 select_whole_document :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select whole document", keybinding = .["%"] };
-	// TODO(multicursor): this should collapse all cursors to one
 	cursor.anchor = 0;
 	cursor.head = get_size(document)-1;
 	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
@@ -762,10 +761,6 @@ flip_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 copy_selection_to_next_line :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Copy selection to next line", keybinding = .["C"], flags = .PER_CURSOR };
-	// Ideally this should work across all current cursors
-	
-	// Theres a few interesting cases to handle
-	// Multiple cursor all copy, if they overlap they get merged (we'll do that outside this command though)
  	
 	move_offset_to_next_suitable_line :: (document: DocumentHandle, offset: s64, stepSize: int) -> s64 {
 		coord := get_coordinate_from_offset(document, offset);
@@ -819,67 +814,66 @@ enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 	editorMode = .NORMAL;
 } @command
 
-enter_insert_mode_start :: (using panel: *Panel, cursor: *Cursor) {
+enter_insert_mode_start :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode start of selection", keybinding = .["i"] };
 	
-	// TODO(multicursor): This requires special functionality, we don't want every cursor to trigger the enter, but we must handle all of them
-	// here, so a loop is required
-	if cursor.head > cursor.anchor {
-		temp := cursor.head;
-		cursor.head = cursor.anchor;
-		cursor.anchor = temp;
-	}
-	panel_reset_dialogs(panel);
-	editorMode = .INSERT;
-	begin_edit(document);
-} @command
-
-enter_insert_mode_end :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode end of selection", keybinding = .["a"] };
-	
-	// TODO(multicursor): This requires special functionality, we don't want every cursor to trigger the enter, but we must handle all of them
-	// here, so a loop is required
-	if cursor.head < cursor.anchor {
-		temp := cursor.head;
-		cursor.head = cursor.anchor;
-		cursor.anchor = temp;
-	}
-	cursor.head = min(cursor.head + 1, get_size(document)-1);
-	cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
-	panel_reset_dialogs(panel);
-	editorMode = .INSERT;
-	begin_edit(document);
-} @command
-
-enter_insert_mode_line_start :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode start of line", keybinding = .["I"] };
-	goto_line_start(panel, cursor);
-
-	// put the cursor on the first non whitespace character
-	
-	// TODO(multicursor): This requires special functionality, we don't want every cursor to trigger the enter, but we must handle all of them
-	// here, so a loop is required
-	cursorChar := get_char_at(document, cursor.head);
-	if is_space(cursorChar) {
-		iterator := make_iterator(document, cursor.head);
-		for iterator {
-			cursor.head = iterator.offset;
-			if !is_space(it) break;
+	for * cursor: cursors {
+		if cursor.head > cursor.anchor {
+			temp := cursor.head;
+			cursor.head = cursor.anchor;
+			cursor.anchor = temp;
 		}
 	}
-	cursor.anchor = cursor.head;
+	panel_reset_dialogs(panel);
+	editorMode = .INSERT;
+	begin_edit(document);
+} @command
+
+enter_insert_mode_end :: (using panel: *Panel, _cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode end of selection", keybinding = .["a"] };
+	
+	for * cursor: cursors {
+		if cursor.head < cursor.anchor {
+			temp := cursor.head;
+			cursor.head = cursor.anchor;
+			cursor.anchor = temp;
+		}
+		cursor.head = min(cursor.head + 1, get_size(document)-1);
+		cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
+	}
+	panel_reset_dialogs(panel);
+	editorMode = .INSERT;
+	begin_edit(document);
+} @command
+
+enter_insert_mode_line_start :: (using panel: *Panel, _cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode start of line", keybinding = .["I"] };
+
+	// put the cursor on the first non whitespace character
+	for * cursor: cursors {
+		goto_line_start(panel, cursor);
+		cursorChar := get_char_at(document, cursor.head);
+		if is_space(cursorChar) {
+			iterator := make_iterator(document, cursor.head);
+			for iterator {
+				cursor.head = iterator.offset;
+				if !is_space(it) break;
+			}
+		}
+		cursor.anchor = cursor.head;
+	}
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document);
 } @command
 
-enter_insert_mode_line_end :: (using panel: *Panel, cursor: *Cursor) {
+enter_insert_mode_line_end :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Enter insert mode end of line", keybinding = .["A"] };
 	
-	// TODO(multicursor): This requires special functionality, we don't want every cursor to trigger the enter, but we must handle all of them
-	// here, so a loop is required
-	goto_line_end(panel, cursor);
+	for * cursor: cursors {
+		goto_line_end(panel, cursor);
+	}
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
@@ -891,14 +885,14 @@ select_register :: (using panel: *Panel, cursor: *Cursor, char: u8) {
 	registers.selectedRegister = char;
 } @command
 
-delete_cursor_range :: (doc: DocumentHandle, locationA: s64, locationB:s64) -> s64 {
+delete_cursor_range :: (doc: DocumentHandle, locationA: s64, locationB:s64) -> s64, s64 {
 	start := min(locationA, locationB);
 	end := max(locationA, locationB);
 
 	startOffset := shift_offset_line_endings(doc, start, .REVERSE);
 	endOffset := shift_offset_line_endings(doc, end + 1, .FORWARD);
 	delete(doc, startOffset, endOffset-startOffset);
-	return start;
+	return start, endOffset-startOffset;
 }
 
 yank_range_to_register :: (doc: DocumentHandle, locationA: s64, locationB:s64) {
@@ -918,50 +912,58 @@ yank_range_to_register :: (doc: DocumentHandle, locationA: s64, locationB:s64) {
 
 delete_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Delete selection", keybinding = .["d"] };
-	// TODO(multicursor): requires a custom loop so there's one edit around the whole group
 	
 	// copy the selection into a register before deleting it
 	yank_range_to_register(document, cursor.head, cursor.anchor);
 
 	begin_edit(document);
 	defer end_edit(document);
-	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
-	cursor.anchor = cursor.head;
+	
+	for * cursor: cursors {
+		deletedCount: s64;
+		cursor.head, deletedCount = delete_cursor_range(document, cursor.head, cursor.anchor);
+		cursor.anchor = cursor.head;
+		
+		update_other_cursors_after_edit(panel, cursor, cursor.head, -deletedCount);
+	}
 } @command
 
 change_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Change selection", keybinding = .["c"] };
 	
-	// TODO(multicursor): This command enters insert mode, so it can't be done per cursor automatically
-	// requires special handling
-	yank_range_to_register(document, cursor.head, cursor.anchor);
-
-	rangeEnd := max(cursor.head, cursor.anchor);
-	endChar := get_char_at(document, rangeEnd);
-	linewiseChange := endChar == #char "\n" || endChar == #char "\r";
-
-	indentation: string;
-	if linewiseChange {
-		lineNumber := get_coordinate_from_offset(document, min(cursor.head, cursor.anchor)).line;
-		indentation = calculate_indentation_for_line(document, lineNumber);
-	}
-
 	enter_insert_mode_start(panel, cursor);
 
-	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
-	cursor.anchor = cursor.head;
-
-	if linewiseChange {
-		insert_mode_insert_string(indentation, cursor);
-
-		// reinsert a line ending
-		textToInsert := "\r\n";
-		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
-			textToInsert = "\n";
+	for * cursor: cursors {
+		yank_range_to_register(document, cursor.head, cursor.anchor);
+		
+		rangeEnd := max(cursor.head, cursor.anchor);
+		endChar := get_char_at(document, rangeEnd);
+		linewiseChange := endChar == #char "\n" || endChar == #char "\r";
+		
+		indentation: string;
+		if linewiseChange {
+			lineNumber := get_coordinate_from_offset(document, min(cursor.head, cursor.anchor)).line;
+			indentation = calculate_indentation_for_line(document, lineNumber);
 		}
-		insert_mode_insert_string(textToInsert, cursor);
-		cursor.head -= textToInsert.count;
-		cursor.anchor -= textToInsert.count;
+		
+		deletedRange: s64;
+		cursor.head, deletedRange = delete_cursor_range(document, cursor.head, cursor.anchor);
+		cursor.anchor = cursor.head;
+		
+		update_other_cursors_after_edit(panel, cursor, cursor.head, -deletedRange);
+		
+		if linewiseChange {
+			insert_mode_insert_string(indentation, cursor);
+			
+			// reinsert a line ending
+			textToInsert := "\r\n";
+			if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
+				textToInsert = "\n";
+			}
+			insert_mode_insert_string(textToInsert, cursor);
+			cursor.head -= textToInsert.count;
+			cursor.anchor -= textToInsert.count;
+		}
 	}
 } @command
 
@@ -973,68 +975,83 @@ yank_selection :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 paste_after_selection :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Paste after selection", keybinding = .["p"], flags = .PER_CURSOR };
+	NORMAL :: CommandConfig.{ prettyName = "Paste after selection", keybinding = .["p"] };
 	textToPaste := read_register(registers.selectedRegister);
-	paste(panel, cursor, textToPaste, false);
+	paste(panel, textToPaste, false);
 } @command
 
 paste_before_selection :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Paste before selection", keybinding = .["P"], flags = .PER_CURSOR };
+	NORMAL :: CommandConfig.{ prettyName = "Paste before selection", keybinding = .["P"] };
 	textToPaste := read_register(registers.selectedRegister);
-	paste(panel, cursor, textToPaste, true);
+	paste(panel, textToPaste, true);
 } @command
 
 replace_selection :: (using panel: *Panel, cursor: *Cursor, char: u8) {
-	NORMAL :: CommandConfig.{ prettyName = "Replace selection with {char}", keybinding = .["r{char}"], flags = .PER_CURSOR };
+	NORMAL :: CommandConfig.{ prettyName = "Replace selection with {char}", keybinding = .["r{char}"] };
 	
-	// TODO(multicursor): requires a custom loop so there's one edit around the whole group
 	begin_edit(document);
 	defer end_edit(document);
-
-	head := cursor.head;
-	anchor := cursor.anchor;
-	rangeLength := abs(cursor.head - cursor.anchor);
-
-	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
-	cursor.anchor = cursor.head;
-
-	builder : String_Builder;
-	builder.allocator = temp;
-	init_string_builder(*builder);
-
-	for 0..rangeLength {
-		append(*builder, char);
+	
+	for * cursor: cursors {
+		head := cursor.head;
+		anchor := cursor.anchor;
+		rangeLength := abs(cursor.head - cursor.anchor);
+		
+		deletedCount: s64;
+		cursor.head, deletedCount = delete_cursor_range(document, cursor.head, cursor.anchor);
+		cursor.anchor = cursor.head;
+		
+		update_other_cursors_after_edit(panel, cursor, cursor.head, -deletedCount);
+		
+		builder : String_Builder;
+		builder.allocator = temp;
+		init_string_builder(*builder);
+		
+		for 0..rangeLength {
+			append(*builder, char);
+		}
+		
+		stringToInsert := builder_to_string(*builder,,temp);
+		insert(document, min(cursor.head, cursor.anchor), stringToInsert);
+		update_other_cursors_after_edit(panel, cursor, min(cursor.head, cursor.anchor), stringToInsert.count);
+		cursor.head = head;
+		cursor.anchor = anchor;
 	}
-
-	insert(document, min(cursor.head, cursor.anchor), builder_to_string(*builder,,temp));
-	cursor.head = head;
-	cursor.anchor = anchor;
 } @command
 
 replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Replace selection with yanked", keybinding = .["R"], flags = .PER_CURSOR };
+	NORMAL :: CommandConfig.{ prettyName = "Replace selection with yanked", keybinding = .["R"] };
 	begin_edit(document);
 
-	// TODO(multicursor): requires a custom loop so there's one edit around the whole group
-	
-	head := cursor.head;
-	anchor := cursor.anchor;
-	rangeLength := abs(cursor.head - cursor.anchor);
-
-	cursor.head = delete_cursor_range(document, cursor.head, cursor.anchor);
-	cursor.anchor = cursor.head;
-
-	textToPaste := read_register(registers.selectedRegister);
-
-	// insert into document
-	insertLocation := max(cursor.head, cursor.anchor);
-	insert(document, insertLocation, textToPaste);
-	change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, textToPaste.count});
+	for * cursor: cursors {
+		head := cursor.head;
+		anchor := cursor.anchor;
+		rangeLength := abs(cursor.head - cursor.anchor);
+		
+		deletedCount: s64;
+		cursor.head, deletedCount = delete_cursor_range(document, cursor.head, cursor.anchor);
+		cursor.anchor = cursor.head;
+		
+		textToPaste := read_register(registers.selectedRegister);
+		
+		// insert into document
+		insertLocation := max(cursor.head, cursor.anchor);
+		insert(document, insertLocation, textToPaste);
+		
+		// normalize line endings from pasted content
+		change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, insertLocation + textToPaste.count});
+		cursor.anchor = insertLocation;
+		cursor.head = cursor.anchor + textToPaste.count - 1 + change;
+		
+		update_other_cursors_after_edit(panel, cursor, insertLocation, textToPaste.count + change - deletedCount);
+	}
 	end_edit(document);
 
-	cursor.anchor = insertLocation;
-	cursor.head = cursor.anchor + textToPaste.count - 1 + change;
+	// autoindent is already cursor aware as it is
+	// and will wrap a begin block around the whole operation across all cursors
+	// but I do not know how to communicate what lines need to be indented?
 	
+	/*
 	linewise := false;
 	for textToPaste {
 		if it == #char "\n" {
@@ -1045,11 +1062,10 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	if linewise && document_supports_treesitter(document) {
 		autoindent_selection(panel, cursor);
 	}
+	*/
 } @command
 
-paste :: (using panel: *Panel, cursor: *Cursor, textToPaste: string, pasteBefore: bool) {
-	begin_edit(document);
-
+paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	linewise := false;
 	for textToPaste {
 		if it == #char "\n" {
@@ -1057,89 +1073,100 @@ paste :: (using panel: *Panel, cursor: *Cursor, textToPaste: string, pasteBefore
 			break;
 		}
 	}
-
-	insertLocation := 0;
-	if linewise && !pasteBefore {
-		coordinate := get_coordinate_from_offset(document, cursor.head);
-		_, insertLocation = get_line_range(document, coordinate.line, true);
-
-		insert(document, insertLocation, textToPaste);
-	}
-	else if linewise && pasteBefore {
-		coordinate := get_coordinate_from_offset(document, cursor.head);
-		// todo: paste on the first line
-		_, insertLocation = get_line_range(document, coordinate.line-1, true);
-		insert(document, insertLocation, textToPaste);
-	}
-	else if !linewise && !pasteBefore {
-		insertLocation = max(cursor.head, cursor.anchor) + 1;
-		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
-		insert(document, insertLocation, textToPaste);
-	}
-	else if !linewise && pasteBefore {
-		insertLocation = min(cursor.head, cursor.anchor);
-		insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
-		insert(document, insertLocation, textToPaste);
-	}
 	
-	change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, insertLocation + textToPaste.count});
-	cursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
-	cursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
+	begin_edit(document);
+
+	for * cursor: cursors { 
+		insertLocation := 0;
+		if linewise && !pasteBefore {
+			coordinate := get_coordinate_from_offset(document, cursor.head);
+			_, insertLocation = get_line_range(document, coordinate.line, true);
+			
+			insert(document, insertLocation, textToPaste);
+		}
+		else if linewise && pasteBefore {
+			coordinate := get_coordinate_from_offset(document, cursor.head);
+			// todo: paste on the first line
+			_, insertLocation = get_line_range(document, coordinate.line-1, true);
+			insert(document, insertLocation, textToPaste);
+		}
+		else if !linewise && !pasteBefore {
+			insertLocation = max(cursor.head, cursor.anchor) + 1;
+			insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
+			insert(document, insertLocation, textToPaste);
+		}
+		else if !linewise && pasteBefore {
+			insertLocation = min(cursor.head, cursor.anchor);
+			insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
+			insert(document, insertLocation, textToPaste);
+		}
+		
+		change := normalize_line_endings_common(document, document_get_line_endings(document), .{insertLocation, insertLocation + textToPaste.count});
+		cursor.anchor = shift_offset_line_endings(document, insertLocation, .FORWARD);
+		cursor.head = shift_offset_line_endings(document, insertLocation + textToPaste.count - 1 + change, .REVERSE);
+		
+		update_other_cursors_after_edit(panel, cursor, insertLocation, textToPaste.count + change);
+	}
 	end_edit(document);
 	
 	if linewise && document_supports_treesitter(document) {
-		autoindent_selection(panel, cursor);
+		// TODO(multicursor): confirm this works with multicursor when implemented
+		autoindent_selection(panel, panel_get_primary_cursor(panel));
 	}
 }
 
-new_line_below :: (using panel: *Panel, cursor: *Cursor) {
+new_line_below :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "New line below selection", keybinding = .["o"] };
-	if cursor.head < cursor.anchor then flip_selection(panel, cursor);
 	
-	// TODO(multicursor): this requires custom multicursor behaviour, you want to enter insert mode once, after all new lines have been placed
-	// for all cursors
-	
-	goto_line_end(panel, cursor);
-	enter_insert_mode_start(panel, cursor);
-
-	textToInsert := "\r\n";
-	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
-		textToInsert = "\n";
+	for * cursor: cursors {
+		if cursor.head < cursor.anchor then flip_selection(panel, cursor);
+		goto_line_end(panel, cursor);
 	}
-	insert_mode_insert_string(textToInsert, cursor);
 	
-	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-	insert_mode_insert_string(indentation, cursor);
+	enter_insert_mode_start(panel, _cursor);
+	
+	for * cursor: cursors {
+		textToInsert := "\r\n";
+		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
+			textToInsert = "\n";
+		}
+		insert_mode_insert_string(textToInsert, cursor);
+		
+		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+		insert_mode_insert_string(indentation, cursor);
+	}
 } @command
 
-new_line_above :: (using panel: *Panel, cursor: *Cursor) {
+new_line_above :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "New line above selection", keybinding = .["O"] };
-	if cursor.head > cursor.anchor then flip_selection(panel, cursor);
 	
-	// TODO(multicursor): this requires custom multicursor behaviour, you want to enter insert mode once, after all new lines have been placed
-	// for all cursors
+	for * cursor: cursors {
+		if cursor.head > cursor.anchor then flip_selection(panel, cursor);
+		goto_line_start(panel, cursor);
+		cursor.anchor = cursor.head;
+	}
 	
-	goto_line_start(panel, cursor);
-	cursor.anchor = cursor.head;
-	enter_insert_mode_start(panel, cursor);
-
-	textToInsert := "\r\n";
-	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
-		textToInsert = "\n";
+	enter_insert_mode_start(panel, _cursor);
+	
+	for * cursor: cursors {
+		textToInsert := "\r\n";
+		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
+			textToInsert = "\n";
+		}
+		insert_mode_insert_string(textToInsert, cursor);
+		
+		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
+			cursor.head -= 1;
+		}
+		else {
+			cursor.head -= 2;
+		}
+		
+		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
+		insert_mode_insert_string(indentation, cursor);
+		
+		cursor.anchor = cursor.head;
 	}
-	insert_mode_insert_string(textToInsert, cursor);
-
-	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
-		cursor.head -= 1;
-	}
-	else {
-		cursor.head -= 2;
-	}
-
-	indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-	insert_mode_insert_string(indentation, cursor);
-
-	cursor.anchor = cursor.head;
 } @command
 
 join_selection :: (using panel: *Panel, cursor: *Cursor) {
@@ -1147,44 +1174,44 @@ join_selection :: (using panel: *Panel, cursor: *Cursor) {
 	begin_edit(document);
 	defer end_edit(document);
 	
-	// TODO(multicursor): this may require custom behaviour, but it may just be fine as is as you want to join at each cursor location
-	// requires some testing
-	
-	// What should happen here? 
-	headCoord := get_coordinate_from_offset(document, cursor.head);
-	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-	
-	startLine := min(headCoord.line, anchorCoord.line);
-	endLine := max(headCoord.line, anchorCoord.line);
-	
-	delta := 0;
-	for 1..max(1,endLine-startLine) {
-		// we deal with the start line every time, cause each iteration removes one of the lines below
-		nextLine := get_line_content(document, startLine+1, true,,temp);
-		lineTrimmed := trim_left(nextLine.text);
-		bytesToRemove := nextLine.text.count - lineTrimmed.count;
-		deletionStart := nextLine.startByteOffset;
+	// Loop the cursors manually so the whole thing is treated as one edit
+	for * cursor: cursors {
+		// What should happen here? 
+		headCoord := get_coordinate_from_offset(document, cursor.head);
+		anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
 		
+		startLine := min(headCoord.line, anchorCoord.line);
+		endLine := max(headCoord.line, anchorCoord.line);
 		
-		while true {
-			char := get_char_at(document, deletionStart-1);
-			if char == #char "\n" || char == #char "\r" {
-				bytesToRemove += 1;
-				deletionStart -= 1;
-				continue;
+		delta := 0;
+		for 1..max(1,endLine-startLine) {
+			// we deal with the start line every time, cause each iteration removes one of the lines below
+			nextLine := get_line_content(document, startLine+1, true,,temp);
+			lineTrimmed := trim_left(nextLine.text);
+			bytesToRemove := nextLine.text.count - lineTrimmed.count;
+			deletionStart := nextLine.startByteOffset;
+			
+			
+			while true {
+				char := get_char_at(document, deletionStart-1);
+				if char == #char "\n" || char == #char "\r" {
+					bytesToRemove += 1;
+					deletionStart -= 1;
+					continue;
+				}
+				break;
 			}
-			break;
+			delete(document, deletionStart, bytesToRemove);
+			insert(document, deletionStart, " ");
+			delta -= bytesToRemove - 1;
 		}
-		delete(document, deletionStart, bytesToRemove);
-		insert(document, deletionStart, " ");
-		delta -= bytesToRemove - 1;
-	}
-	
-	if cursor.head < cursor.anchor {
-		cursor.anchor = cursor.anchor+delta;
-	}
-	else if cursor.head > cursor.anchor {
-		cursor.head = cursor.head+delta;
+		
+		if cursor.head < cursor.anchor {
+			cursor.anchor = cursor.anchor+delta;
+		}
+		else if cursor.head > cursor.anchor {
+			cursor.head = cursor.head+delta;
+		}
 	}
 } @command
 
@@ -1546,6 +1573,7 @@ jump_to_last_open_document :: (using panel: *Panel, cursor: *Cursor) {
 
 insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	// do the insert
+	insertLocation := cursor.head;
 	distanceToAnchor := cursor.anchor - cursor.head;
 	insert(focusedPanel.document, cursor.head, input);
 
@@ -1565,22 +1593,38 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	// If the last thing you typed likely closed an indentation region, reindent the line
 	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
 	// keypress, so for now we'll just guess
+	delta := 0;
 	if document_supports_treesitter(focusedPanel.document) && (input == "}" || input == ")" || input == "]") {
 		headCoord := get_coordinate_from_offset(focusedPanel.document, cursor.head);
 		anchorCoord := get_coordinate_from_offset(focusedPanel.document, cursor.anchor);
 
-		delta := replace_indentation_for_line(focusedPanel.document, headCoord.line);
+		// TODO(multicursor): this function theoretically runs over all cursors, which is not actually what we want
+		// fix this when we get to it
+		delta = replace_indentation_for_line(focusedPanel.document, headCoord.line);
 
 		cursor.head = cursor_offset_after_line_indent_change(focusedPanel.document, headCoord, delta);
 		cursor.anchor = cursor_offset_after_line_indent_change(focusedPanel.document, anchorCoord, delta);
 	}
 		
+	update_other_cursors_after_edit(*focusedPanel, cursor, insertLocation, input.count + delta);
+}
+
+update_other_cursors_after_edit :: (using panel: *Panel, cursor: *Cursor, editLocation: s64, change: s64) {
+	for * otherCursor: panel.cursors {
+		if otherCursor == cursor continue;
+		
+		if range_start(otherCursor) >= editLocation {
+			otherCursor.anchor += change;
+			otherCursor.head += change;
+		}
+	}
 }
 
 insert_mode_handle_text_input :: (char: Utf8_Char) {
 	textToInsert := to_string(*char);
-	// TODO(multicursor): support multiple cursors here
-	insert_mode_insert_string(textToInsert, panel_get_primary_cursor(*focusedPanel));
+	for * cursor: focusedPanel.cursors {
+		insert_mode_insert_string(textToInsert, cursor);
+	}
 }
 
 insert_mode_line_break :: (using panel: *Panel, cursor: *Cursor) {
@@ -1598,6 +1642,7 @@ insert_mode_line_break :: (using panel: *Panel, cursor: *Cursor) {
 	line := get_line_content(document, cursorLine,,temp);
 	trimmed := trim_left(line.text);
 	delete(document, line.startByteOffset, line.text.count - trimmed.count);
+	update_other_cursors_after_edit(panel, cursor, line.startByteOffset, -(line.text.count - trimmed.count));
 	
 	insert_mode_insert_string(indentation, cursor);
 } @command
@@ -1628,6 +1673,8 @@ insert_mode_backward_delete_char :: (using panel: *Panel, cursor: *Cursor) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
+	
+	update_other_cursors_after_edit(panel, cursor, startOffset, -change);
 } @command
 
 insert_mode_forward_delete_char :: (using panel: *Panel, cursor: *Cursor) {
@@ -1647,6 +1694,8 @@ insert_mode_forward_delete_char :: (using panel: *Panel, cursor: *Cursor) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
+	
+	update_other_cursors_after_edit(panel, cursor, startOffset, -change);
 } @command
 
 
