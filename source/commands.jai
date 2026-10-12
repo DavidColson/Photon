@@ -1204,6 +1204,8 @@ join_selection :: (using panel: *Panel, cursor: *Cursor) {
 			delete(document, deletionStart, bytesToRemove);
 			insert(document, deletionStart, " ");
 			delta -= bytesToRemove - 1;
+			
+			update_other_cursors_after_edit(panel, cursor, deletionStart, -(bytesToRemove - 1));
 		}
 		
 		if cursor.head < cursor.anchor {
@@ -1610,13 +1612,31 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 }
 
 update_other_cursors_after_edit :: (using panel: *Panel, cursor: *Cursor, editLocation: s64, change: s64) {
+	
+	adjust :: (offset: s64, editLocation: s64, change: s64) -> s64 {
+		// edit was an insert
+		if change >= 0 {
+			if offset >= editLocation {
+				return offset + change;
+			}
+			return offset;
+		}
+		// edit was a deletion
+		else {
+			if offset >= (editLocation - change) {
+				return offset + change;
+			}
+			else if offset > editLocation {
+				return editLocation;
+			}
+			return offset;
+		}
+	}
 	for * otherCursor: panel.cursors {
 		if otherCursor == cursor continue;
 		
-		if range_start(otherCursor) >= editLocation {
-			otherCursor.anchor += change;
-			otherCursor.head += change;
-		}
+		otherCursor.anchor = adjust(otherCursor.anchor, editLocation, change);
+		otherCursor.head = adjust(otherCursor.head, editLocation, change);
 	}
 }
 
