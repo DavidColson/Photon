@@ -11,6 +11,11 @@ Cursor :: struct {
 	virtualColumnHead: s64;
 }
 
+CursorCoordinates :: struct {
+	head: Document.Coordinate;
+	anchor: Document.Coordinate;
+}
+
 Panel :: struct {
 	document: DocumentHandle;
 	previousDocument: DocumentHandle;

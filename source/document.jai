@@ -1602,11 +1602,19 @@ undo :: (handle: DocumentHandle) -> s64 {
 	doc.longestLineLength = top.longestLineLength;
 
 	// note we want to edit something that is the inverse of the stored change, so old and new are swapped
+	
+	// TODO(multicursor): the merged change offsets _should_ be correct in a multicursor world as far as I can tell
 	if doc.tsTree {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
 	document_update_ts_tree(handle);
+	
+	// TODO(multicursor): this is no longer true with multicursor, there could be several start offsets for every cursor
+	// involved in the edit
+	// I think the better thing to do will be to actively store a selection state as part of the undo entry
+	// We can make a selection be the list of cursors and the primary cursor index
+	// Then just put the whole selection in when we commit_history
 	return entry.changeStartOffset;
 }
 

@@ -75,6 +75,18 @@ byte_offset_for_virtual_column :: (lineContent: Document.LineContent, virtualCol
 	return lineContent.text.count;
 }
 
+// opposite of above
+// Should really rename to visual column
+virtual_column_for_byte_offset :: (lineContent: Document.LineContent, byteColumn: s64) -> s64 {
+	column := 0;
+	for lineContent.text {
+		if it_index >= byteColumn then break;
+		if it == #char "\t" then column += chars_to_tabstop(column);
+		else column += 1;
+	}
+	return column;
+}
+
 move_one_line_down :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{
 		prettyName = "Move one line down",
@@ -759,35 +771,50 @@ flip_selection :: (using panel: *Panel, cursor: *Cursor) {
 	cursor.anchor = temp;
 } @command
 
+// Returns whether the line can hold a cursor at targetColumn, and the byte offset if so
+offset_for_column_on_line :: (document: DocumentHandle, lineNumber: s64, targetColumn: s64, atLineEnd: bool) -> bool, s64 {
+	line := get_line_content(document, lineNumber,,temp);
+	lineWidth := virtual_column_for_byte_offset(line, line.text.count);
+	
+	suitable := ifx atLineEnd then targetColumn <= lineWidth else targetColumn < lineWidth;
+	if !suitable return false, 0;
+	
+	return true, line.startByteOffset + byte_offset_for_virtual_column(line, targetColumn);
+}
+
 copy_selection_to_next_line :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Copy selection to next line", keybinding = .["C"], flags = .PER_CURSOR };
- 	
-	move_offset_to_next_suitable_line :: (document: DocumentHandle, offset: s64, stepSize: int) -> s64 {
+	
+	SourcePosition :: struct {
+		line: s64;
+		visualColumn: s64;
+		atLineEnd: bool;
+	}
+	get_source_position :: (document: DocumentHandle, offset: s64) -> SourcePosition {
 		coord := get_coordinate_from_offset(document, offset);
-		
-		lineIsSuitable := false;
-		while lineIsSuitable == false {
-			coord.line += stepSize;
-			start, end := get_line_range(document, coord.line, false);
-			lineLen := end - start;
-			
-			if coord.col <= lineLen {
-				lineIsSuitable = true;
-			}
-		}
-		
-		return get_offset_from_coordinate(document, coord);
+		line := get_line_content(document, coord.line,,temp);
+		return .{ coord.line, virtual_column_for_byte_offset(line, coord.col), coord.col >= line.text.count };
 	}
 	
-	anchorLine := get_coordinate_from_offset(document, cursor.anchor).line;
-	headLine := get_coordinate_from_offset(document, cursor.head).line;
-	stepSize := abs(headLine - anchorLine) + 1;
+	head := get_source_position(document, cursor.head);
+	anchor := get_source_position(document, cursor.anchor);
+	stepSize := abs(head.line - anchor.line) + 1;
+	numLines := get_number_of_lines(document);
 	
-	newHead := move_offset_to_next_suitable_line(document, cursor.head, stepSize);
-	newAnchor := move_offset_to_next_suitable_line(document, cursor.anchor, stepSize);
-	newCursor := array_add(*panel.cursors);
-	newCursor.head = newHead;
-	newCursor.anchor = newAnchor;
+	lineOffset := stepSize;
+	while max(head.line, anchor.line) + lineOffset < numLines {
+		headOk, newHead := offset_for_column_on_line(document, head.line + lineOffset, head.visualColumn, head.atLineEnd);
+		anchorOk, newAnchor := offset_for_column_on_line(document, anchor.line + lineOffset, anchor.visualColumn, anchor.atLineEnd);
+		
+		if headOk && anchorOk {
+			newCursor := array_add(*panel.cursors);
+			newCursor.head = newHead;
+			newCursor.anchor = newAnchor;
+			return;
+		}
+		lineOffset += stepSize;
+	}
+	// no suitable lines below, don't add a cursor
 } @command
 
 keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
@@ -1023,6 +1050,8 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Replace selection with yanked", keybinding = .["R"] };
 	begin_edit(document);
 
+	linewisePaste := NewArray(cursors.count, bool,,temp);
+	
 	for * cursor: cursors {
 		head := cursor.head;
 		anchor := cursor.anchor;
@@ -1033,6 +1062,13 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 		cursor.anchor = cursor.head;
 		
 		textToPaste := read_register(registers.selectedRegister);
+		
+		for char, i: textToPaste {
+			if char == #char "\n" {
+				linewisePaste[it_index] = true;
+				break;
+			}
+		}
 		
 		// insert into document
 		insertLocation := max(cursor.head, cursor.anchor);
@@ -1047,55 +1083,41 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	}
 	end_edit(document);
 
-	// autoindent is already cursor aware as it is
-	// and will wrap a begin block around the whole operation across all cursors
-	// but I do not know how to communicate what lines need to be indented?
-	
-	/*
-	linewise := false;
-	for textToPaste {
-		if it == #char "\n" {
-			linewise = true;
-			break;
-		}
-	}
-	if linewise && document_supports_treesitter(document) {
-		autoindent_selection(panel, cursor);
-	}
-	*/
+	autoindent_selection_helper(panel, linewisePaste);
 } @command
 
 paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
-	linewise := false;
-	for textToPaste {
-		if it == #char "\n" {
-			linewise = true;
-			break;
-		}
-	}
-	
 	begin_edit(document);
+	
+	linewisePaste := NewArray(cursors.count, bool);
 
 	for * cursor: cursors { 
+		for char, i: textToPaste {
+			if char == #char "\n" {
+				linewisePaste[it_index] = true;
+				break;
+			}
+		}
+		
 		insertLocation := 0;
-		if linewise && !pasteBefore {
+		if linewisePaste[it_index] && !pasteBefore {
 			coordinate := get_coordinate_from_offset(document, cursor.head);
 			_, insertLocation = get_line_range(document, coordinate.line, true);
 			
 			insert(document, insertLocation, textToPaste);
 		}
-		else if linewise && pasteBefore {
+		else if linewisePaste[it_index] && pasteBefore {
 			coordinate := get_coordinate_from_offset(document, cursor.head);
 			// todo: paste on the first line
 			_, insertLocation = get_line_range(document, coordinate.line-1, true);
 			insert(document, insertLocation, textToPaste);
 		}
-		else if !linewise && !pasteBefore {
+		else if !linewisePaste[it_index] && !pasteBefore {
 			insertLocation = max(cursor.head, cursor.anchor) + 1;
 			insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
 			insert(document, insertLocation, textToPaste);
 		}
-		else if !linewise && pasteBefore {
+		else if !linewisePaste[it_index] && pasteBefore {
 			insertLocation = min(cursor.head, cursor.anchor);
 			insertLocation = shift_offset_line_endings(document, insertLocation, .REVERSE);
 			insert(document, insertLocation, textToPaste);
@@ -1109,10 +1131,7 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 	}
 	end_edit(document);
 	
-	if linewise && document_supports_treesitter(document) {
-		// TODO(multicursor): confirm this works with multicursor when implemented
-		autoindent_selection(panel, panel_get_primary_cursor(panel));
-	}
+	autoindent_selection_helper(panel, linewisePaste,,temp);
 }
 
 new_line_below :: (using panel: *Panel, _cursor: *Cursor) {
@@ -1227,58 +1246,66 @@ toggle_comment :: (using panel: *Panel, cursor: *Cursor) {
 	
 	// TODO(multicursor): this function requires custom handling for multicursor, you want to operate on all individual lines
 	// across all cursors, not necessarily all cursors
-
-	headCoord := get_coordinate_from_offset(document, cursor.head);
-	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-
-	startLine := min(headCoord.line, anchorCoord.line);
-	endLine := max(headCoord.line, anchorCoord.line);
-
-	// first we need to work out if we want to comment this block of lines
-	// or uncomment it
-	// so we're gonna search every line to find out
-
-	toggleComment := false;
-	for startLine..endLine {
-		line := get_line_content(document, it,,temp);
-		
-		lineTrimmed := trim_left(line.text);
-		if !begins_with(lineTrimmed, commentString) {
-			toggleComment = true;
-			break;
-		}
+	
+	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
+	
+	for * cursor: cursors {
+		coords[it_index].head = get_coordinate_from_offset(document, cursor.head);
+		coords[it_index].anchor = get_coordinate_from_offset(document, cursor.anchor);
 	}
-
-	// add comment strings
-	offset := 0;
-	for startLine..endLine {
-		line := get_line_content(document, it,,temp);
-		firstNonBlankChar := 0;
-		for character: line.text {
-			if !is_space(character) {
-				firstNonBlankChar = it_index;
+	
+	lineDeltas: Table(s64, s64);
+	lineDeltas.allocator = temp;
+	for c: coords {
+		startLine := min(c.head.line, c.anchor.line);
+		endLine := max(c.head.line, c.anchor.line);
+		
+		// first we need to work out if we want to comment this block of lines
+		// or uncomment it
+		// so we're gonna search every line to find out
+		
+		toggleComment := false;
+		for startLine..endLine {
+			line := get_line_content(document, it,,temp);
+			
+			lineTrimmed := trim_left(line.text);
+			if !begins_with(lineTrimmed, commentString) {
+				toggleComment = true;
 				break;
 			}
 		}
-
-		if toggleComment {
-			insert(document, line.startByteOffset + firstNonBlankChar, commentString);
-			offset = 3;
-		}
-		else {
-			delete(document, line.startByteOffset + firstNonBlankChar, commentString.count);
-			offset = -3;
+		
+		// add comment strings
+		offset := 0;
+		for lineNumber: startLine..endLine {
+			line := get_line_content(document, lineNumber,,temp);
+			firstNonBlankChar := 0;
+			for character: line.text {
+				if !is_space(character) {
+					firstNonBlankChar = it_index;
+					break;
+				}
+			}
+			
+			if table_contains(*lineDeltas, lineNumber) then continue;
+			if toggleComment {
+				insert(document, line.startByteOffset + firstNonBlankChar, commentString);
+				table_set(*lineDeltas, lineNumber, 3);
+			}
+			else {
+				delete(document, line.startByteOffset + firstNonBlankChar, commentString.count);
+				table_set(*lineDeltas, lineNumber, -3);
+			}
 		}
 	}
-
+	
 	// shift the cursors along
-	if cursor.head < cursor.anchor {
-		cursor.head += offset;
-		cursor.anchor += (endLine - startLine + 1)*offset;
-	}
-	else {
-		cursor.anchor += offset;
-		cursor.head += (endLine - startLine + 1)*offset;
+	for * cursor: cursors {
+		c := coords[it_index];
+		headDelta := table_find_pointer(*lineDeltas, c.head.line).*;
+		anchorDelta := table_find_pointer(*lineDeltas, c.anchor.line).*;
+		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
+		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
 	}
 } @command
 	
@@ -1287,9 +1314,6 @@ replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
 	indentation := calculate_indentation_for_line(doc, lineNumber);
 	lineContent := get_line_content(doc, lineNumber,,temp);
 
-	// TODO(multicursor): similar to comment selection, you want this to operate on all lines contained in the selection
-	// not on every cursor
-	
 	// delete any existing indentation
 	deleteUpTo := -1;
 	for lineContent.text {
@@ -1322,85 +1346,122 @@ cursor_offset_after_line_indent_change :: (doc: DocumentHandle, coord: Document.
 	return get_offset_from_coordinate(doc, .{coord.line, max(0, coord.col + delta)});
 }
 
-autoindent_selection :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Autoindent selection", keybinding = .["="] };
+autoindent_selection_helper :: (using panel: *Panel, cursorsToInclude: []bool) {
+	if !document_supports_treesitter(document) return;
+	
 	// TODO: allow setting tabs or spaces, and tab width
 	begin_edit(document);
 	defer end_edit(document);
-
-	// TODO(multicursor): similar to comment selection, you want this to operate on all lines contained in the selection
-	// not on every cursor
 	
-	headCoord := get_coordinate_from_offset(document, cursor.head);
-	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-
-	startLine := min(headCoord.line, anchorCoord.line);
-	endLine := max(headCoord.line, anchorCoord.line);
-
-	headDelta := 0;
-	anchorDelta := 0;
-	for lineNumber: startLine..endLine {
-		delta := replace_indentation_for_line(document, lineNumber);
-		if lineNumber == headCoord.line then headDelta = delta;
-		if lineNumber == anchorCoord.line then anchorDelta = delta;
+	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
+	
+	for * cursor: cursors {
+		coords[it_index].head = get_coordinate_from_offset(document, cursor.head);
+		coords[it_index].anchor = get_coordinate_from_offset(document, cursor.anchor);
 	}
+	
+	lineDeltas: Table(s64, s64);
+	lineDeltas.allocator = temp;
+	for c: coords {
+		if cursorsToInclude[it_index] == false continue;
+		
+		startLine := min(c.head.line, c.anchor.line);
+		endLine := max(c.head.line, c.anchor.line);
+		for lineNumber: startLine..endLine {
+			if table_contains(*lineDeltas, lineNumber) then continue;
+			delta := replace_indentation_for_line(document, lineNumber);
+			table_set(*lineDeltas, lineNumber, delta);
+		}
+	}
+	
+	for * cursor: cursors {
+		c := coords[it_index];
+		_, headDelta := table_find(*lineDeltas, c.head.line);
+		_, anchorDelta := table_find(*lineDeltas, c.anchor.line);
+		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
+		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
+	}
+}
 
-	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
-	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
+autoindent_selection :: (using panel: *Panel, _cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Autoindent selection", keybinding = .["="] };
+	// We need the ability to autoindent specific cursors out of the set of all of them
+	// So we have this little helper here, apologies for the indirection
+	include := NewArray(cursors.count, bool,,temp);
+	for cursors { include[it_index] = true; }
+	autoindent_selection_helper(panel, include);
 } @command
 
-indent_line :: (using panel: *Panel, cursor: *Cursor) {
+indent_line :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Indent line", keybinding = .[">"] };
 	begin_edit(document);
 	defer end_edit(document);
-
-	// TODO(multicursor): similar to comment selection, you want this to operate on all lines contained in the selection
-	// not on every cursor
 	
-	headCoord := get_coordinate_from_offset(document, cursor.head);
-	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-
-	startLine := min(headCoord.line, anchorCoord.line);
-	endLine := max(headCoord.line, anchorCoord.line);
-
-	for startLine..endLine {
-		lineStartOffset := get_line_start(document, it);
-		insert(document, lineStartOffset, "\t");
+	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
+	
+	for * cursor: cursors {
+		coords[it_index].head = get_coordinate_from_offset(document, cursor.head);
+		coords[it_index].anchor = get_coordinate_from_offset(document, cursor.anchor);
 	}
-
-	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, 1);
-	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, 1);
+	
+	lineDeltas: Table(s64, s64);
+	lineDeltas.allocator = temp;
+	for c: coords {
+		startLine := min(c.head.line, c.anchor.line);
+		endLine := max(c.head.line, c.anchor.line);
+		for lineNumber: startLine..endLine {
+			if table_contains(*lineDeltas, lineNumber) then continue;
+			lineStartOffset := get_line_start(document, lineNumber);
+			insert(document, lineStartOffset, "\t");
+			table_set(*lineDeltas, lineNumber, 1);
+		}
+	}
+	
+	for * cursor: cursors {
+		c := coords[it_index];
+		headDelta := table_find_pointer(*lineDeltas, c.head.line).*;
+		anchorDelta := table_find_pointer(*lineDeltas, c.anchor.line).*;
+		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
+		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
+	}
 } @command
 
-unindent_line :: (using panel: *Panel, cursor: *Cursor) {
+unindent_line :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Unindent line", keybinding = .["<"] };
 	begin_edit(document);
 	defer end_edit(document);
 
-	// TODO(multicursor): similar to comment selection, you want this to operate on all lines contained in the selection
-	// not on every cursor
-	
 	// delete the start char for every line, assuming it is a tab of course
-	headCoord := get_coordinate_from_offset(document, cursor.head);
-	anchorCoord := get_coordinate_from_offset(document, cursor.anchor);
-
-	startLine := min(headCoord.line, anchorCoord.line);
-	endLine := max(headCoord.line, anchorCoord.line);
-
-	headDelta := 0;
-	anchorDelta := 0;
-	for startLine..endLine {
-		lineStartOffset := get_line_start(document, it);
-		if get_char_at(document, lineStartOffset) == #char "\t" {
-			delete(document, lineStartOffset, 1);
-
-			if it == headCoord.line then headDelta = -1;
-			if it == anchorCoord.line then anchorDelta = -1;
+	
+	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
+	
+	for * cursor: cursors {
+		coords[it_index].head = get_coordinate_from_offset(document, cursor.head);
+		coords[it_index].anchor = get_coordinate_from_offset(document, cursor.anchor);
+	}
+	
+	lineDeltas: Table(s64, s64);
+	lineDeltas.allocator = temp;
+	for c: coords {
+		startLine := min(c.head.line, c.anchor.line);
+		endLine := max(c.head.line, c.anchor.line);
+		for lineNumber: startLine..endLine {
+			if table_contains(*lineDeltas, lineNumber) then continue;
+			lineStartOffset := get_line_start(document, lineNumber);
+			if get_char_at(document, lineStartOffset) == #char "\t" {
+				delete(document, lineStartOffset, 1);
+			}
+			table_set(*lineDeltas, lineNumber, -1);
 		}
 	}
-
-	cursor.head = cursor_offset_after_line_indent_change(document, headCoord, headDelta);
-	cursor.anchor = cursor_offset_after_line_indent_change(document, anchorCoord, anchorDelta);
+	
+	for * cursor: cursors {
+		c := coords[it_index];
+		headDelta := table_find_pointer(*lineDeltas, c.head.line).*;
+		anchorDelta := table_find_pointer(*lineDeltas, c.anchor.line).*;
+		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
+		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
+	}
 } @command
 
 undo :: (using panel: *Panel, cursor: *Cursor) {
@@ -1592,6 +1653,8 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	}
 	document_update_ts_tree(focusedPanel.document);
 	
+	update_other_cursors_after_edit(*focusedPanel, cursor, insertLocation, input.count);
+	
 	// If the last thing you typed likely closed an indentation region, reindent the line
 	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
 	// keypress, so for now we'll just guess
@@ -1599,16 +1662,18 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	if document_supports_treesitter(focusedPanel.document) && (input == "}" || input == ")" || input == "]") {
 		headCoord := get_coordinate_from_offset(focusedPanel.document, cursor.head);
 		anchorCoord := get_coordinate_from_offset(focusedPanel.document, cursor.anchor);
-
-		// TODO(multicursor): this function theoretically runs over all cursors, which is not actually what we want
-		// fix this when we get to it
+		
 		delta = replace_indentation_for_line(focusedPanel.document, headCoord.line);
 
 		cursor.head = cursor_offset_after_line_indent_change(focusedPanel.document, headCoord, delta);
 		cursor.anchor = cursor_offset_after_line_indent_change(focusedPanel.document, anchorCoord, delta);
+		
+		if delta != 0 {
+			lineStart := get_line_start(focusedPanel.document, headCoord.line);
+			update_other_cursors_after_edit(*focusedPanel, cursor, lineStart, delta);
+		}
 	}
 		
-	update_other_cursors_after_edit(*focusedPanel, cursor, insertLocation, input.count + delta);
 }
 
 update_other_cursors_after_edit :: (using panel: *Panel, cursor: *Cursor, editLocation: s64, change: s64) {
