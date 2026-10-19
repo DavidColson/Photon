@@ -1494,6 +1494,7 @@ confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	if panel.hasMatches {
 		cursor.anchor = panel.results[0].start;
 		cursor.head = panel.results[0].end-1;
+		keep_primary_selection(panel, cursor);
 	}
 	editorMode = .NORMAL;
 	write_register("/", .{panel.searchInput.text.count, panel.searchInput.text.data});
@@ -1515,8 +1516,6 @@ end_document_search :: (using panel: *Panel) {
 next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Next search result", keybinding = .["n"] };
 	
-	// TODO(multicursor): this should collapse to one cursor
-	
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
@@ -1531,6 +1530,8 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	if panel.hasMatches {
 		cursor.anchor = panel.results[0].start;
 		cursor.head = panel.results[0].end-1;
+		
+		keep_primary_selection(panel, cursor);
 
 		matchLine := get_coordinate_from_offset(panel.document, panel.results[0].start).line;
 		startVisibleLine, pageSize := panel_calculate_visible_lines(panel);
@@ -1545,8 +1546,6 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	// TODO(multicursor): this should collapse to one cursor
-	
 	searchTerm := read_register("/");
 	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, searchTerm, stopAtFirstResult=false);
 
@@ -1566,6 +1565,8 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 
 		cursor.anchor = panel.results[bestMatch].start;
 		cursor.head = panel.results[bestMatch].end-1;
+		
+		keep_primary_selection(panel, cursor);
 
 		matchLine := get_coordinate_from_offset(panel.document, panel.results[bestMatch].start).line;
 		startVisibleLine, pageSize := panel_calculate_visible_lines(panel);
@@ -1596,7 +1597,6 @@ document_search_on_edit :: (userData: *void, input: string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	// TODO(multicursor): support multiple cursors here
 	start := max(panel_get_primary_cursor(panel).head, panel_get_primary_cursor(panel).anchor);
 	panel.hasMatches, panel.results = search(panel.document, .NOCASE, start, input);
 
