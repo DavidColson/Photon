@@ -106,7 +106,7 @@ DEFAULT_REGISTER :: #char "+";
 Registers :: struct {
 	registerPool: Flat_Pool;
 	registerAllocator: Allocator;
-	table: Table(u8, [..]u8);
+	table: Table(u8, [..]u8); // TODO(multicursor): should be an array of arrays here, so each register has a slot for each cursor
 	selectedRegister:u8 = DEFAULT_REGISTER;
 }
 registers: Registers;

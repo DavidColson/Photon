@@ -835,7 +835,7 @@ enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 
 	// if we were in insert mode we must now end the edit
 	if editorMode == .INSERT {
-		end_edit(panel.document);
+		end_edit(panel.document, panel);
 	}
 
 	editorMode = .NORMAL;
@@ -853,7 +853,7 @@ enter_insert_mode_start :: (using panel: *Panel, _cursor: *Cursor) {
 	}
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
-	begin_edit(document);
+	begin_edit(document, panel);
 } @command
 
 enter_insert_mode_end :: (using panel: *Panel, _cursor: *Cursor) {
@@ -870,7 +870,7 @@ enter_insert_mode_end :: (using panel: *Panel, _cursor: *Cursor) {
 	}
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
-	begin_edit(document);
+	begin_edit(document, panel);
 } @command
 
 enter_insert_mode_line_start :: (using panel: *Panel, _cursor: *Cursor) {
@@ -892,7 +892,7 @@ enter_insert_mode_line_start :: (using panel: *Panel, _cursor: *Cursor) {
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
-	begin_edit(document);
+	begin_edit(document, panel);
 } @command
 
 enter_insert_mode_line_end :: (using panel: *Panel, _cursor: *Cursor) {
@@ -904,7 +904,7 @@ enter_insert_mode_line_end :: (using panel: *Panel, _cursor: *Cursor) {
 
 	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
-	begin_edit(document);
+	begin_edit(document, panel);
 } @command
 
 select_register :: (using panel: *Panel, cursor: *Cursor, char: u8) { 
@@ -943,8 +943,8 @@ delete_selection :: (using panel: *Panel, cursor: *Cursor) {
 	// copy the selection into a register before deleting it
 	yank_range_to_register(document, cursor.head, cursor.anchor);
 
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	for * cursor: cursors {
 		deletedCount: s64;
@@ -1016,8 +1016,8 @@ paste_before_selection :: (using panel: *Panel, cursor: *Cursor) {
 replace_selection :: (using panel: *Panel, cursor: *Cursor, char: u8) {
 	NORMAL :: CommandConfig.{ prettyName = "Replace selection with {char}", keybinding = .["r{char}"] };
 	
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	for * cursor: cursors {
 		head := cursor.head;
@@ -1048,7 +1048,7 @@ replace_selection :: (using panel: *Panel, cursor: *Cursor, char: u8) {
 
 replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Replace selection with yanked", keybinding = .["R"] };
-	begin_edit(document);
+	begin_edit(document, panel);
 
 	linewisePaste := NewArray(cursors.count, bool,,temp);
 	
@@ -1081,13 +1081,13 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 		
 		update_other_cursors_after_edit(panel, cursor, insertLocation, textToPaste.count + change - deletedCount);
 	}
-	end_edit(document);
+	end_edit(document, panel);
 
 	autoindent_selection_helper(panel, linewisePaste);
 } @command
 
 paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
-	begin_edit(document);
+	begin_edit(document, panel);
 	
 	linewisePaste := NewArray(cursors.count, bool);
 
@@ -1129,7 +1129,7 @@ paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
 		
 		update_other_cursors_after_edit(panel, cursor, insertLocation, textToPaste.count + change);
 	}
-	end_edit(document);
+	end_edit(document, panel);
 	
 	autoindent_selection_helper(panel, linewisePaste,,temp);
 }
@@ -1190,8 +1190,8 @@ new_line_above :: (using panel: *Panel, _cursor: *Cursor) {
 
 join_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Join selection", keybinding = .["alt+j"] };
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	// Loop the cursors manually so the whole thing is treated as one edit
 	for * cursor: cursors {
@@ -1241,8 +1241,8 @@ commentString :: "// ";
 
 toggle_comment :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Toggle comment", keybinding = .["<space>c"] };
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	// TODO(multicursor): this function requires custom handling for multicursor, you want to operate on all individual lines
 	// across all cursors, not necessarily all cursors
@@ -1350,8 +1350,8 @@ autoindent_selection_helper :: (using panel: *Panel, cursorsToInclude: []bool) {
 	if !document_supports_treesitter(document) return;
 	
 	// TODO: allow setting tabs or spaces, and tab width
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
 	
@@ -1394,8 +1394,8 @@ autoindent_selection :: (using panel: *Panel, _cursor: *Cursor) {
 
 indent_line :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Indent line", keybinding = .[">"] };
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 	
 	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
 	
@@ -1428,8 +1428,8 @@ indent_line :: (using panel: *Panel, _cursor: *Cursor) {
 
 unindent_line :: (using panel: *Panel, _cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Unindent line", keybinding = .["<"] };
-	begin_edit(document);
-	defer end_edit(document);
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
 
 	// delete the start char for every line, assuming it is a tab of course
 	
@@ -1466,23 +1466,12 @@ unindent_line :: (using panel: *Panel, _cursor: *Cursor) {
 
 undo :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Undo", keybinding = .["u"] };
-	
-	// TODO(multicursor): do we want to restore all cursor histories? Presumably yes
-	result := undo(document);
-	if result >= 0 {
-		cursor.head = result;
-		cursor.anchor = cursor.head;
-	}
+	panel_restore_selection(panel, undo(document));
 } @command
 
 redo :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Redo", keybinding = .["U"] };
-	result := redo(document);
-	// TODO(multicursor): do we want to restore all cursor histories? Presumably yes
-	if result > 0 {
-		cursor.head = result;
-		cursor.anchor = cursor.head;
-	}
+	panel_restore_selection(panel, redo(document));
 } @command
 
 
@@ -1792,7 +1781,7 @@ page_up :: (using panel: *Panel, cursor: *Cursor) {
 	INSERT :: CommandConfig.{ prettyName = "Page up", keybinding = .["<pageup>"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
-	// TODO(multicursor): how does this work with multiple cursors?
+	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
 	
 	// move the cursor up half a page
 	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
@@ -1809,7 +1798,7 @@ page_down :: (using panel: *Panel, cursor: *Cursor) {
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 	numLinesDocument := get_number_of_lines(panel.document);
 
-	// TODO(multicursor): how does this work with multiple cursors?
+	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
 	
 	// move the cursor down half a page
 	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
@@ -1824,7 +1813,7 @@ half_page_up :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Half page up", keybinding = .["ctrl+u"] };
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 
-	// TODO(multicursor): how does this work with multiple cursors?
+	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
 	
 	// move the cursor up half a page
 	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
@@ -1840,7 +1829,7 @@ half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
 	numLinesDocument := get_number_of_lines(panel.document);
 
-	// TODO(multicursor): how does this work with multiple cursors?
+	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
 	
 	// move the cursor down half a page
 	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
@@ -2156,7 +2145,7 @@ NormalizedLineEndings :: enum {
 
 normalize_line_endings :: (using panel: *Panel, cursor: *Cursor, endings: NormalizedLineEndings) {
 	NORMAL :: CommandConfig.{ prettyName = "Normalize line endings" };
-	begin_edit(document);
+	begin_edit(document, panel);
 	
 	if endings == {
 	case .CRLF;
@@ -2165,6 +2154,6 @@ normalize_line_endings :: (using panel: *Panel, cursor: *Cursor, endings: Normal
 		normalize_line_endings_common(document, .LF, .{0, S64_MAX});
 	}
 	
-	end_edit(document);
+	end_edit(document, panel);
 } @command
 

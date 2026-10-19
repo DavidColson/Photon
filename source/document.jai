@@ -105,6 +105,8 @@ Document :: struct {
 		changeStartOffset: s64;
 		changeOldEndOffset: s64;
 		changeNewEndOffset: s64;
+		selectionBefore: SelectionSnapshot;
+		selectionAfter: SelectionSnapshot;
 		saved: bool;
 	}
 
@@ -134,6 +136,8 @@ Document :: struct {
 	currentEditStartOffset: s64 = 0;
 	currentEditOldEndOffset: s64 = 0;
 	currentEditTotalBytes: s64 = 0;
+	selectionBeforeEdit: SelectionSnapshot;
+	selectionAfterEdit: SelectionSnapshot;
 
 	// Memory (except the undo stack for reasons?)
 	treeMemory: Flat_Pool;
@@ -214,25 +218,26 @@ for_expansion :: (documents: *DocumentTable, body: Code, flags: For_Flags) #expa
 nilDocument: Document;
 
 tree_test :: () {
+	panel: Panel; // edits need a panel to snapshot selection state from
 	docHandle := document_get_or_open("build_shorter.jai");
 	doc := document_get(docHandle);
 
 	pretty_print_tree(doc.tree);
 
-	begin_edit(docHandle);
+	begin_edit(docHandle, *panel);
 	insert(docHandle, 100, "hello world");
 	insert(docHandle, 105, " my");
-	end_edit(docHandle);
+	end_edit(docHandle, *panel);
 	pretty_print_tree(doc.tree);
 
 	// trivial copies
 	copy := document_copy(docHandle);
 	log("size from view before edit: %", get_size(copy));
 
-	begin_edit(docHandle);
+	begin_edit(docHandle, *panel);
 	insert(docHandle, 110, "test ");
 	insert(docHandle, 200, "again more");
-	end_edit(docHandle);
+	end_edit(docHandle, *panel);
 
 	pretty_print_tree(doc.tree);
 
@@ -299,9 +304,9 @@ tree_test :: () {
 	log("at 100, 10 chars: %", get_content(docHandle, 100, 10));
 
 	// deletions
-	begin_edit(docHandle);
+	begin_edit(docHandle, *panel);
 	delete(docHandle, 130, 19);
-	end_edit(docHandle);
+	end_edit(docHandle, *panel);
 
 
 	pretty_print_tree(doc.tree);
@@ -1074,7 +1079,7 @@ reconcile_document :: (handle: DocumentHandle) {
 	document_load_from_disk(handle);
 }
 
-begin_edit :: (handle: DocumentHandle) {
+begin_edit :: (handle: DocumentHandle, panel: *Panel) {
 	assert(handle.directCopy == null, "You cannot edit copies!!!");
 	doc := document_get(handle);
 	assert(doc.editOpen == false, "Cannot begin edit on this document, another edit is in progress");
@@ -1087,13 +1092,18 @@ begin_edit :: (handle: DocumentHandle) {
 	doc.currentEditStartOffset = S64_MAX;
 	doc.currentEditOldEndOffset = 0;
 	doc.currentEditTotalBytes = 0;
+	doc.selectionBeforeEdit = { panel.primaryCursor, NewArray(panel.cursors.count, Cursor,, other_allocator(doc)) };
+	memcpy(doc.selectionBeforeEdit.cursors.data, panel.cursors.data, size_of(Cursor)*panel.cursors.count);
 }
 
-end_edit :: (handle: DocumentHandle) {
+end_edit :: (handle: DocumentHandle, panel: *Panel) {
 	assert(handle.directCopy == null, "You cannot edit copies!!!");
 	doc := document_get(handle);
 	assert(doc.editOpen, "Cannot end edit, one was not started");
 	doc.editOpen = false;
+	
+	doc.selectionAfterEdit = { panel.primaryCursor, NewArray(panel.cursors.count, Cursor,, other_allocator(doc)) };
+	memcpy(doc.selectionAfterEdit.cursors.data, panel.cursors.data, size_of(Cursor)*panel.cursors.count);
 
 	// check if the tree even changed since the begin, if it did commit the change
 	if doc.tree != doc.undoStack[doc.undoStack.count-1].tree {
@@ -1582,14 +1592,17 @@ commit_history :: (doc: *Document) {
 	top.changeStartOffset = doc.currentEditStartOffset;
 	top.changeOldEndOffset = doc.currentEditOldEndOffset;
 	top.changeNewEndOffset = doc.currentEditOldEndOffset + doc.currentEditTotalBytes;
+	top.selectionBefore = doc.selectionBeforeEdit;
+	top.selectionAfter = doc.selectionAfterEdit;
 }
 
-undo :: (handle: DocumentHandle) -> s64 {
+// Returns the selection from before the undone edit, which is empty if there was nothing to undo
+undo :: (handle: DocumentHandle) -> SelectionSnapshot {
 	assert(handle.directCopy == null, "You must not edit copies!!!");
 	doc := document_get(handle);
 	if doc.undoStack.count == 1 {
 		push_notification("Undo history empty");
-		return -1;
+		return .{};
 	}
 
 	// pop the current moment in history and put in redo stack
@@ -1609,21 +1622,16 @@ undo :: (handle: DocumentHandle) -> s64 {
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
 	document_update_ts_tree(handle);
-	
-	// TODO(multicursor): this is no longer true with multicursor, there could be several start offsets for every cursor
-	// involved in the edit
-	// I think the better thing to do will be to actively store a selection state as part of the undo entry
-	// We can make a selection be the list of cursors and the primary cursor index
-	// Then just put the whole selection in when we commit_history
-	return entry.changeStartOffset;
+	return entry.selectionBefore;
 }
 
-redo :: (handle: DocumentHandle) -> s64 {
+// Returns the selection from after the redone edit, which is empty if there was nothing to redo
+redo :: (handle: DocumentHandle) -> SelectionSnapshot {
 	assert(handle.directCopy == null, "You must not edit copies!!!");
 	doc := document_get(handle);
 	if doc.redoStack.count == 0 {
 		push_notification("Redo history empty");
-		return -1;
+		return .{};
 	}
 	entry := pop(*doc.redoStack);
 	doc.tree = entry.tree;
@@ -1636,7 +1644,7 @@ redo :: (handle: DocumentHandle) -> s64 {
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
 	document_update_ts_tree(handle);
-	return entry.changeStartOffset;
+	return entry.selectionAfter;
 }
 
 document_copy :: (handle: DocumentHandle) -> DocumentHandle {

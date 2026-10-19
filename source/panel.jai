@@ -16,6 +16,11 @@ CursorCoordinates :: struct {
 	anchor: Document.Coordinate;
 }
 
+SelectionSnapshot :: struct {
+	primaryCursor: s64;
+	cursors: []Cursor;
+}
+
 Panel :: struct {
 	document: DocumentHandle;
 	previousDocument: DocumentHandle;
@@ -23,18 +28,19 @@ Panel :: struct {
 	layoutRect: Rect;
 	optionsMenuOpen: bool;
 
+	// selection state
 	primaryCursor: s64;
 	cursors: [..]Cursor;
 	lastScrolledCursorHead: s64;
 	
 	// for restoring selections with shrink_selection
-	// TODO(multicursor): this will need to be an array of an array of cursors
+	// TODO(multicursor): this will need to be an array of an array of cursors, you could also include it inside the selection state struct
 	// Probably we will refactor an array of cursors into a single "selection" object similar to helix
 	syntaxSelectionsHistory: [..]Cursor;
 
 	DocumentPanelLocation :: struct {
 		scrollOffset: Vector2;
-		cursor: Cursor;
+		cursor: Cursor; // TODO(multicursor): replace with a selectionState so we cover all cursors
 	}
 	documentLocations: Table(DocumentHandle, DocumentPanelLocation, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
 
@@ -117,6 +123,14 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 
 panel_get_primary_cursor :: (panel: *Panel) -> *Cursor {
 	return *panel.cursors[panel.primaryCursor];
+}
+
+// Copies a snapshot (i.e. from the undo history) into the panel's own cursor array. Empty snapshots are ignored
+panel_restore_selection :: (panel: *Panel, selection: SelectionSnapshot) {
+	if selection.cursors.count == 0 return;
+	array_resize(*panel.cursors, selection.cursors.count, initialize=false);
+	memcpy(panel.cursors.data, selection.cursors.data, size_of(Cursor) * selection.cursors.count);
+	panel.primaryCursor = selection.primaryCursor;
 }
 
 panel_reset_dialogs :: (panel: *Panel) {
