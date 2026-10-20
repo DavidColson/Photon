@@ -1890,6 +1890,8 @@ half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 
 // Dialog Commands
 // -----------------------------
+// TODO: you could probably get rid of these and add a member to the command config
+// that tells the input system which dialog this command is for, and then just call it through usual channels
 
 dialog_select_next :: (using panel: *Panel, cursor: *Cursor) {
 	DIALOG :: CommandConfig.{ prettyName = "Dialog select next", keybinding = .["<down>"] };
