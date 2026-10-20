@@ -823,6 +823,51 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 	panel.primaryCursor = 0;
 	array_resize(*panel.cursors, 1);
 } @command
+
+
+start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
+	editorMode = .DIALOG;
+	panel.activeDialog = .SELECT;
+	panel.searchInput.onEditCallback = select_all_in_selection_on_edit;
+	panel.searchInput.userData = cast(*void) panel;
+	
+	// save the current selection state in the panel
+} @command
+
+confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
+	// actually go and make cursors for all the matches that were found
+	
+	if panel.hasMatches {
+		array_reset_keeping_memory(*panel.cursors);
+		for panel.results {
+			newCursor := array_add(*panel.cursors);
+			newCursor.head = it.end;
+			newCursor.anchor = it.start;
+		}
+		panel.primaryCursor = 0;
+	}
+	
+	editorMode = .NORMAL;
+	panel_reset_dialogs(panel);
+	
+}
+
+cancel_select_all_in_selection :: (using panel: *Panel) { 
+	input_field_reset_keeping_memory(*panel.searchInput);
+	panel.searchInput.onEditCallback = null;
+	panel.searchInput.userData = null;
+	
+	// return us to the prior selection state
+}
+
+select_all_in_selection_on_edit :: (userData: *void, input: string) {
+	panel := cast(*Panel) userData;
+	
+	// Search fully in the current range of all selections
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, input, stopAtFirstResult=false);
+	
+}
  
 // Normal Mode Changes
 // ------------------------------
@@ -1475,6 +1520,8 @@ redo :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 
+
+
 // File Search Commands
 // --------------------------------
 
@@ -1851,6 +1898,7 @@ dialog_select_next :: (using panel: *Panel, cursor: *Cursor) {
 		case .COMMAND_PALETTE;
 			command_palette_select_next(panel, cursor);
 		case .SEARCH; return;
+		case .SELECT; return;
 	}
 } @command
 
@@ -1861,6 +1909,7 @@ dialog_select_previous :: (using panel: *Panel, cursor: *Cursor) {
 		case .COMMAND_PALETTE;
 			command_palette_select_previous(panel, cursor);
 		case .SEARCH; return;
+		case .SELECT; return;
 	}
 } @command
 
@@ -1872,6 +1921,8 @@ dialog_action_item :: (using panel: *Panel, cursor: *Cursor) {
 			command_palette_execute_command(panel, cursor);
 		case .SEARCH;
 			confirm_document_search(panel, cursor);
+		case .SELECT;
+			confirm_select_all_in_selection(panel, cursor);
 	}
 } @command
 
@@ -1882,6 +1933,7 @@ dialog_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 	if activeDialog == {
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
+		case .SELECT; inputField = *searchInput;
 	}
 
 	if activeDialog == {
@@ -1902,6 +1954,7 @@ dialog_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 			}
 			#through;
 		case .SEARCH;
+		case .SELECT;
 			before := inputField.text.count;
 			inputField.text.count -= 1;
 			inputField.cursor -= 1;
@@ -1944,6 +1997,7 @@ dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
 	if activeDialog == {
 		case .COMMAND_PALETTE; inputField = *commandPalette.input;
 		case .SEARCH; inputField = *searchInput;
+		case .SELECT; inputField = *searchInput;
 	}
 
 	// control characters (ctrl+backspace sends 0x7f for instance) are not text
