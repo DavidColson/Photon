@@ -541,6 +541,20 @@ refresh_document_indentation_table :: (document: *Document) {
 	// the treesitter tree, as the table is keyed by the node IDs
 	treeHash := get_hash(document.tsTree, get_hash(document.tree));
 	if treeHash != document.indents.treeHash {
+		// the tables lazily capture context.allocator on first use, and callers may run us under temp
+		// (e.g. autoindent after paste), so pin them to the heap, where resizes actually free their old storage
+		if !document.indents.auto.allocator.proc {
+			allocator := context.default_allocator;
+			document.indents.auto.allocator = allocator;
+			document.indents.begin.allocator = allocator;
+			document.indents.end.allocator = allocator;
+			document.indents.dedent.allocator = allocator;
+			document.indents.branch.allocator = allocator;
+			document.indents.ignore.allocator = allocator;
+			document.indents.align.allocator = allocator;
+			document.indents.zero.allocator = allocator;
+		}
+
 		table_reset(*document.indents.auto);
 		table_reset(*document.indents.begin); 
 		table_reset(*document.indents.end); 

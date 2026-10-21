@@ -2267,6 +2267,15 @@ document_reset :: (using doc: *Document) {
 
 	ts_tree_delete(tsTree);
 
+	deinit(*indents.auto);
+	deinit(*indents.begin);
+	deinit(*indents.end);
+	deinit(*indents.dedent);
+	deinit(*indents.branch);
+	deinit(*indents.ignore);
+	deinit(*indents.align);
+	deinit(*indents.zero);
+
 	doc.* = .{};
 }
 
