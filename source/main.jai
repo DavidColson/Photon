@@ -158,9 +158,6 @@ main :: () {
 	if isSet.build_grammars then build_grammars();
 	if isSet.fetch_grammars || isSet.build_grammars then return;
 
-	// TODO(multicursor): support multiple cursors here
-	array_add(*focusedPanel.cursors);
-	
 	// create window
 	window = create_window(windowWidth, windowHeight, "Photon");
 	Input.window_move_callback = update;
@@ -177,11 +174,13 @@ main :: () {
 	
 	watcher_init();
 
+	// Initialize a panel
 	focusedPanel.layoutRect.x = 0;
 	focusedPanel.layoutRect.y = 0;
 	focusedPanel.layoutRect.w = xx windowWidth;
 	focusedPanel.layoutRect.h = xx windowHeight;
 	focusedPanel.activeDialog = .NONE;
+	array_add(*focusedPanel.cursors);
 
 	projectParsed := false;
 	if isSet.project {
