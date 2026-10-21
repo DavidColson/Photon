@@ -786,11 +786,13 @@ build_ui_panel :: (panel: *Panel) {
 			}
 		
 			if signal.pressed {
+				keep_primary_selection(panel, panel_get_primary_cursor(panel));
 				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
 				panel_get_primary_cursor(panel).anchor = panel_get_primary_cursor(panel).head;
 			}
 			
 			if signal.doubleClicked {
+				keep_primary_selection(panel, panel_get_primary_cursor(panel));
 				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
 				move_prev_word_start(panel, panel_get_primary_cursor(panel));
 				move_word_end(panel, panel_get_primary_cursor(panel));
@@ -1160,7 +1162,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// Draw cursor selection
-	if panel.activeDialog != .SEARCH || panel.activeDialog != .SELECT {
+	if panel.activeDialog != .SEARCH && panel.activeDialog != .SELECT {
 		for cursor: panel.cursors {
 			if cursor.head != cursor.anchor {
 				start := min(cursor.head, cursor.anchor);
@@ -1253,7 +1255,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	for cursor: panel.cursors {
 		cursorLine := get_coordinate_from_offset(panel.document, cursor.head).line;
 		
-		if (panel.activeDialog != .SEARCH || panel.activeDialog != .SELECT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
+		if (panel.activeDialog != .SEARCH && panel.activeDialog != .SELECT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
 			lineCopy := linesOnScreen[cursorLine - startVisibleLine];
 			lineCopy.text.count = min(lineCopy.text.count, cursor.head - get_line_start(panel.document, cursorLine));
 			

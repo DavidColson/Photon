@@ -820,7 +820,7 @@ find_in_files_filter :: (using palette: *CommandPalette, filter: string) {
 		}
 		
 		filter := data.filter.*;
-		hasMatches, results := search(doc.handle, .NOCASE, 0, filter, false);
+		hasMatches, results := search(doc.handle, .NOCASE, .{0, get_size(doc.handle)}, filter, false);
 		
 		path := copy_string(doc.path);
 		

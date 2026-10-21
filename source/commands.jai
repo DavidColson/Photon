@@ -831,18 +831,14 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	panel.activeDialog = .SELECT;
 	panel.searchInput.onEditCallback = select_all_in_selection_on_edit;
 	panel.searchInput.userData = cast(*void) panel;
-	
-	// save the current selection state in the panel
 } @command
 
 confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
-	// actually go and make cursors for all the matches that were found
-	
 	if panel.hasMatches {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
 			newCursor := array_add(*panel.cursors);
-			newCursor.head = it.end;
+			newCursor.head = it.end - 1;
 			newCursor.anchor = it.start;
 		}
 		panel.primaryCursor = 0;
@@ -850,23 +846,28 @@ confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	
 	editorMode = .NORMAL;
 	panel_reset_dialogs(panel);
-	
 }
 
 cancel_select_all_in_selection :: (using panel: *Panel) { 
 	input_field_reset_keeping_memory(*panel.searchInput);
 	panel.searchInput.onEditCallback = null;
 	panel.searchInput.userData = null;
-	
-	// return us to the prior selection state
 }
 
 select_all_in_selection_on_edit :: (userData: *void, input: string) {
 	panel := cast(*Panel) userData;
 	
 	// Search fully in the current range of all selections
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, input, stopAtFirstResult=false);
-	
+	array_reset_keeping_memory(*panel.results);
+	panel.hasMatches = false;
+	for cursor: panel.cursors {
+		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor)};
+		hasMatches, results := search(panel.document, .NOCASE, selectionRange, input, stopAtFirstResult=false);
+		panel.hasMatches |= hasMatches;
+		for results array_add(*panel.results, it);
+		array_free(results);
+	}
+
 }
  
 // Normal Mode Changes
@@ -1567,11 +1568,11 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	panel.hasMatches = false;
 
 	searchTerm := read_register("/");
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, max(cursor.head, cursor.anchor), searchTerm);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{max(cursor.head, cursor.anchor), get_size(panel.document)}, searchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, searchTerm);
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm);
 	}
 
 	if panel.hasMatches {
@@ -1594,7 +1595,7 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	panel.hasMatches = false;
 
 	searchTerm := read_register("/");
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, searchTerm, stopAtFirstResult=false);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -1645,11 +1646,11 @@ document_search_on_edit :: (userData: *void, input: string) {
 	panel.hasMatches = false;
 
 	start := max(panel_get_primary_cursor(panel).head, panel_get_primary_cursor(panel).anchor);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, start, input);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{start, get_size(panel.document)}, input);
 
 	// we do another search if we found nothing to wrap from the start
 	if panel.hasMatches == false && start > 0 {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, 0, input);
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, input);
 	}
 
 	// is the result off the edge of the screen? if so scroll so it's centered

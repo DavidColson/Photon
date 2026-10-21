@@ -137,6 +137,7 @@ panel_reset_dialogs :: (panel: *Panel) {
 	if panel.activeDialog == {
 		case .COMMAND_PALETTE; command_palette_cancel(panel);
 		case .SEARCH; end_document_search(panel);
+		case .SELECT; cancel_select_all_in_selection(panel);
 	}
 	panel.activeDialog = .NONE;
 }

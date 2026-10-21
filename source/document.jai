@@ -1341,9 +1341,9 @@ delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory :
 	}
 }
 
-search :: (handle: DocumentHandle, type: Document.SearchType, fromOffset: s64, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
+search :: (handle: DocumentHandle, type: Document.SearchType, searchRange: Document.Range, searchTerm: string, stopAtFirstResult := true) -> bool, [..]Document.Range {
 	doc := document_get(handle);
-	startCoordinate := get_coordinate_from_offset(handle, fromOffset);
+	startCoordinate := get_coordinate_from_offset(handle, searchRange.start);
 
 	matched := false;
 	results : [..]Document.Range;
@@ -1386,30 +1386,26 @@ search :: (handle: DocumentHandle, type: Document.SearchType, fromOffset: s64, s
 		}
 		currentNode = iter.node;
 
+		// we've gone past the end of the search range, nothing more to find
+		if haystackStartOffset >= searchRange.end then break;
+
+		// clip the haystack to the search range so matches can't start before or end after it
+		clipStart := max(0, searchRange.start - haystackStartOffset);
+		clipEnd := max(0, haystackEndOffset - searchRange.end);
+		if clipStart + clipEnd >= haystack.count then continue;
+		haystack.data += clipStart;
+		haystack.count -= clipStart + clipEnd;
+		haystackStartOffset += clipStart;
+
 		i := 0;
 		while i < haystack.count {
-			if it_index == startCoordinate.line+1 {
-				haystack.data += startCoordinate.col;
-				haystack.count -= startCoordinate.col;
-				if type == {
-					case .STANDARD; 
-						i = find_index_from_left_fast(haystack, searchTerm, i);
-					case .NOCASE;
-						i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
-					case .REGEX;
-						assert(false, "Not implemented");
-				}
-				if i >= 0 then i += startCoordinate.col;
-			}
-			else {
-				if type == {
-					case .STANDARD; 
-						i = find_index_from_left_fast(haystack, searchTerm, i);
-					case .NOCASE;
-						i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
-					case .REGEX;
-						assert(false, "Not implemented");
-				}
+			if type == {
+				case .STANDARD;
+					i = find_index_from_left_fast(haystack, searchTerm, i);
+				case .NOCASE;
+					i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
+				case .REGEX;
+					assert(false, "Not implemented");
 			}
 
 			if i >= 0 {
