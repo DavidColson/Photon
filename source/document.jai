@@ -135,7 +135,7 @@ Document :: struct {
 	undoStack: [..]UndoEntry;
 	redoStack: [..]UndoEntry;
 	currentEditStartOffset: s64 = 0;
-	currentEditOldEndOffset: s64 = 0;
+	currentEditNewEndOffset: s64 = 0;
 	currentEditTotalBytes: s64 = 0;
 	selectionBeforeEdit: SelectionSnapshot;
 	selectionAfterEdit: SelectionSnapshot;
@@ -1091,7 +1091,7 @@ begin_edit :: (handle: DocumentHandle, panel: *Panel) {
 		array_reset(*doc.redoStack);
 	}
 	doc.currentEditStartOffset = S64_MAX;
-	doc.currentEditOldEndOffset = 0;
+	doc.currentEditNewEndOffset = 0;
 	doc.currentEditTotalBytes = 0;
 	doc.selectionBeforeEdit = { panel.primaryCursor, NewArray(panel.cursors.count, Cursor,, other_allocator(doc)) };
 	memcpy(doc.selectionBeforeEdit.cursors.data, panel.cursors.data, size_of(Cursor)*panel.cursors.count);
@@ -1136,7 +1136,7 @@ insert :: (handle: DocumentHandle, atOffset: s64, text: string) {
 	}
 
 	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
-	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset);
+	doc.currentEditNewEndOffset = max(doc.currentEditNewEndOffset, atOffset) + text.count;
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes + text.count;
 
 	if doc.tsTree {
@@ -1236,7 +1236,7 @@ delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory :
 	// delete length bytes in the document at offset
 
 	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
-	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset+length);
+	doc.currentEditNewEndOffset = max(doc.currentEditNewEndOffset, atOffset+length) - length;
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
 	doc.tsTreeDirty = true;
 
@@ -1592,8 +1592,8 @@ commit_history :: (doc: *Document) {
 	top.longestLine = doc.longestLine;
 	top.longestLineLength = doc.longestLineLength;
 	top.changeStartOffset = doc.currentEditStartOffset;
-	top.changeOldEndOffset = doc.currentEditOldEndOffset;
-	top.changeNewEndOffset = doc.currentEditOldEndOffset + doc.currentEditTotalBytes;
+	top.changeOldEndOffset = doc.currentEditNewEndOffset - doc.currentEditTotalBytes;
+	top.changeNewEndOffset = doc.currentEditNewEndOffset;
 	top.selectionBefore = doc.selectionBeforeEdit;
 	top.selectionAfter = doc.selectionAfterEdit;
 }
@@ -1617,8 +1617,6 @@ undo :: (handle: DocumentHandle) -> SelectionSnapshot {
 	doc.longestLineLength = top.longestLineLength;
 
 	// note we want to edit something that is the inverse of the stored change, so old and new are swapped
-	
-	// TODO(multicursor): the merged change offsets _should_ be correct in a multicursor world as far as I can tell
 	if doc.tsTree {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
 		ts_tree_edit(doc.tsTree, *inputEdit);
