@@ -1893,68 +1893,45 @@ insert_mode_forward_delete_char :: (using panel: *Panel, cursor: *Cursor) {
 // View Commands
 // ------------------------------
 
+// Moves every cursor by the same number of lines so they stay positioned relative to each other,
+// then scrolls the view by the same amount to keep the primary cursor in the same place on screen
+move_cursors_by_lines_and_scroll :: (using panel: *Panel, lineDelta: s64) {
+	startVisibleLine := panel_calculate_visible_lines(panel, true);
+	numLinesDocument := get_number_of_lines(panel.document);
+
+	for * cursor: panel.cursors {
+		cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
+		move_cursor_to_specific_line(panel, cursor, clamp(cursorCoordinate.line + lineDelta, 0, numLinesDocument));
+		cursor.anchor = cursor.head;
+	}
+
+	panel_scroll_to_line(panel, startVisibleLine + lineDelta);
+}
+
 page_up :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Page up", keybinding = .["ctrl+b", "<pageup>"] };
 	INSERT :: CommandConfig.{ prettyName = "Page up", keybinding = .["<pageup>"] };
-	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-
-	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
-	
-	// move the cursor up half a page
-	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
-	move_cursor_to_specific_line(panel, cursor, max(cursorCoordinate.line - pageSize, 0));
-	cursor.anchor = cursor.head;
-
-	// scroll to keep the cursor in the same relative place on screen
-	panel_scroll_to_line(panel, startVisibleLine - pageSize);
+	_, pageSize := panel_calculate_visible_lines(panel, true);
+	move_cursors_by_lines_and_scroll(panel, -pageSize);
 } @command
 
 page_down :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Page down", keybinding = .["ctrl+f", "<pagedown>"] };
 	INSERT :: CommandConfig.{ prettyName = "Page down", keybinding = .["<pagedown>"] };
-	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-	numLinesDocument := get_number_of_lines(panel.document);
-
-	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
-	
-	// move the cursor down half a page
-	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
-	move_cursor_to_specific_line(panel, cursor, min(cursorCoordinate.line + pageSize, numLinesDocument));
-	cursor.anchor = cursor.head;
-
-	// scroll to keep the cursor in the same relative place on screen
-	panel_scroll_to_line(panel, startVisibleLine + pageSize);
+	_, pageSize := panel_calculate_visible_lines(panel, true);
+	move_cursors_by_lines_and_scroll(panel, pageSize);
 } @command
 
 half_page_up :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Half page up", keybinding = .["ctrl+u"] };
-	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-
-	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
-	
-	// move the cursor up half a page
-	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
-	move_cursor_to_specific_line(panel, cursor, max(cursorCoordinate.line - pageSize/2, 0));
-	cursor.anchor = cursor.head;
-
-	// scroll to keep the cursor in the same relative place on screen
-	panel_scroll_to_line(panel, startVisibleLine - pageSize/2);
+	_, pageSize := panel_calculate_visible_lines(panel, true);
+	move_cursors_by_lines_and_scroll(panel, -pageSize/2);
 } @command
 
 half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Half page down", keybinding = .["ctrl+d"] };
-	startVisibleLine, pageSize := panel_calculate_visible_lines(panel, true);
-	numLinesDocument := get_number_of_lines(panel.document);
-
-	// TODO(multicursor): we want to move all the cursors by pageSize, so they stay relatively to each other
-	
-	// move the cursor down half a page
-	cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
-	move_cursor_to_specific_line(panel, cursor, min(cursorCoordinate.line + pageSize/2, numLinesDocument));
-	cursor.anchor = cursor.head;
-
-	// scroll to keep the cursor in the same relative place on screen
-	panel_scroll_to_line(panel, startVisibleLine + pageSize/2);
+	_, pageSize := panel_calculate_visible_lines(panel, true);
+	move_cursors_by_lines_and_scroll(panel, pageSize/2);
 } @command
 
 
