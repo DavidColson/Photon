@@ -1215,7 +1215,7 @@ paste :: (using panel: *Panel, valuesToPaste: []string, pasteBefore: bool) {
 	}
 	end_edit(document, panel);
 	
-	autoindent_selection_helper(panel, linewisePaste,,temp);
+	autoindent_selection_helper(panel, linewisePaste);
 }
 
 new_line_below :: (using panel: *Panel, _cursor: *Cursor) {
