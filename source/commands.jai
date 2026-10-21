@@ -706,14 +706,10 @@ shrink_selection_by_syntax :: (using panel: *Panel, cursor: *Cursor) {
 	}
 } @command
 
-
-testFontSize: s32; @option
-testLineNumbers: bool; @option
-
 select_next_sibling :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{
 		prettyName = "Select next sibling syntax node",
-		keybinding = .["alt+n"],
+		keybinding = .["alt+p"],
 		flags = .REPEATABLE | .PER_CURSOR
 	};
 	if !document_supports_treesitter(document) {
@@ -734,7 +730,7 @@ select_next_sibling :: (using panel: *Panel, cursor: *Cursor) {
 select_prev_sibling :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{
 		prettyName = "Select prev sibling syntax node",
-		keybinding = .["alt+p"],
+		keybinding = .["alt+u"],
 		flags = .REPEATABLE | .PER_CURSOR
 	};
 	if !document_supports_treesitter(document) {
@@ -1594,8 +1590,30 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	}
 } @command
 
+add_selection_with_next_search_result :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Add selection with next search result", keybinding = .["N"] };
+	
+	array_reset(*panel.results);
+	panel.hasMatches = false;
+	
+	searchTerm := register_value_for_cursor(read_register("/"), 0);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{max(cursor.head, cursor.anchor), get_size(panel.document)}, searchTerm);
+	
+	// wrap around to the start if you didn't initially find anything
+	if !panel.hasMatches {
+		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm);
+	}
+	
+	if panel.hasMatches {
+		newCursor := array_add(*panel.cursors);
+		newCursor.head = panel.results[0].end-1;
+		newCursor.anchor = panel.results[0].start;
+		primaryCursor = panel.cursors.count-1; // New cursor will be primary so we move along
+	}
+} @command
+
 previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Previous search result", keybinding = .["N"] };
+	NORMAL :: CommandConfig.{ prettyName = "Previous search result", keybinding = .["alt+n"] };
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
@@ -1626,6 +1644,35 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 		if matchLine < startVisibleLine || matchLine >= (startVisibleLine+pageSize) {
 			panel_scroll_to_line(panel, matchLine - pageSize/2);
 		}
+	}
+} @command
+
+add_selection_with_previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Add selection with previous search result", keybinding = .["alt+shift+n"] };
+	array_reset(*panel.results);
+	panel.hasMatches = false;
+	
+	searchTerm := register_value_for_cursor(read_register("/"), 0);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
+	
+	if panel.hasMatches {
+		// you want to find the result whos range is just before the cursor's offset
+		bestMatch := -1;
+		cursorOffset := min(cursor.head, cursor.anchor);
+		for result: panel.results {
+			if result.start >= cursorOffset then break;
+			bestMatch = it_index;
+		}
+		
+		// wrap around if nothing found behind cursor
+		if bestMatch < 0 {
+			bestMatch = panel.results.count-1;
+		}
+		
+		newCursor := array_add(*panel.cursors);
+		newCursor.head = panel.results[bestMatch].end-1;
+		newCursor.anchor = panel.results[bestMatch].start;
+		primaryCursor = panel.cursors.count-1; // New cursor will be primary so we move along
 	}
 } @command
 
