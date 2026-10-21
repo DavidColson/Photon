@@ -852,6 +852,8 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
 	editorMode = .DIALOG;
 	panel.activeDialog = .SELECT;
+	array_reset(*panel.results);
+	panel.hasMatches = false;
 	panel.searchInput.onEditCallback = select_all_in_selection_on_edit;
 	panel.searchInput.userData = cast(*void) panel;
 } @command
@@ -871,10 +873,12 @@ confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	panel_reset_dialogs(panel);
 }
 
-cancel_select_all_in_selection :: (using panel: *Panel) { 
+cancel_select_all_in_selection :: (using panel: *Panel) {
 	input_field_reset_keeping_memory(*panel.searchInput);
 	panel.searchInput.onEditCallback = null;
 	panel.searchInput.userData = null;
+	array_reset(*panel.results);
+	panel.hasMatches = false;
 }
 
 select_all_in_selection_on_edit :: (userData: *void, input: string) {
@@ -884,7 +888,8 @@ select_all_in_selection_on_edit :: (userData: *void, input: string) {
 	array_reset_keeping_memory(*panel.results);
 	panel.hasMatches = false;
 	for cursor: panel.cursors {
-		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), max(cursor.head, cursor.anchor)};
+		selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
 		hasMatches, results := search(panel.document, .NOCASE, selectionRange, input, stopAtFirstResult=false);
 		panel.hasMatches |= hasMatches;
 		for results array_add(*panel.results, it);
@@ -904,6 +909,11 @@ enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 
 	// if we were in insert mode we must now end the edit
 	if editorMode == .INSERT {
+		// after appending, the head sits just past the inserted text. Step it back onto the last
+		// inserted char, otherwise the selection takes in the next char, which may belong to another cursor
+		for * c: panel.cursors {
+			if c.head > c.anchor then c.head = shift_offset_line_endings(panel.document, c.head - 1, .REVERSE);
+		}
 		end_edit(panel.document, panel);
 	}
 
@@ -1519,10 +1529,12 @@ unindent_line :: (using panel: *Panel, _cursor: *Cursor) {
 		for lineNumber: startLine..endLine {
 			if table_contains(*lineDeltas, lineNumber) then continue;
 			lineStartOffset := get_line_start(document, lineNumber);
+			delta := 0;
 			if get_char_at(document, lineStartOffset) == #char "\t" {
 				delete(document, lineStartOffset, 1);
+				delta = -1;
 			}
-			table_set(*lineDeltas, lineNumber, -1);
+			table_set(*lineDeltas, lineNumber, delta);
 		}
 	}
 	
@@ -1556,6 +1568,9 @@ start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	// show search bar
 	editorMode = .DIALOG;
 	panel.activeDialog = .SEARCH;
+	// results may be left over from n/N, don't let them be confirmed or drawn
+	array_reset(*panel.results);
+	panel.hasMatches = false;
 	write_register("/", "");
 	panel.searchInput.onEditCallback = document_search_on_edit;
 	panel.searchInput.userData = cast(*void) panel;
@@ -1593,7 +1608,8 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	panel.hasMatches = false;
 
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{max(cursor.head, cursor.anchor), get_size(panel.document)}, searchTerm);
+	searchStart := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{searchStart, get_size(panel.document)}, searchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
@@ -1621,7 +1637,8 @@ add_selection_with_next_search_result :: (using panel: *Panel, cursor: *Cursor) 
 	panel.hasMatches = false;
 	
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{max(cursor.head, cursor.anchor), get_size(panel.document)}, searchTerm);
+	searchStart := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{searchStart, get_size(panel.document)}, searchTerm);
 	
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
@@ -1901,7 +1918,7 @@ move_cursors_by_lines_and_scroll :: (using panel: *Panel, lineDelta: s64) {
 
 	for * cursor: panel.cursors {
 		cursorCoordinate := get_coordinate_from_offset(panel.document, cursor.head);
-		move_cursor_to_specific_line(panel, cursor, clamp(cursorCoordinate.line + lineDelta, 0, numLinesDocument));
+		move_cursor_to_specific_line(panel, cursor, clamp(cursorCoordinate.line + lineDelta, 0, numLinesDocument - 1));
 		cursor.anchor = cursor.head;
 	}
 

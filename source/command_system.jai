@@ -370,7 +370,14 @@ command_dispatcher :: (cmd: *Command, repeatCount: int, args: []*void) {
 			last := *focusedPanel.cursors[write];
 			curr := focusedPanel.cursors[i];
 			
-			if range_start(curr) <= range_end(last) { // Cursors overlap
+			overlaps := range_start(curr) <= range_end(last);
+			if editorMode == .INSERT {
+				// In insert mode the head sits between chars rather than on one, so ranges that only touch at
+				// a head (i.e. after appending to adjacent selections) are separate, unless the heads are the same
+				overlaps = range_start(curr) < range_end(last) || curr.head == last.head;
+			}
+
+			if overlaps {
 				newStart := min(range_start(curr), range_start(last));
 				newEnd := max(range_end(curr), range_end(last));
 				// Merge into last, keeping its direction. A single char selection has no direction, so take curr's
