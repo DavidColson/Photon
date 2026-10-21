@@ -129,6 +129,7 @@ Document :: struct {
 	tsTree: *TSTree;
 	indents: Indents;
 	isParsing: bool;
+	tsTreeDirty: bool; // edits have been applied to tsTree but no reparse has been queued yet, see document_flush_ts_tree
 
 	// Undo
 	undoStack: [..]UndoEntry;
@@ -1108,8 +1109,8 @@ end_edit :: (handle: DocumentHandle, panel: *Panel) {
 	// check if the tree even changed since the begin, if it did commit the change
 	if doc.tree != doc.undoStack[doc.undoStack.count-1].tree {
 		commit_history(doc);
-		document_update_ts_tree(handle);
 	}
+	document_flush_ts_tree(handle);
 }
 
 insert :: (handle: DocumentHandle, atOffset: s64, text: string) {
@@ -1139,6 +1140,7 @@ insert :: (handle: DocumentHandle, atOffset: s64, text: string) {
 		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
 		ts_tree_edit(doc.tsTree, *inputEdit);
 	}
+	doc.tsTreeDirty = true;
 
 	if get_size(handle) == 0 {
 		rootPiece := make_piece(doc, text);
@@ -1233,6 +1235,7 @@ delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory :
 	doc.currentEditStartOffset = min(doc.currentEditStartOffset, atOffset);
 	doc.currentEditOldEndOffset = max(doc.currentEditOldEndOffset, atOffset+length);
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes - length;
+	doc.tsTreeDirty = true;
 
 	// edge case, delete the entire document, or do nothing
 	if get_size(handle) - length <= 0 {
@@ -2109,6 +2112,7 @@ document_update_ts_tree :: (handle: DocumentHandle, async := true) {
 	doc := document_get(handle);
 	if doc.language == null then return;
 
+	doc.tsTreeDirty = false;
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(handle).directCopy;
@@ -2121,6 +2125,15 @@ document_update_ts_tree :: (handle: DocumentHandle, async := true) {
 		ts_parse_task(task);
 		ts_parse_task_complete(task);
 	}
+}
+
+// Edits only mark the tree dirty, so many cursors editing at once doesn't queue a parse each.
+// Call this once the batch of edits is done to queue a single incremental reparse
+document_flush_ts_tree :: (handle: DocumentHandle, async := true) {
+	if document_get_slot(handle) == null then return;
+	doc := document_get(handle);
+	if !doc.tsTreeDirty then return;
+	document_update_ts_tree(handle, async);
 }
 
 #scope_file

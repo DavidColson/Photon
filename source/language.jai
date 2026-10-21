@@ -530,7 +530,8 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 }
 	
 refresh_document_indentation_table :: (document: *Document) {
-	// it's important we have up to date tree to use here, so we have to wait if one is in progress
+	// it's important we have up to date tree to use here, so kick off any pending reparse and wait for it
+	document_flush_ts_tree(document.handle);
 	while document.isParsing {
 		process_completed_tasks(*asyncWorker);
 		sleep_milliseconds(5);

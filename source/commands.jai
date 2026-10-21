@@ -1688,8 +1688,7 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	else if distanceToAnchor == 0 {
 		cursor.anchor = cursor.head;
 	}
-	document_update_ts_tree(focusedPanel.document);
-	
+
 	update_other_cursors_after_edit(*focusedPanel, cursor, insertLocation, input.count);
 	
 	// If the last thing you typed likely closed an indentation region, reindent the line

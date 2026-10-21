@@ -283,6 +283,9 @@ update :: (deltaTime: float64) {
 	if uiState.events.count > 0 then requestRedraw = true;
 	array_reset_keeping_memory(*uiState.events);
 
+	// edits this frame (possibly from many cursors) only marked the syntax tree dirty, queue one reparse for all of them
+	document_flush_ts_tree(focusedPanel.document);
+
 	// TODO(multicursor): what does this mean with multiple cursors?
 	if panel_get_primary_cursor(*focusedPanel).head != focusedPanel.lastScrolledCursorHead {
 		panel_scroll_to_cursor(*focusedPanel);
