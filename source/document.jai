@@ -1095,6 +1095,9 @@ begin_edit :: (handle: DocumentHandle, panel: *Panel) {
 	doc.currentEditTotalBytes = 0;
 	doc.selectionBeforeEdit = { panel.primaryCursor, NewArray(panel.cursors.count, Cursor,, other_allocator(doc)) };
 	memcpy(doc.selectionBeforeEdit.cursors.data, panel.cursors.data, size_of(Cursor)*panel.cursors.count);
+
+	// edits shift byte offsets, so any saved syntax selections are now stale
+	panel_clear_syntax_history(panel);
 }
 
 end_edit :: (handle: DocumentHandle, panel: *Panel) {

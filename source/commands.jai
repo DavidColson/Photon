@@ -636,72 +636,99 @@ expand_selection_by_syntax :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{
 		prettyName = "Expand selection to parent syntax",
 		keybinding = .["alt+o"],
-		flags = .REPEATABLE | .PER_CURSOR
+		flags = .REPEATABLE
 	};
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
 	}
-		
-	range := cursor_to_range(cursor);
+
+	before := panel_snapshot_selection(panel);
+	changed := false;
 	rootNode := ts_tree_root_node(document_get_ts_tree(document));
-	node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
-	
-	startByte := ts_node_start_byte(node);
-	endByte := ts_node_end_byte(node)-1;
-	
-	while startByte == range.start && endByte == range.end {
-		parent := ts_node_parent(node);
-		if !ts_node_is_null(parent) {
-			node = parent;
-			startByte = ts_node_start_byte(node);
-			endByte = ts_node_end_byte(node)-1;
+
+	for * c: cursors {
+		range := cursor_to_range(c);
+		node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
+
+		startByte := ts_node_start_byte(node);
+		endByte := ts_node_end_byte(node)-1;
+
+		while startByte == range.start && endByte == range.end {
+			parent := ts_node_parent(node);
+			if !ts_node_is_null(parent) {
+				node = parent;
+				startByte = ts_node_start_byte(node);
+				endByte = ts_node_end_byte(node)-1;
+			}
+			else {
+				break;
+			}
 		}
-		else {
-			break;
+
+		if range.start != startByte || range.end != endByte {
+			changed = true;
 		}
+		c.* = range_to_cursor(c.*, .{startByte, endByte});
 	}
-	
-	// TODO(multicursor): Special behaviour is required here as the selection history must be stored per cursor
-	// if the selection has changed, store it in the history so it can be restroed with shrink_selections below
-	if range.start != startByte || range.end != endByte {
-		array_add(*syntaxSelectionsHistory, cursor);
+
+	// if the selection has changed, store it in the history so it can be restored with shrink_selection_by_syntax below
+	if changed {
+		array_add(*syntaxSelectionsHistory, before);
 	}
-	
-	cursor.* = range_to_cursor(cursor.*, .{startByte, endByte});
+	else {
+		free(before.cursors.data);
+	}
 } @command
+
+// True if every cursor in the current selection contains at least one snapshot cursor, and every snapshot
+// cursor is contained by a current cursor, i.e. the snapshot is what you'd get by shrinking the current selection.
+// Relies on both sets of cursors being sorted and non overlapping
+syntax_history_matches_selection :: (snapshot: SelectionSnapshot, cursors: []Cursor) -> bool {
+	i := 0;
+	for current: cursors {
+		contained := 0;
+		while i < snapshot.cursors.count && range_start(snapshot.cursors[i]) >= range_start(current) && range_end(snapshot.cursors[i]) <= range_end(current) {
+			i += 1;
+			contained += 1;
+		}
+		if contained == 0 return false;
+	}
+	return i == snapshot.cursors.count;
+}
 
 shrink_selection_by_syntax :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{
 		prettyName = "Shrink selection by syntax",
 		keybinding = .["alt+i"],
-		flags = .REPEATABLE | .PER_CURSOR
+		flags = .REPEATABLE
 	};
 	if !document_supports_treesitter(document) {
 		push_notification("Not supported in this language");
 		return;
 	}
-	
-	// is there anything in the selectionsHistory?
-	// TODO(multicursor): Special behaviour is required here as the selection history must be stored per cursor
+
+	// Restore the selection from before the last expand, but only if the whole selection still matches it
 	if syntaxSelectionsHistory.count > 0 {
 		top := pop(*syntaxSelectionsHistory);
-		range := cursor_to_range(top);
-		rangeCurrent := cursor_to_range(cursor);
-		if rangeCurrent.start <= range.start && rangeCurrent.end >= range.end {
-			cursor.* = top;
+		matches := syntax_history_matches_selection(top, cursors);
+		if matches {
+			panel_restore_selection(panel, top);
 		}
-		else {
-			array_reset(*syntaxSelectionsHistory);
-		}
+		free(top.cursors.data);
+		if matches return;
+
+		// the history is stale, drop it and fall through to shrinking each cursor
+		panel_clear_syntax_history(panel);
 	}
-	else {
-		range := cursor_to_range(cursor);
-		rootNode := ts_tree_root_node(document_get_ts_tree(document));
+
+	rootNode := ts_tree_root_node(document_get_ts_tree(document));
+	for * c: cursors {
+		range := cursor_to_range(c);
 		node := ts_node_descendant_for_byte_range(rootNode, xx range.start, xx (range.end+1));
 		node = ts_node_child(node, 0);
 		if !ts_node_is_null(node) {
-			cursor.* = range_to_cursor(cursor.*, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
+			c.* = range_to_cursor(c.*, .{ts_node_start_byte(node), ts_node_end_byte(node)-1});
 		}
 	}
 } @command

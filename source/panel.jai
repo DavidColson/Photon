@@ -33,10 +33,8 @@ Panel :: struct {
 	cursors: [..]Cursor;
 	lastScrolledCursorHead: s64;
 	
-	// for restoring selections with shrink_selection
-	// TODO(multicursor): this will need to be an array of an array of cursors, you could also include it inside the selection state struct
-	// Probably we will refactor an array of cursors into a single "selection" object similar to helix
-	syntaxSelectionsHistory: [..]Cursor;
+	// for restoring selections with shrink_selection, each entry is the whole selection before an expand
+	syntaxSelectionsHistory: [..]SelectionSnapshot;
 
 	DocumentPanelLocation :: struct {
 		scrollOffset: Vector2;
@@ -74,6 +72,9 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel_get_primary_cursor(panel).*});
 		}
 	}
+
+	// the history holds offsets into the old document
+	panel_clear_syntax_history(panel);
 
 	tempDoc := doc;
 	panel.previousDocument = panel.document;
@@ -131,6 +132,19 @@ panel_restore_selection :: (panel: *Panel, selection: SelectionSnapshot) {
 	array_resize(*panel.cursors, selection.cursors.count, initialize=false);
 	memcpy(panel.cursors.data, selection.cursors.data, size_of(Cursor) * selection.cursors.count);
 	panel.primaryCursor = selection.primaryCursor;
+}
+
+panel_snapshot_selection :: (panel: *Panel) -> SelectionSnapshot {
+	snapshot := SelectionSnapshot.{ panel.primaryCursor, NewArray(panel.cursors.count, Cursor, initialized=false) };
+	memcpy(snapshot.cursors.data, panel.cursors.data, size_of(Cursor) * panel.cursors.count);
+	return snapshot;
+}
+
+panel_clear_syntax_history :: (panel: *Panel) {
+	for panel.syntaxSelectionsHistory {
+		free(it.cursors.data);
+	}
+	array_reset(*panel.syntaxSelectionsHistory);
 }
 
 panel_reset_dialogs :: (panel: *Panel) {
