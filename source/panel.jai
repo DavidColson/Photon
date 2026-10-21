@@ -38,7 +38,7 @@ Panel :: struct {
 
 	DocumentPanelLocation :: struct {
 		scrollOffset: Vector2;
-		cursor: Cursor; // TODO(multicursor): replace with a selectionState so we cover all cursors
+		selection: SelectionSnapshot; // owns its cursors array
 	}
 	documentLocations: Table(DocumentHandle, DocumentPanelLocation, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
 
@@ -64,12 +64,12 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	if success {
 		location := table_find_pointer(*panel.documentLocations, panel.document);
 		if location {
-			// TODO(multicursor): save the whole set of cursors?
+			free(location.selection.cursors.data);
 			location.scrollOffset = .{codeBox.viewOffset.x, codeBox.viewOffset.y};
-			location.cursor = panel_get_primary_cursor(panel).*;
+			location.selection = panel_snapshot_selection(panel);
 		}
 		else {
-			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel_get_primary_cursor(panel).*});
+			table_add(*panel.documentLocations, panel.document, .{.{codeBox.viewOffset.x, codeBox.viewOffset.y}, panel_snapshot_selection(panel)});
 		}
 	}
 
@@ -80,16 +80,10 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 	panel.previousDocument = panel.document;
 	panel.document = tempDoc;
 	
-	panel.cursors[0] = panel_get_primary_cursor(panel).*;
 	panel.primaryCursor = 0;
 	array_resize(*panel.cursors, 1);
-	
-	// TODO(multicursor): restore the whole set of cursors?
-	panel_get_primary_cursor(panel).* = .{};
-	panel_get_primary_cursor(panel).head = 0;
-	panel_get_primary_cursor(panel).anchor = 0;
-	panel_get_primary_cursor(panel).virtualColumn = 0;
-	
+	panel.cursors[0] = .{};
+
 	table_set(*fileOpenRecency, panel.document, current_time_consensus());
 
 	// Restore a saved scroll offset if one exists
@@ -98,8 +92,7 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		if location {
 			codeBox.viewOffset = location.scrollOffset;
 			codeBox.viewOffsetTarget = location.scrollOffset;
-			// TODO(multicursor): restore the whole set of cursors?
-			panel_get_primary_cursor(panel).* = location.cursor;
+			panel_restore_selection(panel, location.selection);
 		}
 		else {
 			codeBox.viewOffset = .{};
@@ -110,8 +103,7 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		if location {
 			// @todo: initial offsets should support x
 			codeScrollInitialOffset = location.scrollOffset.y;
-			// TODO(multicursor): restore the whole set of cursors?
-			panel_get_primary_cursor(panel).* = location.cursor;
+			panel_restore_selection(panel, location.selection);
 		}
 		else {
 			codeScrollInitialOffset = 0;
