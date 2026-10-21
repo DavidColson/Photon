@@ -110,7 +110,6 @@ panel_set_active_document :: (panel: *Panel, doc: DocumentHandle) {
 		}
 	}
 
-	// TODO(multicursor): does this make sense with multiple cursors?
 	panel.lastScrolledCursorHead = panel_get_primary_cursor(panel).head;
 }
 
@@ -158,7 +157,7 @@ panel_get_current_scrolled_line :: (panel: *Panel) -> s64 {
 }
 
 panel_scroll_to_cursor :: (panel: *Panel) {
-	// TODO(multicursor): what does this mean with multiple cursors?
+	// with multiple cursors the view follows the primary one, the others may be off screen
 	currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
 
 	startVisibleLine, range := panel_calculate_visible_lines(panel);
@@ -222,7 +221,6 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 		codeScrollInitialOffset = cast(float, -targetLine * metrics.lineSpacing);
 	}
 	
-	// TODO(multicursor): does this make sense with multiple cursors?
 	panel.lastScrolledCursorHead = panel_get_primary_cursor(panel).head;
 }
 

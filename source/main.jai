@@ -274,10 +274,9 @@ update :: (deltaTime: float64) {
 	// edits this frame (possibly from many cursors) only marked the syntax tree dirty, queue one reparse for all of them
 	document_flush_ts_tree(focusedPanel.document);
 
-	// TODO(multicursor): what does this mean with multiple cursors?
+	// the view follows the primary cursor: scroll to it whenever it moved since we last did.
 	if panel_get_primary_cursor(*focusedPanel).head != focusedPanel.lastScrolledCursorHead {
 		panel_scroll_to_cursor(*focusedPanel);
-		focusedPanel.lastScrolledCursorHead = panel_get_primary_cursor(*focusedPanel).head;
 	}
 
 	// update notifications

@@ -1318,9 +1318,6 @@ toggle_comment :: (using panel: *Panel, cursor: *Cursor) {
 	begin_edit(document, panel);
 	defer end_edit(document, panel);
 	
-	// TODO(multicursor): this function requires custom handling for multicursor, you want to operate on all individual lines
-	// across all cursors, not necessarily all cursors
-	
 	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
 	
 	for * cursor: cursors {
@@ -2152,9 +2149,10 @@ find_in_files :: (panel: *Panel, cursor: *Cursor, result: FindInFiles) {
 		panel_set_active_document(panel, doc);
 	}
 	
-	// TODO(multicursor): do we collapse to a single cursor here?
-	cursor.head = result.lineOffset + result.matchRange.end;
-	cursor.anchor = result.lineOffset + result.matchRange.start;
+	keep_primary_selection(panel, panel_get_primary_cursor(panel));
+	primary := panel_get_primary_cursor(panel);
+	primary.head = result.lineOffset + result.matchRange.end;
+	primary.anchor = result.lineOffset + result.matchRange.start;
 	
 	// force set the initial scroll such that the result is in the center of the view
 	startVisibleLine, range := panel_calculate_visible_lines(panel);
