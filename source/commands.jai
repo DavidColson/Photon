@@ -968,26 +968,26 @@ delete_cursor_range :: (doc: DocumentHandle, locationA: s64, locationB:s64) -> s
 	return start, endOffset-startOffset;
 }
 
-yank_range_to_register :: (doc: DocumentHandle, locationA: s64, locationB:s64) {
-	start := min(locationA, locationB);
-	end := max(locationA, locationB);
-
-	// TODO(multicursor): special handling is required here as the register must be per cursor
-	text: [..]u8;
-	iterator := make_iterator(doc, start);
-	for :raw_bytes iterator {
-		array_add(*text, it,,temp);
-		if it != #char "\r" && iterator.offset >= end then break;
+// yanks every cursor's selection into the selected register, one value per cursor
+yank_cursors_to_register :: (using panel: *Panel) {
+	reg := register_begin_write(registers.selectedRegister);
+	for cursor: cursors {
+		register_add_document_range(reg, document, cursor.head, cursor.anchor);
 	}
-	textStr := string.{text.count, text.data};
-	write_register(registers.selectedRegister, textStr);
+
+	// separates the values when they're joined for the OS clipboard
+	separator := "\r\n";
+	if document_get_line_endings(document) == .LF || document_get_line_endings(document) == .MIXED_MAJORITY_LF {
+		separator = "\n";
+	}
+	register_end_write(registers.selectedRegister, separator);
 }
 
 delete_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Delete selection", keybinding = .["d"] };
-	
-	// copy the selection into a register before deleting it
-	yank_range_to_register(document, cursor.head, cursor.anchor);
+
+	// copy the selections into a register before deleting them
+	yank_cursors_to_register(panel);
 
 	begin_edit(document, panel);
 	defer end_edit(document, panel);
@@ -1005,10 +1005,9 @@ change_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Change selection", keybinding = .["c"] };
 	
 	enter_insert_mode_start(panel, cursor);
+	yank_cursors_to_register(panel);
 
 	for * cursor: cursors {
-		yank_range_to_register(document, cursor.head, cursor.anchor);
-		
 		rangeEnd := max(cursor.head, cursor.anchor);
 		endChar := get_char_at(document, rangeEnd);
 		linewiseChange := endChar == #char "\n" || endChar == #char "\r";
@@ -1041,22 +1040,26 @@ change_selection :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 yank_selection :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Yank selection", keybinding = .["y"], flags = .PER_CURSOR };
-	range := cursor_to_range(cursor);
-	yank_range_to_register(document, range.start, range.end);
-	push_notification(tprint("Yanked into register %", string.{1,*registers.selectedRegister}));
+	NORMAL :: CommandConfig.{ prettyName = "Yank selection", keybinding = .["y"] };
+	yank_cursors_to_register(panel);
+	if cursors.count > 1 {
+		push_notification(tprint("Yanked % selections into register %", cursors.count, string.{1,*registers.selectedRegister}));
+	}
+	else {
+		push_notification(tprint("Yanked into register %", string.{1,*registers.selectedRegister}));
+	}
 } @command
 
 paste_after_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Paste after selection", keybinding = .["p"] };
-	textToPaste := read_register(registers.selectedRegister);
-	paste(panel, textToPaste, false);
+	valuesToPaste := read_register(registers.selectedRegister);
+	paste(panel, valuesToPaste, false);
 } @command
 
 paste_before_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Paste before selection", keybinding = .["P"] };
-	textToPaste := read_register(registers.selectedRegister);
-	paste(panel, textToPaste, true);
+	valuesToPaste := read_register(registers.selectedRegister);
+	paste(panel, valuesToPaste, true);
 } @command
 
 replace_selection :: (using panel: *Panel, cursor: *Cursor, char: u8) {
@@ -1097,18 +1100,19 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	begin_edit(document, panel);
 
 	linewisePaste := NewArray(cursors.count, bool,,temp);
-	
+	valuesToPaste := read_register(registers.selectedRegister);
+
 	for * cursor: cursors {
 		head := cursor.head;
 		anchor := cursor.anchor;
 		rangeLength := abs(cursor.head - cursor.anchor);
-		
+
 		deletedCount: s64;
 		cursor.head, deletedCount = delete_cursor_range(document, cursor.head, cursor.anchor);
 		cursor.anchor = cursor.head;
-		
-		textToPaste := read_register(registers.selectedRegister);
-		
+
+		textToPaste := register_value_for_cursor(valuesToPaste, it_index);
+
 		for char, i: textToPaste {
 			if char == #char "\n" {
 				linewisePaste[it_index] = true;
@@ -1132,12 +1136,13 @@ replace_selection_with_yanked :: (using panel: *Panel, cursor: *Cursor) {
 	autoindent_selection_helper(panel, linewisePaste);
 } @command
 
-paste :: (using panel: *Panel, textToPaste: string, pasteBefore: bool) {
+paste :: (using panel: *Panel, valuesToPaste: []string, pasteBefore: bool) {
 	begin_edit(document, panel);
-	
-	linewisePaste := NewArray(cursors.count, bool);
 
-	for * cursor: cursors { 
+	linewisePaste := NewArray(cursors.count, bool,,temp);
+
+	for * cursor: cursors {
+		textToPaste := register_value_for_cursor(valuesToPaste, it_index);
 		for char, i: textToPaste {
 			if char == #char "\n" {
 				linewisePaste[it_index] = true;
@@ -1567,7 +1572,7 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	searchTerm := read_register("/");
+	searchTerm := register_value_for_cursor(read_register("/"), 0);
 	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{max(cursor.head, cursor.anchor), get_size(panel.document)}, searchTerm);
 
 	// wrap around to the start if you didn't initially find anything
@@ -1594,7 +1599,7 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 
-	searchTerm := read_register("/");
+	searchTerm := register_value_for_cursor(read_register("/"), 0);
 	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
@@ -1626,17 +1631,11 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 
 search_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Search selection", keybinding = .["*"] };
-	start := min(cursor.head, cursor.anchor);
-	end := max(cursor.head, cursor.anchor);
-	
-	text: [..]u8;
-	iterator := make_iterator(document, start);
-	for :raw_bytes iterator {
-		array_add(*text, it,,temp);
-		if it != #char "\r" && iterator.offset >= end then break;
-	}
-	textStr := string.{text.count, text.data};
-	write_register("/", textStr);
+
+	// the search register only holds one search term, so this uses the primary selection
+	reg := register_begin_write("/");
+	register_add_document_range(reg, document, cursor.head, cursor.anchor);
+	register_end_write("/");
 	push_notification("Selection copied to search register");
 } @command
 
@@ -1955,7 +1954,7 @@ dialog_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 				}
 			}
 			#through;
-		case .SEARCH;
+		case .SEARCH; #through;
 		case .SELECT;
 			before := inputField.text.count;
 			inputField.text.count -= 1;

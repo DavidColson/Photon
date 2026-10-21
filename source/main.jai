@@ -102,16 +102,6 @@ notifications : [10]Notification;
 numActiveNotifications := 0;
 notificationTime: float64 = 10;
 
-// registers
-DEFAULT_REGISTER :: #char "+";
-Registers :: struct {
-	registerPool: Flat_Pool;
-	registerAllocator: Allocator;
-	table: Table(u8, [..]u8); // TODO(multicursor): should be an array of arrays here, so each register has a slot for each cursor
-	selectedRegister:u8 = DEFAULT_REGISTER;
-}
-registers: Registers;
-
 // fonts
 fontUI: *Font;
 fontCode: *Font;
@@ -185,8 +175,6 @@ main :: () {
 	init(*openDocuments.lock);
 	init(*languagesMutex);
 	
-	registers.registerAllocator = Allocator.{ proc = flat_pool_allocator_proc, data = *registers.registerPool };
-
 	watcher_init();
 
 	focusedPanel.layoutRect.x = 0;
@@ -1391,39 +1379,6 @@ do_backup_callback :: () {
 	}
 }
 
-write_register :: (name: u8, value: string) {
-	if name == DEFAULT_REGISTER {
-		os_clipboard_set_text(value);
-	}
-
-	// we write to the default yank
-	registerData := find_or_add(*registers.table, name,,registers.registerAllocator); 
-	array_reset_keeping_memory(registerData);
-
-	array_reserve(registerData, value.count,,registers.registerAllocator);
-	memcpy(registerData.data, value.data, value.count * size_of(u8));
-	registerData.count = value.count;
-}
-
-read_register :: (name: u8) -> string {
-	if name == DEFAULT_REGISTER {
-		// os_clipboard_get_text() heap-allocates its result
-		// the semantics of this function are that the data is always available
-		// so you shouldn't store it, so we put this in temp storage,
-		// and one can simply call read_register again to retrieve it
-		clipboardText := os_clipboard_get_text();
-		defer free(clipboardText);
-		return copy_string(clipboardText,,temp);
-	}
-	else {
-		registerData := table_find_pointer(*registers.table, name); 
-		if registerData {
-			return string.{registerData.count, registerData.data};
-		}
-	}
-	return string.{};
-}
-
 load_fonts :: () {
 	fontUI,_ = load_font("segoeui.ttf");
 
@@ -1899,6 +1854,7 @@ Input :: #import "Input";
 #load "project.jai";
 #load "watcher.jai";
 #load "language.jai";
+#load "registers.jai";
 
 #if OS == .WINDOWS {
 	#load "platform_windows.jai";
