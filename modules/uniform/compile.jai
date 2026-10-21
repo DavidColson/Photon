@@ -9,6 +9,7 @@ Regexp :: struct {
 
 uninit :: (re: *Regexp) {
 	uninit(*re.pool);
+	re.* = .{};
 }
 
 compile :: (pattern: string, parse_flags := ParseFlags.LikePerl) -> Regexp, success: bool {

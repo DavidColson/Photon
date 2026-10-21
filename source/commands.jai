@@ -890,7 +890,7 @@ select_all_in_selection_on_edit :: (userData: *void, input: string) {
 	for cursor: panel.cursors {
 		selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
 		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
-		hasMatches, results := search(panel.document, .NOCASE, selectionRange, input, stopAtFirstResult=false);
+		hasMatches, results := search(panel.document, panel_search_type(panel), selectionRange, input, stopAtFirstResult=false);
 		panel.hasMatches |= hasMatches;
 		for results array_add(*panel.results, it);
 		array_free(results);
@@ -1609,11 +1609,11 @@ next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
 	searchStart := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{searchStart, get_size(panel.document)}, searchTerm);
+	panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{searchStart, get_size(panel.document)}, searchTerm);
 
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm);
+		panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{0, get_size(panel.document)}, searchTerm);
 	}
 
 	if panel.hasMatches {
@@ -1638,11 +1638,11 @@ add_selection_with_next_search_result :: (using panel: *Panel, cursor: *Cursor) 
 	
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
 	searchStart := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{searchStart, get_size(panel.document)}, searchTerm);
+	panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{searchStart, get_size(panel.document)}, searchTerm);
 	
 	// wrap around to the start if you didn't initially find anything
 	if !panel.hasMatches {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm);
+		panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{0, get_size(panel.document)}, searchTerm);
 	}
 	
 	if panel.hasMatches {
@@ -1659,7 +1659,7 @@ previous_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	panel.hasMatches = false;
 
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
+	panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
 
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -1694,7 +1694,7 @@ add_selection_with_previous_search_result :: (using panel: *Panel, cursor: *Curs
 	panel.hasMatches = false;
 	
 	searchTerm := register_value_for_cursor(read_register("/"), 0);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
+	panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{0, get_size(panel.document)}, searchTerm, stopAtFirstResult=false);
 	
 	if panel.hasMatches {
 		// you want to find the result whos range is just before the cursor's offset
@@ -1733,11 +1733,11 @@ document_search_on_edit :: (userData: *void, input: string) {
 	panel.hasMatches = false;
 
 	start := max(panel_get_primary_cursor(panel).head, panel_get_primary_cursor(panel).anchor);
-	panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{start, get_size(panel.document)}, input);
+	panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{start, get_size(panel.document)}, input);
 
 	// we do another search if we found nothing to wrap from the start
 	if panel.hasMatches == false && start > 0 {
-		panel.hasMatches, panel.results = search(panel.document, .NOCASE, .{0, get_size(panel.document)}, input);
+		panel.hasMatches, panel.results = search(panel.document, panel_search_type(panel), .{0, get_size(panel.document)}, input);
 	}
 
 	// is the result off the edge of the screen? if so scroll so it's centered

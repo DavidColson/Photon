@@ -96,6 +96,7 @@ Document :: struct {
 		STANDARD;
 		NOCASE;
 		REGEX;
+		REGEX_NOCASE;
 	}
 
 	UndoEntry :: struct {
@@ -130,6 +131,11 @@ Document :: struct {
 	indents: Indents;
 	isParsing: bool;
 	tsTreeDirty: bool; // edits have been applied to tsTree but no reparse has been queued yet, see document_flush_ts_tree
+	
+	// search cache
+	currentRegex: Regexp;
+	currentRegexSource: string;
+	currentRegexNoCase: bool;
 
 	// Undo
 	undoStack: [..]UndoEntry;
@@ -1354,6 +1360,30 @@ search :: (handle: DocumentHandle, type: Document.SearchType, searchRange: Docum
 	matched := false;
 	results : [..]Document.Range;
 
+	// an empty term matches nothing, and would otherwise never advance through the haystack
+	if searchTerm.count == 0 then return false, results;
+
+	isRegex := type == .REGEX || type == .REGEX_NOCASE;
+	if isRegex {
+		noCase := type == .REGEX_NOCASE;
+		if searchTerm != doc.currentRegexSource || noCase != doc.currentRegexNoCase {
+			uninit(*doc.currentRegex);
+			if doc.currentRegexSource.count > 0 {
+				free(doc.currentRegexSource);
+				doc.currentRegexSource.count = 0;
+			}
+			
+			parseFlags := ParseFlags.LikePerl;
+			if noCase then parseFlags |= .FoldCase;
+			regexp, success := compile(searchTerm, parseFlags);
+			if !success return false, results;
+
+			doc.currentRegex = regexp;
+			doc.currentRegexSource = copy_string(searchTerm);
+			doc.currentRegexNoCase = noCase;
+		}
+	}
+
 	iter := make_line_iterator(handle, startCoordinate.line);
 	currentNode := iter.node;
 	for outer: iter {
@@ -1403,27 +1433,50 @@ search :: (handle: DocumentHandle, type: Document.SearchType, searchRange: Docum
 		haystack.count -= clipStart + clipEnd;
 		haystackStartOffset += clipStart;
 
-		i := 0;
-		while i < haystack.count {
-			if type == {
+		if isRegex {
+			i := 0;
+			while i < haystack.count {
+				remaining := string.{haystack.count - i, haystack.data + i};
+				success, captures := match(remaining, doc.currentRegex,,temp);
+				if !success || captures.count == 0 then break;
+
+				// captures[0] is the whole match, the rest are capture groups which we don't want as results
+				wholeMatch := captures[0];
+				if wholeMatch.count == 0 {
+					// zero length matches (i.e. "a*") can't be selected, step forward and try again
+					i += 1;
+					continue;
+				}
+				matchStart := wholeMatch.data - haystack.data;
+				matchEnd := matchStart + wholeMatch.count;
+
+				matched = true;
+				array_add(*results, Document.Range.{haystackStartOffset + matchStart, haystackStartOffset + matchEnd});
+				if stopAtFirstResult then break outer;
+				i = matchEnd;
+			}
+		}
+		else {
+			i := 0;
+			while i < haystack.count {
+				if type == {
 				case .STANDARD;
 					i = find_index_from_left_fast(haystack, searchTerm, i);
 				case .NOCASE;
 					i = find_index_from_left_nocase_fast(haystack, searchTerm, i);
-				case .REGEX;
-					assert(false, "Not implemented");
+				}
+				
+				if i >= 0 {
+					// found a match, report it
+					matched = true;
+					array_add(*results, Document.Range.{haystackStartOffset+i, haystackStartOffset+i+searchTerm.count});
+					i += searchTerm.count;
+					if stopAtFirstResult then break outer;
+				}
+				else {
+					i = haystack.count; // finished (nothing found)
+				}
 			}
-
-			if i >= 0 {
-				// found a match, report it
-				matched = true;
-				array_add(*results, Document.Range.{haystackStartOffset+i, haystackStartOffset+i+searchTerm.count});
-				i += searchTerm.count;
-				if stopAtFirstResult then break outer;
-			}
-			else {
-				i = haystack.count; // finished (nothing found)
- 			}
 		}
 	}
 	return matched, results;

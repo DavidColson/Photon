@@ -169,8 +169,10 @@ init :: (pool: *Regexp_Pool) {
 }
 
 uninit :: (pool: *Regexp_Pool) {
-	release(pool.pool);
-	free(pool.pool);
+	if pool.pool {
+		release(pool.pool);
+		free(pool.pool);
+	}
 }
 
 #scope_module

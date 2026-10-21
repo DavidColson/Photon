@@ -48,7 +48,8 @@ Panel :: struct {
 	
 	// search state (this is too a dialog, may want to group it up)
 	searchInput: InputField;
-	currentRegex: Regexp;
+	searchRegexEnabled := false;
+	searchCaseSensitive := false;
 	hasMatches := false;
 	previousScrollLine := 0;
 	results: [..]Document.Range;
@@ -145,6 +146,13 @@ panel_reset_dialogs :: (panel: *Panel) {
 		case .SELECT; cancel_select_all_in_selection(panel);
 	}
 	panel.activeDialog = .NONE;
+}
+
+panel_search_type :: (panel: *Panel) -> Document.SearchType {
+	if panel.searchRegexEnabled {
+		return ifx panel.searchCaseSensitive then .REGEX else .REGEX_NOCASE;
+	}
+	return ifx panel.searchCaseSensitive then .STANDARD else .NOCASE;
 }
 
 panel_get_current_scrolled_line :: (panel: *Panel) -> s64 {

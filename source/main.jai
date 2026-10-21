@@ -836,6 +836,60 @@ build_ui_panel :: (panel: *Panel) {
 		{
 			push_parent(searchContainer); defer pop_parent();
 
+			// regex toggle, highlighted while enabled
+			regexFlags := UIBoxFlags.DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE;
+			regexPalette: UIPalette;
+			if panel.searchRegexEnabled {
+				regexPalette.background = style.activeHighlight;
+			}
+			else {
+				regexFlags |= .DRAW_HOT_EFFECTS;
+			}
+			regexButton := box(ui_key(".*##search_regex_toggle"), .{
+				flags=regexFlags,
+				layout=.{ width=fixed(em(2.0)), height=grow() },
+				palette=regexPalette,
+				font=fontCode,
+				textAlignment=.CENTER,
+				cornerRadius=corner_rad_all(em(0.2))
+			});
+			if signal_from_box(regexButton).pressed {
+				panel.searchRegexEnabled = !panel.searchRegexEnabled;
+				// rerun the search so the results reflect the new mode
+				if panel.searchInput.onEditCallback {
+					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+				}
+			}
+
+			spacer(.X, fixed(em(0.2)));
+
+			// case sensitive toggle, highlighted while enabled
+			caseFlags := UIBoxFlags.DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE;
+			casePalette: UIPalette;
+			if panel.searchCaseSensitive {
+				casePalette.background = style.activeHighlight;
+			}
+			else {
+				caseFlags |= .DRAW_HOT_EFFECTS;
+			}
+			caseButton := box(ui_key("Aa##search_case_toggle"), .{
+				flags=caseFlags,
+				layout=.{ width=fixed(em(2.0)), height=grow() },
+				palette=casePalette,
+				font=fontCode,
+				textAlignment=.CENTER,
+				cornerRadius=corner_rad_all(em(0.2))
+			});
+			if signal_from_box(caseButton).pressed {
+				panel.searchCaseSensitive = !panel.searchCaseSensitive;
+				// rerun the search so the results reflect the new mode
+				if panel.searchInput.onEditCallback {
+					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+				}
+			}
+
+			spacer(.X, fixed(em(0.4)));
+
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 			inputBox := box(ui_key("search_input"), .{
 				flags=.DRAW_BACKGROUND,
