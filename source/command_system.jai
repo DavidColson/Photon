@@ -313,10 +313,13 @@ find_command_by_name :: (commandName: string) -> *Command {
 
 command_dispatcher :: (cmd: *Command, repeatCount: int, args: []*void) {
 	while repeatCount > 0 {
-		anchor := 0;
-		// TODO(multicursor): support multiple cursors here
+		
+		anchors: [..]s64;
+		anchors.allocator = temp;
 		if cmd.flags & .EXTEND {
-			anchor = panel_get_primary_cursor(*focusedPanel).anchor;
+			for focusedPanel.cursors {
+				array_add(*anchors, it.anchor);
+			}
 		}
 		
 		if args.count < cmd.args.count {
@@ -350,9 +353,10 @@ command_dispatcher :: (cmd: *Command, repeatCount: int, args: []*void) {
 			}
 		}
 		
-		// TODO(multicursor): support multiple cursors here
 		if cmd.flags & .EXTEND {
-			panel_get_primary_cursor(*focusedPanel).anchor = anchor;
+			for * focusedPanel.cursors {
+				it.anchor = anchors[it_index];
+			}
 		}
 		
 		primaryCursorStart := range_start(panel_get_primary_cursor(*focusedPanel));
