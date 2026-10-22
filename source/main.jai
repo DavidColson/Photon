@@ -418,6 +418,7 @@ build_ui_empty_panel :: (panel: *Panel) {
 		borderThickness=1.0
 	});
 	{
+		// TODO: parent will now be a parameter of every get_node call
 		push_parent(header); defer pop_parent();
 		box(ui_key("DUMMY"), .{
 			flags=0,
@@ -430,7 +431,10 @@ build_ui_empty_panel :: (panel: *Panel) {
 
 	spacer(.Y, fixed(em(5.0)));
 
-	box(ui_key("No Document Loaded"), .{
+	// Box should change to get_node("key") or get_node() (for no key)
+	// properties should all be set with setters, basically everything in the box declaration
+	// should be getters
+ 	box(ui_key("No Document Loaded"), .{
 		flags=.DRAW_TEXT,
 		layout=.{ width=text_content(), height=text_content() },
 	});

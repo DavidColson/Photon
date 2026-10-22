@@ -25,15 +25,17 @@ UIBox :: struct {
 
 	// per frame information (must be cleared in box())
 	using declaration: UIBoxDeclaration;
-	text: string;
-	textRun: TextRun;
-	textHighlights: []TextHighlight;
-	childCount: s32;
+	text: string; // property data to move into property struct
+	textRun: TextRun; // property data
+	textHighlights: []TextHighlight; // property data
+	customDrawFunction: (*UIBox, *void); // property data
+	customDrawUdata: *void; // property data
+	
+	// per frame information (must be cleared in box())
 	fixedPosition: [UIAxis.COUNT]float; // parent relative
 	fixedSize: [UIAxis.COUNT]float;
+	childCount: s32;
 	rect: Rect; // final rect for rendering
-	customDrawFunction: (*UIBox, *void);
-	customDrawUdata: *void;
 
 	// persistent data
 	firstTouchedFrame: u64;
@@ -239,6 +241,7 @@ box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 	box.customDrawFunction = null;
 	box.lastTouchedFrame = uiState.frameIndex;
 
+	// A lot of this code will have to move to setters for the corresponding properties
 	if data.fixedX != 0.0 {
 		box.fixedPosition[UIAxis.X] = data.fixedX;
 		box.flags |= .FLOATING_X;
