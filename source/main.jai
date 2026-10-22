@@ -1321,7 +1321,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 					cursorRun.width,
 					xx metrics.lineSpacing
 				},
-				color = (ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary) * (ifx it_index != 0 then 0.9 else 1.0),
+				color = (ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary) * (ifx it_index != panel.primaryCursor then 0.9 else 1.0),
 				shader = .RECTS
 			});
 			

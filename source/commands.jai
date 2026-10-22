@@ -847,6 +847,25 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 	array_resize(*panel.cursors, 1);
 } @command
 
+remove_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Keep primary selection", keybinding = .["alt+,"] };
+	if panel.cursors.count > 1 {
+		array_ordered_remove_by_index(*panel.cursors, panel.primaryCursor);
+		panel.primaryCursor = panel.primaryCursor % panel.cursors.count;
+	}
+} @command
+
+rotate_cursors_forward :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Rotate cursor forward", keybinding = .[")"] };
+	panel.primaryCursor = (panel.primaryCursor + 1) % panel.cursors.count;
+} @command
+
+rotate_cursors_backward :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Rotate cursor backward", keybinding = .["("] };
+	panel.primaryCursor = (panel.primaryCursor - 1);
+	if panel.primaryCursor < 0 then panel.primaryCursor = panel.cursors.count - 1;
+} @command
+
 split_selection_on_newlines :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Split selection on newlines", keybinding = .["alt+s"] };
 	
