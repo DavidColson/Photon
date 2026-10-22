@@ -847,7 +847,6 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 	array_resize(*panel.cursors, 1);
 } @command
 
-
 start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
 	editorMode = .SELECT;
@@ -859,11 +858,11 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "Confirm select all in selection", keybinding = .["<enter>"] };
-	if panel.hasMatches {
+	if panel.hasMatches && panel.results.count > 0 {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
 			newCursor := array_add(*panel.cursors);
-			newCursor.head = it.end - 1;
+			newCursor.head = shift_offset_line_endings(document, it.end - 1, .REVERSE);
 			newCursor.anchor = it.start;
 		}
 		panel.primaryCursor = 0;
@@ -913,18 +912,13 @@ start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 			
 			panel.hasMatches |= hasMatches;
 			
-			// The matches are actually not what we want to select
-			// The results should be the inverse of the matches
-			
-			// So what is the inverse
-			// You basically want to go through the results
-			// and then make a range up to the start of the first result
 			start := selectionRange.start;
 			for result: results {
-				array_add(*panel.results, {start, result.start});
-				start = result.end;
+				end := shift_offset_line_endings(panel.document, result.start, .REVERSE);
+				if end > start then array_add(*panel.results, {start, end});
+				start = shift_offset_line_endings(panel.document, result.end, .FORWARD);
 			}
-			array_add(*panel.results, {start, selectionEnd});
+			if selectionEnd > start then array_add(*panel.results, {start, selectionEnd});
 			
 			
 			array_free(results);
@@ -935,11 +929,11 @@ start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 confirm_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 	SPLIT :: CommandConfig.{ prettyName = "Confirm split selection", keybinding = .["<enter>"] };
-	if panel.hasMatches {
+	if panel.hasMatches && panel.results.count > 0 {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
 			newCursor := array_add(*panel.cursors);
-			newCursor.head = it.end - 1;
+			newCursor.head = shift_offset_line_endings(document, it.end - 1, .REVERSE);
 			newCursor.anchor = it.start;
 		}
 		panel.primaryCursor = 0;
