@@ -847,6 +847,35 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 	array_resize(*panel.cursors, 1);
 } @command
 
+split_selection_on_newlines :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Split selection on newlines", keybinding = .["alt+s"] };
+	
+	newRanges: [..]Document.Range;
+	newRanges.allocator = temp;
+	for cursor: panel.cursors {
+		selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
+		hasMatches, results := search(panel.document, .REGEX, selectionRange, "\n", stopAtFirstResult=false);
+		defer array_free(results);
+		
+		start := selectionRange.start;
+		for result: results {
+			end := shift_offset_line_endings(panel.document, result.start, .REVERSE);
+			if end > start then array_add(*newRanges, {start, end});
+			start = shift_offset_line_endings(panel.document, result.end, .FORWARD);
+		}
+		if selectionEnd > start then array_add(*newRanges, {start, selectionEnd});
+	}
+	
+	array_reset_keeping_memory(*panel.cursors);
+	for newRanges {
+		newCursor := array_add(*panel.cursors);
+		newCursor.head = shift_offset_line_endings(document, it.end - 1, .REVERSE);
+		newCursor.anchor = it.start;
+	}
+	panel.primaryCursor = 0;
+} @command
+
 start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
 	editorMode = .SELECT;
