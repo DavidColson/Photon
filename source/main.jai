@@ -1,14 +1,11 @@
-DialogType :: enum u8 {
-	NONE;
-	COMMAND_PALETTE;
-	SEARCH;
-	SELECT;
-}
-
+// The editor mode is our current input state, each mode has it's own keymap
+// Commands bind to a mode by declaring a CommandConfig constant named after the mode
 EditorMode :: enum u8 {
 	NORMAL;
 	INSERT;
-	DIALOG;
+	COMMAND_PALETTE;
+	SEARCH;
+	SELECT;
 }
 
 Notification :: struct {
@@ -122,8 +119,6 @@ LoggerData :: struct {
 	logFile: File;
 }
 
-#placeholder normalModeCommands;
-
 loggerFunc :: (message: string, data: *void, info: Log_Info) {
 	logger: *LoggerData;
 	logger = cast(*LoggerData)data;
@@ -179,7 +174,6 @@ main :: () {
 	focusedPanel.layoutRect.y = 0;
 	focusedPanel.layoutRect.w = xx windowWidth;
 	focusedPanel.layoutRect.h = xx windowHeight;
-	focusedPanel.activeDialog = .NONE;
 	array_add(*focusedPanel.cursors);
 
 	projectParsed := false;
@@ -821,7 +815,7 @@ build_ui_panel :: (panel: *Panel) {
 	}
 
 	// Draw the search/select dialog
-	if panel.activeDialog == .SEARCH || panel.activeDialog == .SELECT {
+	if editorMode == .SEARCH || editorMode == .SELECT {
 		searchContainer := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND | .DRAW_SIDE_TOP,
 			layout=.{ 
@@ -911,7 +905,7 @@ build_ui_panel :: (panel: *Panel) {
 }
 
 build_ui_panel_dialogs :: (panel: *Panel) {
-	if panel.activeDialog == .COMMAND_PALETTE {
+	if editorMode == .COMMAND_PALETTE {
 		paletteWidth := panel.layoutRect.w * 0.5;
 		if panel.commandPalette.currentHandler {
 			paletteWidth = panel.layoutRect.w * panel.commandPalette.currentHandler.rowWidthPercent;
@@ -1205,7 +1199,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// Draw cursor selection
-	if panel.activeDialog != .SEARCH && panel.activeDialog != .SELECT {
+	if editorMode != .SEARCH && editorMode != .SELECT {
 		for cursor: panel.cursors {
 			if cursor.head != cursor.anchor {
 				start := min(cursor.head, cursor.anchor);
@@ -1223,7 +1217,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// draw search results
-	if panel.activeDialog == .SEARCH || panel.activeDialog == .SELECT {
+	if editorMode == .SEARCH || editorMode == .SELECT {
 		for panel.results {
 			draw_document_range(panel.document,
 								it.start,
@@ -1298,7 +1292,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	for cursor: panel.cursors {
 		cursorLine := get_coordinate_from_offset(panel.document, cursor.head).line;
 		
-		if (panel.activeDialog != .SEARCH && panel.activeDialog != .SELECT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
+		if (editorMode != .SEARCH && editorMode != .SELECT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
 			lineCopy := linesOnScreen[cursorLine - startVisibleLine];
 			lineCopy.text.count = min(lineCopy.text.count, cursor.head - get_line_start(panel.document, cursorLine));
 			
@@ -1794,6 +1788,15 @@ input_field_reset_keeping_memory :: (inputField: *InputField) {
 
 input_field_get_text :: (inputField: *InputField) -> string {
 	return string.{inputField.text.count, inputField.text.data};
+}
+
+input_field_backward_delete :: (inputField: *InputField) {
+	before := inputField.text.count;
+	inputField.text.count = max(inputField.text.count - 1, 0);
+	inputField.cursor = max(inputField.cursor - 1, 0);
+	if inputField.onEditCallback && before != inputField.text.count {
+		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
+	}
 }
 
 Utf8_Char :: struct {

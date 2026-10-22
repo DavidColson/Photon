@@ -850,8 +850,7 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
-	editorMode = .DIALOG;
-	panel.activeDialog = .SELECT;
+	editorMode = .SELECT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 	panel.searchInput.onEditCallback = select_all_in_selection_on_edit;
@@ -859,6 +858,7 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
+	SELECT :: CommandConfig.{ prettyName = "Confirm select all in selection", keybinding = .["<enter>"] };
 	if panel.hasMatches {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
@@ -868,10 +868,9 @@ confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 		}
 		panel.primaryCursor = 0;
 	}
-	
-	editorMode = .NORMAL;
+
 	panel_reset_dialogs(panel);
-}
+} @command
 
 cancel_select_all_in_selection :: (using panel: *Panel) {
 	input_field_reset_keeping_memory(*panel.searchInput);
@@ -904,7 +903,9 @@ select_all_in_selection_on_edit :: (userData: *void, input: string) {
 enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	INSERT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	DIALOG :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
+	SEARCH :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
+	SELECT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	panel_reset_dialogs(panel);
 
 	// if we were in insert mode we must now end the edit
@@ -1566,8 +1567,7 @@ redo :: (using panel: *Panel, cursor: *Cursor) {
 start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Search Document", keybinding = .["/"] };
 	// show search bar
-	editorMode = .DIALOG;
-	panel.activeDialog = .SEARCH;
+	editorMode = .SEARCH;
 	// results may be left over from n/N, don't let them be confirmed or drawn
 	array_reset(*panel.results);
 	panel.hasMatches = false;
@@ -1578,17 +1578,17 @@ start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
+	SEARCH :: CommandConfig.{ prettyName = "Confirm document search", keybinding = .["<enter>"] };
 	// set real cursor to the match that was found, setup stepping
 	if panel.hasMatches {
 		cursor.anchor = panel.results[0].start;
 		cursor.head = panel.results[0].end-1;
 		keep_primary_selection(panel, cursor);
 	}
-	editorMode = .NORMAL;
 	write_register("/", .{panel.searchInput.text.count, panel.searchInput.text.data});
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
 	panel_reset_dialogs(panel);
-}
+} @command
 
 end_document_search :: (using panel: *Panel) { 
 	panel_scroll_to_line(panel, panel.previousScrollLine);
@@ -1954,117 +1954,17 @@ half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 
 // Dialog Commands
 // -----------------------------
-// TODO: you could probably get rid of these and add a member to the command config
-// that tells the input system which dialog this command is for, and then just call it through usual channels
 
-dialog_select_next :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ prettyName = "Dialog select next", keybinding = .["<down>"] };
-	if activeDialog == {
-		case .NONE; return;
-		case .COMMAND_PALETTE;
-			command_palette_select_next(panel, cursor);
-		case .SEARCH; return;
-		case .SELECT; return;
-	}
+search_input_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
+	SEARCH :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>", "ctrl+<backspace>"] };
+	SELECT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>", "ctrl+<backspace>"] };
+	input_field_backward_delete(*searchInput);
 } @command
 
-dialog_select_previous :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ prettyName = "Dialog select previous", keybinding = .["<up>"] };
-	if activeDialog == {
-		case .NONE; return;
-		case .COMMAND_PALETTE;
-			command_palette_select_previous(panel, cursor);
-		case .SEARCH; return;
-		case .SELECT; return;
-	}
-} @command
-
-dialog_action_item :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ prettyName = "Dialog action item", keybinding = .["<enter>"] };
-	if activeDialog == {
-		case .NONE; return;
-		case .COMMAND_PALETTE;
-			command_palette_execute_command(panel, cursor);
-		case .SEARCH;
-			confirm_document_search(panel, cursor);
-		case .SELECT;
-			confirm_select_all_in_selection(panel, cursor);
-	}
-} @command
-
-
-dialog_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ prettyName = "Dialog backward delete", keybinding = .["<backspace>"] };
-	inputField := *commandPalette.input;
-	if activeDialog == {
-		case .COMMAND_PALETTE; inputField = *commandPalette.input;
-		case .SEARCH; inputField = *searchInput;
-		case .SELECT; inputField = *searchInput;
-	}
-
-	if activeDialog == {
-		case .COMMAND_PALETTE;
-			if commandPalette.input.text.count == 0 {
-				if commandPalette.currentArgIndex > 0 {
-					commandPalette.currentArgIndex -= 1;
-					commandPalette.handlerData = null;
-					command_palette_populate_suggestions(*commandPalette);
-					return;
-				}
-				else if commandPalette.pendingCommandMode {
-					commandPalette.pendingCommandMode = false;
-					commandPalette.handlerData = null;
-					cancel_deferred_command(*commandPalette.pendingCommand);
-					command_palette_populate_suggestions(*commandPalette);
-				}
-			}
-			#through;
-		case .SEARCH; #through;
-		case .SELECT;
-			before := inputField.text.count;
-			inputField.text.count -= 1;
-			inputField.cursor -= 1;
-			inputField.text.count = max(inputField.text.count, 0);
-			inputField.cursor = max(inputField.cursor, 0);
-			if inputField.onEditCallback && before != inputField.text.count {
-				inputField.onEditCallback(inputField.userData, string.{inputField.text.count, inputField.text.data});
-			}
-		case .NONE; return;
-	}
-} @command
-
-dialog_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ prettyName = "Dialog backward delete path segment", keybinding = .["ctrl+<backspace>"] };
-
-	// this only means something while editing a path, anything else deletes a character as usual
-	if activeDialog != .COMMAND_PALETTE || !commandPalette.input.isPath || commandPalette.input.text.count == 0 {
-		dialog_backward_delete(panel, cursor);
-		return;
-	}
-
-	inputField := *commandPalette.input;
-	text := input_field_get_text(inputField);
-
-	// a trailing separator belongs to the segment we're deleting, so drop it before looking for the previous one
-	if text[text.count-1] == #char "/" || text[text.count-1] == #char "\\" {
-		text.count -= 1;
-	}
-	text.count = path_strip_filename(text).count;
-
-	inputField.text.count = text.count;
-	inputField.cursor = xx text.count;
-	if inputField.onEditCallback {
-		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
-	}
-} @command
-
-dialog_handle_text_input :: (using panel: *Panel, char: Utf8_Char) {
-	inputField := *commandPalette.input;
-	if activeDialog == {
-		case .COMMAND_PALETTE; inputField = *commandPalette.input;
-		case .SEARCH; inputField = *searchInput;
-		case .SELECT; inputField = *searchInput;
-	}
+// text input in any of the dialog modes goes to that dialog's input field
+dialog_handle_text_input :: (panel: *Panel, char: Utf8_Char) {
+	inputField := panel_get_dialog_input_field(panel);
+	if inputField == null then return;
 
 	// control characters (ctrl+backspace sends 0x7f for instance) are not text
 	if char.count == 1 && (char.bytes[0] < 0x20 || char.bytes[0] == 0x7f) then return;

@@ -38,9 +38,8 @@ CommandPalette :: struct {
 
 command_palette_open :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Open Command Palette", keybinding = .[":"] };
-	panel.activeDialog = .COMMAND_PALETTE;
 	commandPalette.editorModeFilter = editorMode;
-	editorMode = .DIALOG;
+	editorMode = .COMMAND_PALETTE;
 
 	commandPalette.suggestionList.allocator = get_per_invocation_allocator(*commandPalette);
 
@@ -135,7 +134,7 @@ command_palette_reset :: (panel: *Panel) {
 
 	// input field manages it's own memory
 	input_field_reset_keeping_memory(*input);
-	panel.activeDialog = .NONE;
+	editorMode = .NORMAL;
 }
 
 command_palette_has_valid_selection :: (state: *CommandPalette) -> bool {
@@ -152,7 +151,7 @@ command_palette_cancel :: (panel: *Panel) {
 }
 
 command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Execute command", keybinding = .["<enter>"] };
 	state := *commandPalette;
 
 	if state.pendingCommandMode {
@@ -194,7 +193,6 @@ command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 
 			// reset before executing the command, incase the command opens a dialog
 			command_palette_reset(panel);
-			editorMode = .NORMAL;
 			deferred_command_invoke(*command);
 		}
 		else {
@@ -213,7 +211,6 @@ command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 		// dialog and dispatch the command
 		
 		command_palette_reset(panel);
-		editorMode = .NORMAL;
 		command_dispatcher(cmd, 1, .[]);
 	}
 
@@ -231,7 +228,7 @@ command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
 }
 
 command_palette_select_next :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Select next", keybinding = .["<down>"] };
 	state := *commandPalette;
 
 	maxItems := state.numToDisplay - 1;
@@ -240,7 +237,7 @@ command_palette_select_next :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 command_palette_select_previous :: (using panel: *Panel, cursor: *Cursor) {
-	DIALOG :: CommandConfig.{ };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Select previous", keybinding = .["<up>"] };
 	state := *commandPalette;
 
 	maxItems := state.numToDisplay - 1;
@@ -248,7 +245,54 @@ command_palette_select_previous :: (using panel: *Panel, cursor: *Cursor) {
 	state.selectionChange = true;
 } @command
 
-get_enum_pretty_names :: (enumType: *Type_Info_Enum) -> []string {
+command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete", keybinding = .["<backspace>"] };
+
+	// deleting with an empty input steps back through the arguments of the pending command
+	if commandPalette.input.text.count == 0 {
+		if commandPalette.currentArgIndex > 0 {
+			commandPalette.currentArgIndex -= 1;
+			commandPalette.handlerData = null;
+			command_palette_populate_suggestions(*commandPalette);
+			return;
+		}
+		else if commandPalette.pendingCommandMode {
+			commandPalette.pendingCommandMode = false;
+			commandPalette.handlerData = null;
+			cancel_deferred_command(*commandPalette.pendingCommand);
+			command_palette_populate_suggestions(*commandPalette);
+		}
+	}
+
+	input_field_backward_delete(*commandPalette.input);
+} @command
+
+command_palette_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete path segment", keybinding = .["ctrl+<backspace>"] };
+
+	// this only means something while editing a path, anything else deletes a character as usual
+	if !commandPalette.input.isPath || commandPalette.input.text.count == 0 {
+		command_palette_backward_delete(panel, cursor);
+		return;
+	}
+
+	inputField := *commandPalette.input;
+	text := input_field_get_text(inputField);
+
+	// a trailing separator belongs to the segment we're deleting, so drop it before looking for the previous one
+	if text[text.count-1] == #char "/" || text[text.count-1] == #char "\\" {
+		text.count -= 1;
+	}
+	text.count = path_strip_filename(text).count;
+
+	inputField.text.count = text.count;
+	inputField.cursor = xx text.count;
+	if inputField.onEditCallback {
+		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
+	}
+} @command
+
+get_enum_pretty_names ::(enumType: *Type_Info_Enum) -> []string {
 	// Put in here overrides for enums that you want to have pretty visual names
 	return enumType.names;
 }

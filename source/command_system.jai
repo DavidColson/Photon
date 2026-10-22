@@ -66,10 +66,7 @@ KeyMapNode :: struct {
 }
 
 optionsTable:    Table(string, Option);
-normalModeCommands: [..]Command;
-insertModeCommands: [..]Command;
-dialogModeCommands: [..]Command;
-allCommands: [3][..]Command;
+allCommands: [EDITOR_MODE_NUM][..]Command; // indexed by EditorMode
 
 // global keymap
 keyMap: KeyMap;
@@ -77,8 +74,7 @@ keyMap: KeyMap;
 initialize_commands_and_keymap :: ()  {
 	register_options(); // created by the metaprogram to fill out all our command metadata
 	
-	// execute_command(*focusedPanel, normalModeCommands[1], .["321"]);
-	// execute_command(*focusedPanel, dialogModeCommands[0], .["MIXED_MAJORITY_LF"]);
+	// execute_command(*focusedPanel, allCommands[EditorMode.NORMAL][1], .["321"]);
 	
 	// found, command = table_find(*commandTable, "sample_goto_line");
 	// execute_command(*focusedPanel, , .["321"]);
@@ -197,14 +193,10 @@ initialize_commands_and_keymap :: ()  {
 		}
 	}
 	
-	keyMap.root[EditorMode.NORMAL].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-	build_key_map_for_mode(normalModeCommands, .NORMAL);
-
-	keyMap.root[EditorMode.INSERT].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-	build_key_map_for_mode(insertModeCommands, .INSERT);
-
-	keyMap.root[EditorMode.DIALOG].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
-	build_key_map_for_mode(dialogModeCommands, .DIALOG);
+	for mode: 0..EDITOR_MODE_NUM-1 {
+		keyMap.root[mode].children = New(Table(string, *KeyMapNode),,keyMap.allocator);
+		build_key_map_for_mode(allCommands[mode], xx mode);
+	}
 
 	keyMap.pendingKeyNode = *keyMap.root[editorMode];
 }
@@ -301,7 +293,7 @@ flush_pending_commands :: () {
 find_command_by_name :: (commandName: string) -> *Command {
 	// TODO: you could even do this at build time no?
 	// quick and easy but you may want to accelerate with a map?
-	for editorMode: 0..EDITOR_MODE_NUM {
+	for editorMode: 0..EDITOR_MODE_NUM-1 {
 		for * allCommands[editorMode] {
 			if it.name == commandName {
 				return it;
@@ -424,7 +416,7 @@ input_handler :: (event: Input.Event) {
 		// if there are no pending key sequences give the text input to a currently focused dialog
 		// otherwise normal insert mode can have it
 		if keyMap.pendingKeyNode == *keyMap.root[editorMode] {
-			if focusedPanel.activeDialog != .NONE {
+			if panel_get_dialog_input_field(*focusedPanel) {
 				dialog_handle_text_input(*focusedPanel, char);
 				return;
 			}

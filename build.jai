@@ -38,7 +38,7 @@ Build :: ()
 	target_options.output_executable_name = "Photon";
 	set_build_options(target_options, w);
 	set_build_options_dc(.{do_output=false});
-    
+	
 	buildType: BuildType = .DEBUG;
 	for arg: args {
 		if arg == {
@@ -194,10 +194,6 @@ compiler_message_handler :: (w: Workspace, plugins: *[..]*Metaprogram_Plugin) {
 					// TODO: one call to generate command data with the whole list of commands
 					generate_command_data(*builder, *commands);
 					
-					append(*builder, "allCommands[0] = normalModeCommands;\n");
-					append(*builder, "allCommands[1] = insertModeCommands;\n");
-					append(*builder, "allCommands[2] = dialogModeCommands;\n");
-					
 					append(*builder, "};\n");
 					
 					code := builder_to_string(*builder);
@@ -228,13 +224,9 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 
 	for header: (.*)commands {
 
-		EditorMode :: enum {
-			NORMAL;
-			INSERT;
-			DIALOG;
-			COUNT;
-		}
-		configs : [EditorMode.COUNT]*Code_Node;
+		// Any CommandConfig constant in the body binds the command to the editor mode of the same name
+		configs: [..]*Code_Declaration;
+		configs.allocator = temp;
 		
 		// Pull out and place the config structure
 		body := header.body_or_null;
@@ -244,13 +236,10 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 				if statement.kind == .DECLARATION {
 					declaration := cast(*Code_Declaration, statement);
 					if declaration.flags & .IS_CONSTANT {
-						if declaration.name == {
-						case "NORMAL";  configs[EditorMode.NORMAL] = declaration.expression;
-						case "INSERT";  configs[EditorMode.INSERT] = declaration.expression;
-						case "DIALOG";  configs[EditorMode.DIALOG] = declaration.expression;
+						exprType := declaration.expression.type;
+						if exprType && exprType.type == .STRUCT && cast(*Type_Info_Struct, exprType).name == "CommandConfig" {
+							array_add(*configs, declaration);
 						}
-						// append(builder,        "        ");
-						// print_expression(builder, declaration.expression);
 					}
 				}
 			}
@@ -259,14 +248,8 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 			compiler_report(header.enclosing_load.fully_pathed_filename, header.l0, header.c0, tprint("Procedure % has an empty body when we're trying to pull out the command config", header.name));
 		}
 		
-		for configs {
-			if it == null continue;
-			
-			if it_index == {
-			case 0;  append(builder, "    array_add(*normalModeCommands, Command.{\n");
-			case 1;  append(builder, "    array_add(*insertModeCommands, Command.{\n");
-			case 2;  append(builder, "    array_add(*dialogModeCommands, Command.{\n");
-			}
+		for config: configs {
+			append(builder, tprint("    array_add(*allCommands[EditorMode.%], Command.{\n", config.name));
 			append(builder, tprint("       \"%\",\n", header.name));
 			
 			// generate the list of args
@@ -362,7 +345,7 @@ generate_command_data :: (builder: *String_Builder, commands: *[..]*Code_Procedu
 			
 			// print the config struct data here
 			append(builder,        "        ");
-			print_expression(builder, it);
+			print_expression(builder, config.expression);
 			
 			append(builder, "\n");
 			append(builder, "    });\n");

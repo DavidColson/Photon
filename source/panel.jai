@@ -42,8 +42,7 @@ Panel :: struct {
 	}
 	documentLocations: Table(DocumentHandle, DocumentPanelLocation, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
 
-	// Dialogs
-	activeDialog: DialogType;
+	// Dialogs, which one is open is decided by the editor mode
 	commandPalette: CommandPalette;
 	
 	// search state (this is too a dialog, may want to group it up)
@@ -139,13 +138,25 @@ panel_clear_syntax_history :: (panel: *Panel) {
 	array_reset(*panel.syntaxSelectionsHistory);
 }
 
+// Closes whatever dialog is open, returning to normal mode. Does nothing in normal or insert mode
 panel_reset_dialogs :: (panel: *Panel) {
-	if panel.activeDialog == {
+	if editorMode == {
 		case .COMMAND_PALETTE; command_palette_cancel(panel);
 		case .SEARCH; end_document_search(panel);
 		case .SELECT; cancel_select_all_in_selection(panel);
+		case; return;
 	}
-	panel.activeDialog = .NONE;
+	editorMode = .NORMAL;
+}
+
+// The input field text input goes to in the current mode, null if the mode has none
+panel_get_dialog_input_field :: (panel: *Panel) -> *InputField {
+	if editorMode == {
+		case .COMMAND_PALETTE; return *panel.commandPalette.input;
+		case .SEARCH; #through;
+		case .SELECT; return *panel.searchInput;
+	}
+	return null;
 }
 
 panel_search_type :: (panel: *Panel) -> Document.SearchType {
