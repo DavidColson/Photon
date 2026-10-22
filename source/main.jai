@@ -6,6 +6,7 @@ EditorMode :: enum u8 {
 	COMMAND_PALETTE;
 	SEARCH;
 	SELECT;
+	SPLIT;
 }
 
 Notification :: struct {
@@ -815,7 +816,7 @@ build_ui_panel :: (panel: *Panel) {
 	}
 
 	// Draw the search/select dialog
-	if editorMode == .SEARCH || editorMode == .SELECT {
+	if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
 		searchContainer := box(ui_key_nil, .{
 			flags=.DRAW_BACKGROUND | .DRAW_SIDE_TOP,
 			layout=.{ 
@@ -1199,7 +1200,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// Draw cursor selection
-	if editorMode != .SEARCH && editorMode != .SELECT {
+	if editorMode != .SEARCH && editorMode != .SELECT && editorMode != .SPLIT {
 		for cursor: panel.cursors {
 			if cursor.head != cursor.anchor {
 				start := min(cursor.head, cursor.anchor);
@@ -1217,7 +1218,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	}
 
 	// draw search results
-	if editorMode == .SEARCH || editorMode == .SELECT {
+	if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
 		for panel.results {
 			draw_document_range(panel.document,
 								it.start,
@@ -1292,7 +1293,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 	for cursor: panel.cursors {
 		cursorLine := get_coordinate_from_offset(panel.document, cursor.head).line;
 		
-		if (editorMode != .SEARCH && editorMode != .SELECT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
+		if (editorMode != .SEARCH && editorMode != .SELECT && editorMode != .SPLIT) && cursorLine >= startVisibleLine && cursorLine <= endVisibleLine {
 			lineCopy := linesOnScreen[cursorLine - startVisibleLine];
 			lineCopy.text.count = min(lineCopy.text.count, cursor.head - get_line_start(panel.document, cursorLine));
 			

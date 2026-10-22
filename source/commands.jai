@@ -894,9 +894,68 @@ select_all_in_selection_on_edit :: (userData: *void, input: string) {
 		for results array_add(*panel.results, it);
 		array_free(results);
 	}
-
 }
- 
+
+start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Split Selection", keybinding = .["S"] };
+	editorMode = .SPLIT;
+	array_reset(*panel.results);
+	panel.hasMatches = false;
+	panel.searchInput.onEditCallback = (userData: *void, input: string) {
+		panel := cast(*Panel) userData;
+		
+		array_reset_keeping_memory(*panel.results);
+		panel.hasMatches = false;
+		for cursor: panel.cursors {
+			selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+			selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
+			hasMatches, results := search(panel.document, panel_search_type(panel), selectionRange, input, stopAtFirstResult=false);
+			
+			panel.hasMatches |= hasMatches;
+			
+			// The matches are actually not what we want to select
+			// The results should be the inverse of the matches
+			
+			// So what is the inverse
+			// You basically want to go through the results
+			// and then make a range up to the start of the first result
+			start := selectionRange.start;
+			for result: results {
+				array_add(*panel.results, {start, result.start});
+				start = result.end;
+			}
+			array_add(*panel.results, {start, selectionEnd});
+			
+			
+			array_free(results);
+		}
+	} ;
+	panel.searchInput.userData = cast(*void) panel;
+} @command
+
+confirm_split_selection :: (using panel: *Panel, cursor: *Cursor) {
+	SPLIT :: CommandConfig.{ prettyName = "Confirm split selection", keybinding = .["<enter>"] };
+	if panel.hasMatches {
+		array_reset_keeping_memory(*panel.cursors);
+		for panel.results {
+			newCursor := array_add(*panel.cursors);
+			newCursor.head = it.end - 1;
+			newCursor.anchor = it.start;
+		}
+		panel.primaryCursor = 0;
+	}
+	
+	panel_reset_dialogs(panel);
+} @command
+
+cancel_split_selection :: (using panel: *Panel) {
+	input_field_reset_keeping_memory(*panel.searchInput);
+	panel.searchInput.onEditCallback = null;
+	panel.searchInput.userData = null;
+	array_reset(*panel.results);
+	panel.hasMatches = false;
+}
+
 // Normal Mode Changes
 // ------------------------------
 
@@ -906,6 +965,7 @@ enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	SEARCH :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	SELECT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
+	SPLIT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	panel_reset_dialogs(panel);
 
 	// if we were in insert mode we must now end the edit
@@ -1956,8 +2016,9 @@ half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 // -----------------------------
 
 search_input_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
-	SEARCH :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>", "ctrl+<backspace>"] };
-	SELECT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>", "ctrl+<backspace>"] };
+	SEARCH :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
+	SELECT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
+	SPLIT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
 	input_field_backward_delete(*searchInput);
 } @command
 

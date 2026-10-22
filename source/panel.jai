@@ -144,6 +144,7 @@ panel_reset_dialogs :: (panel: *Panel) {
 		case .COMMAND_PALETTE; command_palette_cancel(panel);
 		case .SEARCH; end_document_search(panel);
 		case .SELECT; cancel_select_all_in_selection(panel);
+		case .SPLIT; cancel_split_selection(panel);
 		case; return;
 	}
 	editorMode = .NORMAL;
@@ -154,6 +155,7 @@ panel_get_dialog_input_field :: (panel: *Panel) -> *InputField {
 	if editorMode == {
 		case .COMMAND_PALETTE; return *panel.commandPalette.input;
 		case .SEARCH; #through;
+		case .SPLIT; #through;
 		case .SELECT; return *panel.searchInput;
 	}
 	return null;
