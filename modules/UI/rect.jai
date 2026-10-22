@@ -170,3 +170,13 @@ cut_top :: (rect: Rect, amount: float) -> (top: Rect, remainder: Rect) {
 
     return top, remainder;
 }
+
+round :: (f: float) -> float {
+	diff := f - floor(f);
+	if diff >= 0.5{
+		return ceil(f);
+	}
+	else {
+		return floor(f);
+	}
+}

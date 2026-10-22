@@ -27,7 +27,7 @@ UIBox :: struct {
 	using declaration: UIBoxDeclaration;
 	text: string;
 	textRun: TextRun;
-	textHighlights: []Highlight;
+	textHighlights: []TextHighlight;
 	childCount: s32;
 	fixedPosition: [UIAxis.COUNT]float; // parent relative
 	fixedSize: [UIAxis.COUNT]float;
@@ -154,6 +154,14 @@ UIState :: struct {
 	defaultFontSize := 15.0;
 	defaultTextPadding := 0.0;
 	defaultTextAlignment:UIAlignment = .LEFT;
+	defaultIconFont: *Font;
+
+	// TODO: these should be superceded by a new style/theme system
+	// Style settings, the app should set these to match its theme
+	popupBackground: Vector4; // tooltips, context menus and scroll bar tracks
+	scrollBarHandle: Vector4;
+	scrollAnimRate := 14.0;
+	doubleClickTimeSeconds := 0.4;
 
 	// Persistent UI data
 	boxTable: Table(UIKey, *UIBox, given_compare_function=compare_key, given_hash_function=x=>get_hash(x.keyVal));
@@ -305,7 +313,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 		blacklistRect = uiState.contextMenu.rect;
 	}
 
-    x, y, success := get_mouse_pointer_position(window, false);
+    x, y, success := get_mouse_pointer_position(renderState.window, false);
 	box_contains_cursor := !contains_point(blacklistRect, xx x, xx y) && contains_point(box.rect, xx x, xx y);
 	
 	if box_contains_cursor && uiState.hotBoxKey == ui_key_nil {
@@ -347,7 +355,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					uiState.activeBoxKey = ui_key_nil;
 
 					now := seconds_since_init();
-					if now - box.lastClickTime <= style.doubleClickTimeSeconds {
+					if now - box.lastClickTime <= uiState.doubleClickTimeSeconds {
 						signal.doubleClicked = true;
 						box.lastClickTime = 0; // consume the pair so a third rapid click starts fresh rather than chaining
 					}
@@ -411,7 +419,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 
 begin_ui :: () {
 	uiState.rootbox = box(ui_key_nil, .{
-		layout=.{childLayoutAxis=.Y, width=fixed(xx windowWidth), height=fixed(xx windowHeight)},
+		layout=.{childLayoutAxis=.Y, width=fixed(xx renderState.windowWidth), height=fixed(xx renderState.windowHeight)},
 	}); 
 	uiState.hotBoxKeyLastFrame = uiState.hotBoxKey;
 	uiState.hotBoxKey = ui_key_nil;
@@ -419,7 +427,10 @@ begin_ui :: () {
 	push_parent(uiState.rootbox);
 }
 
-end_ui :: () {
+// Returns true if animations are still playing and the app should redraw next frame
+end_ui :: (deltaTime: float64) -> needsRedraw: bool {
+	needsRedraw := false;
+
 	// yeet any unused boxes
 	for uiState.boxTable {
 		if it.lastTouchedFrame < uiState.frameIndex || it.key == ui_key_nil {
@@ -462,14 +473,14 @@ end_ui :: () {
 		box := it;
 
 		// scroll animations
-		box.viewOffset.x += cast(float) deltaTime * style.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
-		box.viewOffset.y += cast(float) deltaTime * style.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
+		box.viewOffset.x += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
+		box.viewOffset.y += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
 		if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
 		if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
 
 		// figure out if we need redraws because there are animations playing
-		if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then requestRedraw = true;
-		if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then requestRedraw = true;
+		if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then needsRedraw = true;
+		if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then needsRedraw = true;
 	}
 
 	render_ui_recursive(uiState.rootbox);
@@ -488,6 +499,7 @@ end_ui :: () {
 	reset(*uiState.frameArena, overwrite_memory=true);
 	uiState.frameIndex += 1;
 	uiState.parentStackTop = 1;
+	return needsRedraw;
 }
 
 // depth first UI tree iterator
@@ -595,7 +607,7 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 		fixedY = anchor.rect.y + anchorOffset.y;
 	}
 	else {
-		x, y, success := get_mouse_pointer_position(window, false);
+		x, y, success := get_mouse_pointer_position(renderState.window, false);
 		fixedX = cast(float, x + 20);
 		fixedY = cast(float, y + 20);
 	}
@@ -608,7 +620,7 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 			height=fit(),
 			padding=padding_all(em(0.5))
 		},
-		palette=.{ background=style.backgroundLight },
+		palette=.{ background=uiState.popupBackground },
 		borderThickness=1.0,
 		cornerRadius=corner_rad_all(em(0.4)),
 		fixedX = fixedX,
@@ -644,7 +656,7 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 			fixedY = anchor.rect.y + anchorOffset.y;
 		}
 		else {
-			x, y, success := get_mouse_pointer_position(window, false);
+			x, y, success := get_mouse_pointer_position(renderState.window, false);
 			fixedX = cast(float, x + 20);
 			fixedY = cast(float, y + 20);
 		}
@@ -658,7 +670,7 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 				padding=padding_all(em(0.5)),
 				childGap=em(0.2),
 			},
-			palette=.{ background=style.backgroundLight },
+			palette=.{ background=uiState.popupBackground },
 			borderThickness=1.0,
 			cornerRadius=corner_rad_all(em(0.4)),
 			fixedX = fixedX,
@@ -680,7 +692,7 @@ context_menu_item :: (text: string, icon: string) -> UISignal {
 			width=grow(),
 			height=fit(),
 		},
-		palette=.{background = style.backgroundLight}
+		palette=.{background = uiState.popupBackground}
 	});
 	{
 		push_parent(row); defer pop_parent();
@@ -690,7 +702,7 @@ context_menu_item :: (text: string, icon: string) -> UISignal {
 			box(ui_key(icon), .{
 				flags=.DRAW_TEXT,
 				layout=.{ width=fixed(em(2.0)), height=text_content() },
-				font=fontIcons
+				font=uiState.defaultIconFont
 			});
 		}
 		else {
@@ -737,7 +749,7 @@ scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange
 			flags=.DRAW_BACKGROUND,
 			layout=.{childLayoutAxis = axis, width=grow(), height=grow()},
 			cornerRadius=corner_rad_all(em(0.3)),
-			palette=.{background=style.backgroundLight}
+			palette=.{background=uiState.popupBackground}
 		});
 		{
 			push_parent(scrollBarOuter); defer pop_parent();
@@ -758,7 +770,7 @@ scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange
 			scrollHandle := box(key, .{
 				flags=.DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS,
 				layout=layout,
-				palette=.{background=style.backgroundLighter},
+				palette=.{background=uiState.scrollBarHandle},
 				cornerRadius=corner_rad_all(em(0.3))
 			});
 

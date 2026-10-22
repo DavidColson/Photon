@@ -1,6 +1,8 @@
 
 RendererState :: struct {
 	window: Window_Type;
+	windowWidth: s32;
+	windowHeight: s32;
 
 	instanceVbo: GLuint;
 	vao: GLuint;
@@ -64,9 +66,11 @@ BitmapFormat :: enum {
 	R8;
 }
 
-init_renderer :: (_window: Window_Type) {
+init_renderer :: (_window: Window_Type, width: s32, height: s32) {
 	using renderState;
 	window = _window;
+	windowWidth = width;
+	windowHeight = height;
 
 	// all initialization
 	gl_create_context(window, 4, 2);
@@ -165,10 +169,10 @@ init_renderer :: (_window: Window_Type) {
     glEnable(GL_SCISSOR_TEST);
 }
 
-render_frame :: () {
+render_frame :: (clearColor: Vector4) {
 	using renderState;
 
-	glClearColor(style.backgroundDark.x, style.backgroundDark.y, style.backgroundDark.z, 1.0);
+	glClearColor(clearColor.x, clearColor.y, clearColor.z, 1.0);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	if numGroups == 0 then return;
@@ -214,7 +218,7 @@ render_frame :: () {
 		glDrawArraysInstancedBaseInstance(GL_TRIANGLES, 0, 6, xx count, xx group.instanceStart);
 	}
 
-	platform_swap_buffers(window);
+	swap_buffers(window);
 
 	array_reset_keeping_memory(*instances);
 	numInstances = 0;
@@ -271,8 +275,10 @@ submit_instance :: (instance: Instance) {
 	numInstances += 1;
 }
 
-resize_backbuffer :: () {
+resize_backbuffer :: (width: s32, height: s32) {
 	using renderState;
+	windowWidth = width;
+	windowHeight = height;
 	glViewport(0, 0, xx windowWidth, xx windowHeight);
 	scissorTop = -1;
 	push_scissors(.{0, 0, xx windowWidth, xx windowHeight});
@@ -325,6 +331,18 @@ load_bitmap_to_gpu :: (bitmap: *Bitmap) {
 #import "stb_image";
 
 #scope_file
+
+swap_buffers :: (window: Window_Type) {
+	#if OS == .WINDOWS {
+		dc := GetDC(window);
+		SwapBuffers(dc);
+		ReleaseDC(window, dc);
+	}
+}
+
+#if OS == .WINDOWS {
+	#import "Windows";
+}
 
 calculate_active_scissor :: () -> bool, Rect {
 	using renderState;

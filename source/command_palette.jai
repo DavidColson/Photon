@@ -20,7 +20,7 @@ CommandPalette :: struct {
 	Suggestion :: struct {
 		name: string;
 		sortKey: s64;
-		fuzzyMatches: []Highlight;
+		fuzzyMatches: []TextHighlight;
 
 		// the value this suggestion resolves to, used by the default resolve (i.e. *bool for bool arguments)
 		payload: *void;
@@ -655,7 +655,7 @@ finder_file_filter :: (using palette: *CommandPalette, filter: string) {
 		// Write output directly to suggestion
 		// Note that we know our range of suggestions will not be touched during this work
 		// as the main thread is waiting for us
-		filenameMatches := New([]Highlight);
+		filenameMatches := New([]TextHighlight);
 		filenameMatches.* = fuzzyMatchesFile;
 		suggestion.userData = filenameMatches;
 		
@@ -675,7 +675,7 @@ finder_file_draw_suggestion :: (palette: *CommandPalette, suggestion: *CommandPa
 		flags=.DRAW_TEXT_HIGHLIGHTS,
 		layout=.{ width=text_content(), height=text_content() },
 	});
-	if suggestion.userData then fileLabel.textHighlights = cast(*[]Highlight, suggestion.userData).*;
+	if suggestion.userData then fileLabel.textHighlights = cast(*[]TextHighlight, suggestion.userData).*;
 
 	key2 := ui_key("%##fileListPathLabel%", suggestion.name, index);
 	pathLabel := box(key2, .{

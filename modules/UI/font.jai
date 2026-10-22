@@ -268,10 +268,10 @@ draw_text_run :: (textRun: TextRun, x: float, y: float, color: Vector4) {
 	}
 }
 
-draw_text_run_highlights :: (textRun: TextRun, x: float, y: float, highlights: []Highlight, color: Vector4, highlightColor: Vector4) {
+draw_text_run_highlights :: (textRun: TextRun, x: float, y: float, highlights: []TextHighlight, color: Vector4, highlightColor: Vector4) {
 
 	currHighlightIndex := 0;
-	currHighlight := Highlight.{};
+	currHighlight := TextHighlight.{};
 	if currHighlightIndex < highlights.count {
 		currHighlight = highlights[currHighlightIndex];
 	}
@@ -287,7 +287,7 @@ draw_text_run_highlights :: (textRun: TextRun, x: float, y: float, highlights: [
 				currHighlight = highlights[currHighlightIndex];
 			}
 			else {
-				currHighlight = Highlight.{};
+				currHighlight = TextHighlight.{};
 			}
 		}
 
@@ -541,3 +541,11 @@ FT_ROUND :: inline (x: int) -> int {
 }
 
 #import "freetype";
+
+#scope_export
+
+// A highlighted range of bytes within a text run
+TextHighlight :: struct {
+	start: u32;
+	end: u32;
+}

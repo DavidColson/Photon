@@ -158,7 +158,7 @@ main :: () {
 	window = create_window(windowWidth, windowHeight, "Photon");
 	Input.window_move_callback = update;
 	platform_set_border_color();
-	init_renderer(window);
+	init_renderer(window, windowWidth, windowHeight);
 	init_font_cache();
 	load_fonts();
 	init_ui();
@@ -229,7 +229,7 @@ update :: (deltaTime: float64) {
 			windowWidth  = it.width;
 			windowHeight = it.height;
 
-			resize_backbuffer();
+			resize_backbuffer(windowWidth, windowHeight);
 
 			focusedPanel.layoutRect.x = 0;
 			focusedPanel.layoutRect.y = 0;
@@ -304,6 +304,7 @@ update :: (deltaTime: float64) {
 build_ui :: () {
 	begin_ui();
 
+	// TODO: should eventually be moved to a new and better style system
 	uiState.defaultPalette = .{
 		text = style.textPrimary,
 		textHighlight = style.textHighlight,
@@ -313,8 +314,13 @@ build_ui :: () {
 		border=style.borders
 	};
 	uiState.defaultFont = fontUI;
+	uiState.defaultIconFont = fontIcons;
 	uiState.defaultFontSize = style.fontSize * dpiScale;
 	uiState.defaultTextPadding = em(0.2);
+	uiState.popupBackground = style.backgroundLight;
+	uiState.scrollBarHandle = style.backgroundLighter;
+	uiState.scrollAnimRate = xx style.scrollAnimRate;
+	uiState.doubleClickTimeSeconds = style.doubleClickTimeSeconds;
 
 	// Draw notifications
 	
@@ -383,9 +389,9 @@ build_ui :: () {
 		build_ui_empty_panel(*focusedPanel);
 	}
 
-	end_ui();
+	if end_ui(deltaTime) then requestRedraw = true;
 
-	render_frame();
+	render_frame(style.backgroundDark);
 }
 
 build_ui_empty_panel :: (panel: *Panel) {
@@ -1470,16 +1476,6 @@ hex_to_color_vec4 :: (src_hex: string) -> Vector4 {
 	return c;
 }
 
-round :: (f: float) -> float {
-	diff := f - floor(f);
-	if diff >= 0.5{
-		return ceil(f);
-	}
-	else {
-		return floor(f);
-	}
-}
-
 // fuzzy searching
 Highlight :: struct {
 	start: u32;
@@ -1487,10 +1483,10 @@ Highlight :: struct {
 	type: HighlightType;
 }
 
-fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highlights: [..]Highlight {
+fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highlights: [..]TextHighlight {
 	MAX_CHARS :: 200;
 
-	highlights: [..]Highlight;
+	highlights: [..]TextHighlight;
 
 	if filter.count == 0 return 1, highlights;
 
@@ -1500,7 +1496,7 @@ fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highligh
 		if i >= 0 {
 			// match!
 			score := (200 + cast(s32, filter.count)) * (MAX_CHARS - i);
-			array_add(*highlights, Highlight.{xx i, cast(u32, i + filter.count), .NONE});
+			array_add(*highlights, TextHighlight.{xx i, cast(u32, i + filter.count)});
 			return xx score, highlights; 
 		}
 	}
@@ -1522,7 +1518,7 @@ fuzzy_search :: (stringToSearch: string, filter: string) -> score: s32, highligh
 
 		// found a match!
 		score += 5 * (MAX_CHARS - i); 
-		array_add(*highlights, Highlight.{xx i, cast(u32, i + substr.count), .NONE});
+		array_add(*highlights, TextHighlight.{xx i, cast(u32, i + substr.count)});
 
 		// start the next search after this one, so we find ordered highlights of chars
 		pos = i + substr.count;
@@ -1892,19 +1888,14 @@ Input :: #import "Input";
 #import "Bucket_Array";
 #import "treesitter";
 #import "uniform";
-#import "Bit_Operations";
 #import "Text_File_Handler";
 #import "Thread";
-#import "Reflection";
+#import "UI";
 
-#load "rect.jai";
 #load "command_palette.jai";
 #load "command_system.jai";
 #load "commands.jai";
 #load "panel.jai";
-#load "ui.jai";
-#load "renderer.jai";
-#load "font.jai";
 #load "async.jai";
 #load "document.jai";
 #load "project.jai";
