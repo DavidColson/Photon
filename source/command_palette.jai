@@ -386,11 +386,7 @@ default_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveRes
 }
 
 default_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion: *CommandPalette.Suggestion, index: int, selected: bool, signal: UISignal) {
-	suggestionLabel := box(parent);
-	add_flags(suggestionLabel, .DRAW_TEXT_HIGHLIGHTS);
-	set_text(suggestionLabel, suggestion.name);
-	set_text_highlights(suggestionLabel, suggestion.fuzzyMatches);
-	set_size(suggestionLabel, text_content(), text_content());
+	highlighted_text(parent, suggestion.name, suggestion.fuzzyMatches);
 
 	spacer(parent, .X, grow());
 }
@@ -424,19 +420,13 @@ command_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion
 		mappingStr = it;
 	}
 
-	commandLabel := box(parent);
-	add_flags(commandLabel, .DRAW_TEXT_HIGHLIGHTS);
-	set_text(commandLabel, suggestion.name);
-	set_text_highlights(commandLabel, suggestion.fuzzyMatches);
-	set_size(commandLabel, text_content(), text_content());
-
+	highlighted_text(parent, suggestion.name, suggestion.fuzzyMatches);
+	
 	spacer(parent, .X, grow());
 
 	if mappingStr {
-		mappingLabel := box(parent);
-		add_flags(mappingLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
-		set_text(mappingLabel, mappingStr);
-		set_size(mappingLabel, text_content(), text_content());
+		mappingLabel := text(parent, mappingStr);
+		add_flags(mappingLabel, .DRAW_BACKGROUND);
 		set_background_color(mappingLabel, style.backgroundMid);
 		set_text_padding(mappingLabel, em(0.3));
 	}
@@ -671,17 +661,11 @@ finder_file_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugges
 	set_child_layout_axis(verticalBox, .Y);
 	set_size(verticalBox, grow(), grow());
 
-	fileLabel := box(verticalBox);
-	add_flags(fileLabel, .DRAW_TEXT_HIGHLIGHTS);
-	set_text(fileLabel, path_filename(suggestion.name));
-	if suggestion.userData then set_text_highlights(fileLabel, cast(*[]TextHighlight, suggestion.userData).*);
-	set_size(fileLabel, text_content(), text_content());
+	filenameMatches: []TextHighlight;
+	if suggestion.userData then filenameMatches = cast(*[]TextHighlight, suggestion.userData).*;
+	highlighted_text(verticalBox, path_filename(suggestion.name), filenameMatches);
 
-	pathLabel := box(verticalBox);
-	add_flags(pathLabel, .DRAW_TEXT_HIGHLIGHTS);
-	set_text(pathLabel, suggestion.name);
-	set_text_highlights(pathLabel, suggestion.fuzzyMatches);
-	set_size(pathLabel, text_content(), text_content());
+	pathLabel := highlighted_text(verticalBox, suggestion.name, suggestion.fuzzyMatches);
 	set_font_size(pathLabel, em(0.7));
 }
 
@@ -1014,10 +998,7 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 	set_child_alignment(fileNameBox, .CENTER);
 	{
 		fileName := path_filename(searchResult.filePath);
-		fileLabel := box(fileNameBox);
-		add_flags(fileLabel, .DRAW_TEXT);
-		set_text(fileLabel, fileName);
-		set_size(fileLabel, text_content(), text_content());
+		text(fileNameBox, fileName);
 
 		filePath := searchResult.filePath;
 		for project.folders {
@@ -1030,17 +1011,12 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 		
 		textCol := uiState.defaultPalette.text;
 		textCol.w = 0.6;
-		filePathLabel := box(fileNameBox);
-		add_flags(filePathLabel, .DRAW_TEXT);
-		set_text(filePathLabel, filePath);
-		set_size(filePathLabel, text_content(), text_content());
+		filePathLabel := text(fileNameBox, filePath);
 		set_text_color(filePathLabel, textCol);
 		set_font_size(filePathLabel, em(0.8));
 	}
 
-	lineNumLabel := box(parent);
-	add_flags(lineNumLabel, .DRAW_TEXT);
-	set_text(lineNumLabel, tprint("% ", searchResult.lineNum+1));
+	lineNumLabel := text(parent, "% ", searchResult.lineNum+1);
 	set_size(lineNumLabel, fixed(em(2.0)), grow());
 	set_font(lineNumLabel, fontCode);
 	set_text_alignment(lineNumLabel, .RIGHT);
@@ -1289,25 +1265,15 @@ path_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion: *
 
 	if entry.kind == .CREATE {
 		state := cast(*PathArgState, palette.handlerData);
-		createLabel := box(parent);
-		add_flags(createLabel, .DRAW_TEXT);
-		set_text(createLabel, tprint("% %", state.config.createLabel, input_field_get_text(*palette.input)));
-		set_size(createLabel, text_content(), text_content());
+		text(parent, "% %", state.config.createLabel, input_field_get_text(*palette.input));
 		return;
 	}
 
 	isDirectory := entry.kind != .FILE;
-	iconLabel := box(parent);
-	add_flags(iconLabel, .DRAW_TEXT);
-	set_text(iconLabel, ifx isDirectory then style.iconFolder else style.iconFile);
-	set_size(iconLabel, text_content(), text_content());
+	iconLabel := text(parent, ifx isDirectory then style.iconFolder else style.iconFile);
 	set_font(iconLabel, fontIcons);
 
-	itemLabel := box(parent);
-	add_flags(itemLabel, .DRAW_TEXT_HIGHLIGHTS);
-	set_text(itemLabel, suggestion.name);
-	set_text_highlights(itemLabel, suggestion.fuzzyMatches);
-	set_size(itemLabel, text_content(), text_content());
+	highlighted_text(parent, suggestion.name, suggestion.fuzzyMatches);
 }
 
 #scope_file

@@ -351,10 +351,8 @@ build_ui :: () {
 			backgroundCol.w = alpha;
 			textCol := style.backgroundMid;
 			textCol.w = alpha;
-			notifLabel := box(notificationBox);
-			add_flags(notifLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
-			set_text(notifLabel, notif.content);
-			set_size(notifLabel, text_content(), text_content());
+			notifLabel := text(notificationBox, notif.content);
+			add_flags(notifLabel, .DRAW_BACKGROUND);
 			set_background_color(notifLabel, backgroundCol);
 			set_text_color(notifLabel, textCol);
 			set_text_padding(notifLabel, em(0.4));
@@ -395,39 +393,31 @@ build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
 	set_child_layout_axis(panelBox, .Y);
 	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
 	set_child_alignment(panelBox, .CENTER);
-
-	header := box(panelBox);
-	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
-	set_size(header, grow(), fit());
-	set_padding(header, em(0.3));
-	set_background_color(header, style.backgroundLight);
-	set_border_thickness(header, 1.0);
 	{
-		// empty box to give the header the height of a line of text
-		dummy := box(header);
-		set_size(dummy, text_content(), text_content());
+		header := box(panelBox);
+		add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+		set_size(header, grow(), fit());
+		set_padding(header, em(0.3));
+		set_background_color(header, style.backgroundLight);
+		set_border_thickness(header, 1.0);
+		{
+			// empty box to give the header the height of a line of text
+			dummy := box(header);
+			set_size(dummy, text_content(), text_content());
+		}
+		
+		build_ui_panel_dialogs(panelBox, panel);
+		
+		spacer(panelBox, .Y, fixed(em(5.0)));
+		
+		text(panelBox, "No Document Loaded");
+		
+		spacer(panelBox, .Y, fixed(em(3.0)));
+		
+		text(panelBox, "Open file with '<space>O'");
+		
+		text(panelBox, "Open command palette with ':'");
 	}
-
-	build_ui_panel_dialogs(panelBox, panel);
-
-	spacer(panelBox, .Y, fixed(em(5.0)));
-
-	noDocLabel := box(panelBox);
-	add_flags(noDocLabel, .DRAW_TEXT);
-	set_text(noDocLabel, "No Document Loaded");
-	set_size(noDocLabel, text_content(), text_content());
-
-	spacer(panelBox, .Y, fixed(em(3.0)));
-
-	openFileHint := box(panelBox);
-	add_flags(openFileHint, .DRAW_TEXT);
-	set_text(openFileHint, "Open file with '<space>O'");
-	set_size(openFileHint, text_content(), text_content());
-
-	paletteHint := box(panelBox);
-	add_flags(paletteHint, .DRAW_TEXT);
-	set_text(paletteHint, "Open command palette with ':'");
-	set_size(paletteHint, text_content(), text_content());
 }
 
 build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
@@ -457,10 +447,7 @@ build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
 		set_size(loadingBox, fit(), fit());
 		set_padding(loadingBox, em(0.3));
 		{
-			loadingLabel := box(loadingBox);
-			add_flags(loadingLabel, .DRAW_TEXT);
-			set_text(loadingLabel, tprint("Loading % ...", document_get_path(panel.document)));
-			set_size(loadingLabel, text_content(), text_content());
+			text(loadingBox, "Loading % ...", document_get_path(panel.document));
 
 			spinner := box(loadingBox);
 			set_size(spinner, text_content(), text_content());
@@ -490,10 +477,8 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 		if editorMode == .INSERT {
 			modeText = "INSERT";
 		}
-		modeLabel := box(header);
-		add_flags(modeLabel, .DRAW_BACKGROUND | .DRAW_TEXT);
-		set_text(modeLabel, modeText);
-		set_size(modeLabel, text_content(), text_content());
+		modeLabel := text(header, modeText);
+		add_flags(modeLabel, .DRAW_BACKGROUND);
 		set_background_color(modeLabel, style.backgroundDark);
 
 		spacer(header, .X, fixed(em(0.5)));
@@ -505,28 +490,19 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 		set_size(fileLabel, text_content(), text_content());
 		if signal_from_box(fileLabel).hovering {
 			tooltip := tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
-			pathLabel := box(tooltip);
-			add_flags(pathLabel, .DRAW_TEXT);
-			set_text(pathLabel, document_get_path(panel.document));
-			set_size(pathLabel, text_content(), text_content());
+			text(tooltip, document_get_path(panel.document));
 		}
 
 		// lock icon @todo: implement for real
 		if document_is_read_only(panel.document) {
-			lockIcon := box(header);
-			add_flags(lockIcon, .DRAW_TEXT);
-			set_text(lockIcon, style.iconLock);
-			set_size(lockIcon, text_content(), text_content());
+			lockIcon := text(header, style.iconLock);
 			set_font_size(lockIcon, em(0.7));
 			set_font(lockIcon, fontIcons);
 		}
 
 		// icon for file save status
 		if document_is_unsaved(panel.document) {
-			unsavedIcon := box(header);
-			add_flags(unsavedIcon, .DRAW_TEXT);
-			set_text(unsavedIcon, style.iconCircle);
-			set_size(unsavedIcon, text_content(), text_content());
+			unsavedIcon := text(header, style.iconCircle);
 			set_font_size(unsavedIcon, em(0.7));
 			set_font(unsavedIcon, fontIcons);
 		}
@@ -535,10 +511,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 
 		// pending keys
 		pendingKeys := string.{keyMap.pendingKeyString.count, keyMap.pendingKeyString.data};
-		pendingKeysLabel := box(header);
-		add_flags(pendingKeysLabel, .DRAW_TEXT);
-		set_text(pendingKeysLabel, pendingKeys);
-		set_size(pendingKeysLabel, text_content(), text_content());
+		text(header, pendingKeys);
 
 		if project_is_loading() || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
 			spacer(header, .X, fixed(em(2.0)));
@@ -554,10 +527,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 
 		// location
 		cursorCoordinate := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head);
-		locationLabel := box(header);
-		add_flags(locationLabel, .DRAW_TEXT);
-		set_text(locationLabel, tprint("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head));
-		set_size(locationLabel, text_content(), text_content());
+		text(header, "Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head);
 
 		spacer(header, .X, fixed(em(2.0)));
 
@@ -573,51 +543,33 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 		else if lineEndings == .MIXED_MAJORITY_LF {
 			lineEndingText = "[Mixed]";
 		}
-		lineEndingLabel := box(header);
-		add_flags(lineEndingLabel, .DRAW_TEXT);
-		set_text(lineEndingLabel, lineEndingText);
-		set_size(lineEndingLabel, text_content(), text_content());
+		text(header, lineEndingText);
 
 		spacer(header, .X, fixed(em(2.0)));
 
 		// file type
 		language := document_get_language(panel.document);
-		fileTypeLabel := box(header);
-		add_flags(fileTypeLabel, .DRAW_TEXT);
-		set_text(fileTypeLabel, ifx language then language.name else path_extension(document_get_path(panel.document)));
-		set_size(fileTypeLabel, text_content(), text_content());
+		text(header, ifx language then language.name else path_extension(document_get_path(panel.document)));
 
 		spacer(header, .X, fixed(em(2.0)));
 
 		// panel options button
 		panelOptsKey := ui_key("panelopts");
-		panelOptsButtonKey := ui_key("panelopts_button");
 		menuOpen := is_context_menu_open(panelOptsKey);
-		button := box(header, panelOptsButtonKey);
-		add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
-		set_text(button, style.iconVerticalEllipsis);
-		set_size(button, fixed(em(1.5)), text_content());
-		set_font(button, fontIcons);
-		set_text_alignment(button, .CENTER);
-		set_corner_radius(button, em(0.3));
-		if menuOpen {
-			set_background_color(button, style.activeHighlight);
-		}
-		else {
-			add_flags(button, .DRAW_HOT_EFFECTS);
-		}
-		if signal_from_box(button).pressed {
+		clicked, panelOptsToggle := toggle(header, fixed(em(1.5)), text_content(), *menuOpen, style.iconVerticalEllipsis);
+		set_font(panelOptsToggle, fontIcons);
+		if clicked {
 			if menuOpen {
-				context_menu_close();
+				context_menu_open(panelOptsKey);
 			}
 			else {
-				context_menu_open(panelOptsKey);
+				context_menu_close();
 			}
 		}
 
 		menu := context_menu_begin(key=panelOptsKey,
 								width=fixed(em(12.0)),
-								anchorBoxKey=panelOptsButtonKey,
+								anchorBoxKey=panelOptsToggle.key,
 								anchorOffset=.{0.0, em(1.9)});
 		if menu {
 			if context_menu_item(menu, "Line Numbers", style.iconNumList).pressed {
@@ -761,55 +713,28 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 		set_padding(searchContainer, em(0.4));
 		set_background_color(searchContainer, style.backgroundLight);
 		set_border_thickness(searchContainer, 1.0);
+		set_child_gap(searchContainer, em(0.4));
 		{
 			// regex toggle, highlighted while enabled
-			regexButton := box(searchContainer, ui_key("search_regex_toggle"));
-			add_flags(regexButton, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
-			set_text(regexButton, ".*");
-			set_size(regexButton, fixed(em(2.0)), grow());
-			set_font(regexButton, fontCode);
-			set_text_alignment(regexButton, .CENTER);
-			set_corner_radius(regexButton, em(0.2));
-			if panel.searchRegexEnabled {
-				set_background_color(regexButton, style.activeHighlight);
-			}
-			else {
-				add_flags(regexButton, .DRAW_HOT_EFFECTS);
-			}
-			if signal_from_box(regexButton).pressed {
-				panel.searchRegexEnabled = !panel.searchRegexEnabled;
+			clicked, regexToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchRegexEnabled, ".*");
+			set_font(regexToggle, fontCode);
+			if clicked {
 				// rerun the search so the results reflect the new mode
 				if panel.searchInput.onEditCallback {
 					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
 				}
 			}
-
-			spacer(searchContainer, .X, fixed(em(0.2)));
 
 			// case sensitive toggle, highlighted while enabled
-			caseButton := box(searchContainer, ui_key("search_case_toggle"));
-			add_flags(caseButton, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
-			set_text(caseButton, "Aa");
-			set_size(caseButton, fixed(em(2.0)), grow());
-			set_font(caseButton, fontCode);
-			set_text_alignment(caseButton, .CENTER);
-			set_corner_radius(caseButton, em(0.2));
-			if panel.searchCaseSensitive {
-				set_background_color(caseButton, style.activeHighlight);
-			}
-			else {
-				add_flags(caseButton, .DRAW_HOT_EFFECTS);
-			}
-			if signal_from_box(caseButton).pressed {
-				panel.searchCaseSensitive = !panel.searchCaseSensitive;
-				// rerun the search so the results reflect the new mode
+			caseClicked, caseToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchCaseSensitive, "Aa");
+			set_font(caseToggle, fontCode);
+			if caseClicked {
 				if panel.searchInput.onEditCallback {
 					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
 				}
 			}
-
-			spacer(searchContainer, .X, fixed(em(0.4)));
-
+			
+			// TODO(ui): input field widget here
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 			inputBox := box(searchContainer, ui_key("search_input"));
 			add_flags(inputBox, .DRAW_BACKGROUND);
@@ -819,8 +744,6 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			set_font(inputBox, fontCode);
 			set_text_padding(inputBox, em(0.5));
 			set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
-
-			// @todo: buttons for regex mode, caps, whole word search etc
 		}
 	}
 }
@@ -855,10 +778,8 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 			// Draw everything inside the input field
 			{
 				if panel.commandPalette.pendingCommandMode {
-					pendingCommandLabel := box(inputBox);
-					add_flags(pendingCommandLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
-					set_text(pendingCommandLabel, panel.commandPalette.pendingCommand.cmd.prettyName);
-					set_size(pendingCommandLabel, text_content(), text_content());
+					pendingCommandLabel := text(inputBox, panel.commandPalette.pendingCommand.cmd.prettyName);
+					add_flags(pendingCommandLabel, .DRAW_BACKGROUND);
 
 					// only arguments before currentArgIndex are filled in, later slots are null or stale
 					pendingCommand := *panel.commandPalette.pendingCommand;
@@ -875,22 +796,18 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 						else {
 							valueText = tprint("%", Any.{argType, argValue});
 						}
-						argLabel := box(inputBox);
-						add_flags(argLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
-						set_text(argLabel, valueText);
-						set_size(argLabel, text_content(), text_content());
+						argLabel := text(inputBox, valueText);
+						add_flags(argLabel, .DRAW_BACKGROUND);
 					}
 				}
 
 				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
 					currentArg := panel.commandPalette.currentArgIndex;
 					// TODO: capitalize and undo camelcase on this name
-					argNameLabel := box(inputBox);
-					add_flags(argNameLabel, .DRAW_TEXT);
-					set_text(argNameLabel, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
-					set_size(argNameLabel, text_content(), text_content());
+					text(inputBox, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
 				}
 				else {
+					// TODO(ui): refactor into input field widget
 					inputArea := box(inputBox, ui_key("commandPaletteInput"));
 					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
 					set_custom_draw(inputArea, custom_draw_input_field, cast(*void, *panel.commandPalette.input));
@@ -948,10 +865,7 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 
 				textCol := uiState.defaultPalette.text;
 				textCol.w = 0.6;
-				hintsLabel := box(hintsBox);
-				add_flags(hintsLabel, .DRAW_TEXT);
-				set_text(hintsLabel, "<up><down> to navigate <enter> to use <escape> to dismiss");
-				set_size(hintsLabel, text_content(), text_content());
+				hintsLabel := text(hintsBox, "<up><down> to navigate <enter> to use <escape> to dismiss");
 				set_text_alignment(hintsLabel, .CENTER);
 				set_text_padding(hintsLabel, em(0.5));
 				set_text_color(hintsLabel, textCol);

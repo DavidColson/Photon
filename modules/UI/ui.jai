@@ -572,28 +572,70 @@ compare_key :: (key1: UIKey, key2: UIKey) -> bool {
 	return key1.keyVal == key2.keyVal;
 }
 
-// Basic widgets
+// Widgets
+// ------------------
 
-// @todo: actually use these
-label :: (parent: *UIBox, text: string) -> UISignal, *UIBox {
+text :: (parent: *UIBox, text: string) -> *UIBox {
 	label := box(parent);
 	add_flags(label, .DRAW_TEXT);
 	set_text(label, text);
 	set_size(label, text_content(), text_content());
-	return signal_from_box(label), label;
+	return label;
 }
 
-label :: (parent: *UIBox, textFormat: string, args: ..Any) -> UISignal, *UIBox {
-	signal, box := label(parent, tprint(textFormat, ..args));
-	return signal, box;
+text :: (parent: *UIBox, textFormat: string, args: ..Any) -> *UIBox {
+	return text(parent, tprint(textFormat, ..args));
 }
 
-button :: (parent: *UIBox, key: UIKey, text: string) -> UISignal {
-	button := box(parent, key);
-	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE);
+// Text where the highlighted ranges are drawn in the palette's textHighlight color, i.e. fuzzy search matches
+highlighted_text :: (parent: *UIBox, text: string, highlights: []TextHighlight) -> *UIBox {
+	label := box(parent);
+	add_flags(label, .DRAW_TEXT_HIGHLIGHTS);
+	set_text(label, text);
+	set_text_highlights(label, highlights);
+	set_size(label, text_content(), text_content());
+	return label;
+}
+
+button :: (parent: *UIBox, width: UISize, height: UISize, text: string) -> bool, *UIBox {
+	button := box(parent, ui_key(text));
+	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
 	set_text(button, text);
-	set_size(button, text_content(), text_content());
-	return signal_from_box(button);
+	set_size(button, width, height);
+	set_text_alignment(button, .CENTER);
+	set_corner_radius(button, em(0.2));
+	signal := signal_from_box(button);
+	return signal.pressed, button;
+}
+
+button :: (parent: *UIBox, text: string) -> bool, *UIBox {
+	clicked, toggle := button(parent, text_content(), text_content(), text);
+	return clicked, toggle;
+}
+
+toggle :: (parent: *UIBox, width: UISize, height: UISize, value: *bool, text: string) -> bool, *UIBox {
+	toggle := box(parent, ui_key(text));
+	add_flags(toggle, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
+	set_text(toggle, text);
+	set_size(toggle, width, height);
+	set_text_alignment(toggle, .CENTER);
+	set_corner_radius(toggle, em(0.2));
+	if value.* {
+		set_background_color(toggle, uiState.defaultPalette.active);
+	}
+	else {
+		add_flags(toggle, .DRAW_HOT_EFFECTS);
+	}
+	signal := signal_from_box(toggle);
+	if signal.pressed {
+		value.* = !(value.*);
+	}
+	return signal.pressed, toggle;
+}
+
+toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
+	clicked, toggle := toggle(parent, text_content(), text_content(), value, text);
+	return clicked, toggle;
 }
 
 // Tooltips are detached floating roots, build their contents as children of the returned box
@@ -670,7 +712,7 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 	return menu;
 }
 
-context_menu_item :: (menu: *UIBox, text: string, icon: string) -> UISignal {
+context_menu_item :: (menu: *UIBox, label: string, icon: string) -> UISignal {
 	id := menu.childCount;
 	row := box(menu, ui_key("menuitem%", id));
 	add_flags(row, .DRAW_BACKGROUND | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE);
@@ -679,20 +721,17 @@ context_menu_item :: (menu: *UIBox, text: string, icon: string) -> UISignal {
 	set_background_color(row, uiState.popupBackground);
 	{
 		// icon
-		iconBox := box(row);
-		set_width(iconBox, fixed(em(2.0)));
 		if icon.count {
-			add_flags(iconBox, .DRAW_TEXT);
-			set_text(iconBox, icon);
-			set_height(iconBox, text_content());
+			iconBox := text(row, icon);
+			set_width(iconBox, fixed(em(2.0)));
 			set_font(iconBox, uiState.defaultIconFont);
+		}
+		else {
+			spacer(row, .X, fixed(em(2.0)));
 		}
 
 		// text
-		textBox := box(row);
-		add_flags(textBox, .DRAW_TEXT);
-		set_text(textBox, text);
-		set_size(textBox, text_content(), text_content());
+		text(row, label);
 	}
 	return signal_from_box(row);
 }
@@ -820,13 +859,6 @@ scroll_list_end :: (container: *UIBox) {
 	container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
 	container.viewOffsetTarget.x = clamp(container.viewOffsetTarget.x, container.viewBounds.x, 0);
 }
-
-// @todo: widgets:
-// [ ] - context menu item
-// [ ] - Table stuff
-// [ ] - Text input box
-// [ ] - Checkbox
-// [ ] - 
 
 // helpers
 
