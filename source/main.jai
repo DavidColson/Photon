@@ -334,13 +334,14 @@ build_ui :: () {
 
 	it := numActiveNotifications;
 	notificationBox := box(root, ui_key("notifBox"));
-	set_child_layout_axis(notificationBox, .Y);
-	set_size(notificationBox, fit(), fit());
-	set_child_alignment(notificationBox, .RIGHT);
-	set_child_gap(notificationBox, em(0.5));
-	set_fixed_x(notificationBox, windowWidth - maxWidth - em(2.5));
-	set_fixed_y(notificationBox, em(3.0));
 	{
+		set_child_layout_axis(notificationBox, .Y);
+		set_size(notificationBox, fit(), fit());
+		set_child_alignment(notificationBox, .RIGHT);
+		set_child_gap(notificationBox, em(0.5));
+		set_fixed_x(notificationBox, windowWidth - maxWidth - em(2.5));
+		set_fixed_y(notificationBox, em(3.0));
+		
 		while it > 0 {
 			notif := notifications[it-1];
 			fadeOutTime := cast(float) notificationTime*0.3;
@@ -389,18 +390,20 @@ build_ui :: () {
 
 build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
 	panelBox := box(parent, ui_key("panel1"));
-	add_flags(panelBox, .DRAW_BACKGROUND);
-	set_child_layout_axis(panelBox, .Y);
-	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
-	set_child_alignment(panelBox, .CENTER);
 	{
+		add_flags(panelBox, .DRAW_BACKGROUND);
+		set_child_layout_axis(panelBox, .Y);
+		set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
+		set_child_alignment(panelBox, .CENTER);
+		
 		header := box(panelBox);
-		add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
-		set_size(header, grow(), fit());
-		set_padding(header, em(0.3));
-		set_background_color(header, style.backgroundLight);
-		set_border_thickness(header, 1.0);
 		{
+			add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+			set_size(header, grow(), fit());
+			set_padding(header, em(0.3));
+			set_background_color(header, style.backgroundLight);
+			set_border_thickness(header, 1.0);
+			
 			// empty box to give the header the height of a line of text
 			dummy := box(header);
 			set_size(dummy, text_content(), text_content());
@@ -422,328 +425,338 @@ build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
 
 build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
 	panelBox := box(parent, ui_key("panel1"));
-	add_flags(panelBox, .DRAW_BACKGROUND);
-	set_child_layout_axis(panelBox, .Y);
-	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
-	set_child_alignment(panelBox, .CENTER);
-
-	header := box(panelBox);
-	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
-	set_size(header, grow(), fit());
-	set_padding(header, em(0.3));
-	set_background_color(header, style.backgroundLight);
-	set_border_thickness(header, 1.0);
 	{
-		// empty box to give the header the height of a line of text
-		dummy := box(header);
-		set_size(dummy, text_content(), text_content());
-	}
-
-	spacer(panelBox, .Y, fixed(em(5.0)));
-
-	shouldShowSpinner :=  asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33;
-	if shouldShowSpinner {
-		loadingBox := box(panelBox);
-		set_size(loadingBox, fit(), fit());
-		set_padding(loadingBox, em(0.3));
+		add_flags(panelBox, .DRAW_BACKGROUND);
+		set_child_layout_axis(panelBox, .Y);
+		set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
+		set_child_alignment(panelBox, .CENTER);
+		
+		header := box(panelBox);
 		{
-			text(loadingBox, "Loading % ...", document_get_path(panel.document));
-
-			spinner := box(loadingBox);
-			set_size(spinner, text_content(), text_content());
-			set_font_size(spinner, em(1.0));
-			set_font(spinner, fontIcons);
-			set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
+			add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+			set_size(header, grow(), fit());
+			set_padding(header, em(0.3));
+			set_background_color(header, style.backgroundLight);
+			set_border_thickness(header, 1.0);
+			
+			// empty box to give the header the height of a line of text
+			dummy := box(header);
+			set_size(dummy, text_content(), text_content());
+		}
+		
+		spacer(panelBox, .Y, fixed(em(5.0)));
+		
+		shouldShowSpinner :=  asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33;
+		if shouldShowSpinner {
+			loadingBox := box(panelBox);
+			{
+				set_size(loadingBox, fit(), fit());
+				set_padding(loadingBox, em(0.3));
+				
+				text(loadingBox, "Loading % ...", document_get_path(panel.document));
+				
+				spinner := box(loadingBox);
+				set_size(spinner, text_content(), text_content());
+				set_font_size(spinner, em(1.0));
+				set_font(spinner, fontIcons);
+				set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
+			}
 		}
 	}
 }
 
 build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 	panelBox := box(parent, ui_key("panel1"));
-	add_flags(panelBox, .DRAW_BACKGROUND);
-	set_child_layout_axis(panelBox, .Y);
-	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
-
-	header := box(panelBox);
-	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
-	set_size(header, grow(), fit());
-	set_padding(header, em(0.3));
-	set_child_alignment(header, .CENTER);
-	set_background_color(header, style.backgroundLight);
-	set_border_thickness(header, 1.0);
 	{
-		// mode
-		modeText := "NORMAL";
-		if editorMode == .INSERT {
-			modeText = "INSERT";
-		}
-		modeLabel := text(header, modeText);
-		add_flags(modeLabel, .DRAW_BACKGROUND);
-		set_background_color(modeLabel, style.backgroundDark);
-
-		spacer(header, .X, fixed(em(0.5)));
-
-		// filename (keyed as it's the anchor for the tooltip)
-		fileLabel := box(header, ui_key("header_filename"));
-		add_flags(fileLabel, .DRAW_TEXT);
-		set_text(fileLabel, path_filename(document_get_path(panel.document)));
-		set_size(fileLabel, text_content(), text_content());
-		if signal_from_box(fileLabel).hovering {
-			tooltip := tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
-			text(tooltip, document_get_path(panel.document));
-		}
-
-		// lock icon @todo: implement for real
-		if document_is_read_only(panel.document) {
-			lockIcon := text(header, style.iconLock);
-			set_font_size(lockIcon, em(0.7));
-			set_font(lockIcon, fontIcons);
-		}
-
-		// icon for file save status
-		if document_is_unsaved(panel.document) {
-			unsavedIcon := text(header, style.iconCircle);
-			set_font_size(unsavedIcon, em(0.7));
-			set_font(unsavedIcon, fontIcons);
-		}
-
-		spacer(header, .X, grow());
-
-		// pending keys
-		pendingKeys := string.{keyMap.pendingKeyString.count, keyMap.pendingKeyString.data};
-		text(header, pendingKeys);
-
-		if project_is_loading() || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
+		add_flags(panelBox, .DRAW_BACKGROUND);
+		set_child_layout_axis(panelBox, .Y);
+		set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
+		
+		header := box(panelBox);
+		{
+			add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+			set_size(header, grow(), fit());
+			set_padding(header, em(0.3));
+			set_child_alignment(header, .CENTER);
+			set_background_color(header, style.backgroundLight);
+			set_border_thickness(header, 1.0);
+			
+			// mode
+			modeText := "NORMAL";
+			if editorMode == .INSERT {
+				modeText = "INSERT";
+			}
+			modeLabel := text(header, modeText);
+			add_flags(modeLabel, .DRAW_BACKGROUND);
+			set_background_color(modeLabel, style.backgroundDark);
+			
+			spacer(header, .X, fixed(em(0.5)));
+			
+			// filename (keyed as it's the anchor for the tooltip)
+			fileLabel := box(header, ui_key("header_filename"));
+			add_flags(fileLabel, .DRAW_TEXT);
+			set_text(fileLabel, path_filename(document_get_path(panel.document)));
+			set_size(fileLabel, text_content(), text_content());
+			if signal_from_box(fileLabel).hovering {
+				tooltip := tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
+				text(tooltip, document_get_path(panel.document));
+			}
+			
+			// lock icon @todo: implement for real
+			if document_is_read_only(panel.document) {
+				lockIcon := text(header, style.iconLock);
+				set_font_size(lockIcon, em(0.7));
+				set_font(lockIcon, fontIcons);
+			}
+			
+			// icon for file save status
+			if document_is_unsaved(panel.document) {
+				unsavedIcon := text(header, style.iconCircle);
+				set_font_size(unsavedIcon, em(0.7));
+				set_font(unsavedIcon, fontIcons);
+			}
+			
+			spacer(header, .X, grow());
+			
+			// pending keys
+			pendingKeys := string.{keyMap.pendingKeyString.count, keyMap.pendingKeyString.data};
+			text(header, pendingKeys);
+			
+			if project_is_loading() || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
+				spacer(header, .X, fixed(em(2.0)));
+				
+				spinner := box(header);
+				set_size(spinner, text_content(), text_content());
+				set_font_size(spinner, em(1.0));
+				set_font(spinner, fontIcons);
+				set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
+			}
+			
 			spacer(header, .X, fixed(em(2.0)));
-
-			spinner := box(header);
-			set_size(spinner, text_content(), text_content());
-			set_font_size(spinner, em(1.0));
-			set_font(spinner, fontIcons);
-			set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
-		}
-
-		spacer(header, .X, fixed(em(2.0)));
-
-		// location
-		cursorCoordinate := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head);
-		text(header, "Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head);
-
-		spacer(header, .X, fixed(em(2.0)));
-
-		// line endings
-		lineEndingText := "[Mixed]";
-		lineEndings := document_get_line_endings(panel.document);
-		if lineEndings == .LF {
-			lineEndingText = "LF";
-		}
-		else if lineEndings == .CRLF {
-			lineEndingText = "CRLF";
-		}
-		else if lineEndings == .MIXED_MAJORITY_LF {
-			lineEndingText = "[Mixed]";
-		}
-		text(header, lineEndingText);
-
-		spacer(header, .X, fixed(em(2.0)));
-
-		// file type
-		language := document_get_language(panel.document);
-		text(header, ifx language then language.name else path_extension(document_get_path(panel.document)));
-
-		spacer(header, .X, fixed(em(2.0)));
-
-		// panel options button
-		panelOptsKey := ui_key("panelopts");
-		menuOpen := is_context_menu_open(panelOptsKey);
-		clicked, panelOptsToggle := toggle(header, fixed(em(1.5)), text_content(), *menuOpen, style.iconVerticalEllipsis);
-		set_font(panelOptsToggle, fontIcons);
-		if clicked {
-			if menuOpen {
-				context_menu_open(panelOptsKey);
+			
+			// location
+			cursorCoordinate := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head);
+			text(header, "Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head);
+			
+			spacer(header, .X, fixed(em(2.0)));
+			
+			// line endings
+			lineEndingText := "[Mixed]";
+			lineEndings := document_get_line_endings(panel.document);
+			if lineEndings == .LF {
+				lineEndingText = "LF";
 			}
-			else {
-				context_menu_close();
+			else if lineEndings == .CRLF {
+				lineEndingText = "CRLF";
 			}
-		}
-
-		menu := context_menu_begin(key=panelOptsKey,
-								width=fixed(em(12.0)),
-								anchorBoxKey=panelOptsToggle.key,
-								anchorOffset=.{0.0, em(1.9)});
-		if menu {
-			if context_menu_item(menu, "Line Numbers", style.iconNumList).pressed {
-				lineNumbers = !lineNumbers;
+			else if lineEndings == .MIXED_MAJORITY_LF {
+				lineEndingText = "[Mixed]";
 			}
-			context_menu_item(menu, "View Line Endings", "");
-			context_menu_item(menu, "Line Wrapping", style.iconAlignLeft);
-		}
-	}
-
-	build_ui_panel_dialogs(panelBox, panel);
-
-	// Draw the main code screen
-	codeContainerOuter := box(panelBox);
-	add_flags(codeContainerOuter, .DRAW_BACKGROUND);
-	set_child_layout_axis(codeContainerOuter, .Y);
-	set_size(codeContainerOuter, grow(), grow());
-	{
-		longestLinePixelWidth:= 0.0;
-
-		codeContainerInner := box(codeContainerOuter);
-		add_flags(codeContainerInner, .DRAW_BACKGROUND);
-		set_size(codeContainerInner, grow(), grow());
-
-		codeBox := box(codeContainerInner, ui_key("code"));
-		add_flags(codeBox, .CLIP_CONTENTS | .MOUSE_CLICKABLE);
-		set_size(codeBox, grow(), grow());
-		set_font(codeBox, fontCode);
-		set_custom_draw(codeBox, custom_draw_code, cast(*void) panel);
-		{
-			numDocumentLines := get_number_of_lines(panel.document);
-			metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
-			codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
-
-			if codeBox.firstTouchedFrame == uiState.frameIndex {
-				codeBox.viewOffsetTarget.y = codeScrollInitialOffset;
-				codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
-			}
-
-			// TODO: cache this calculation, it won't change much and it can be slow
-			longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, document_get_longest_line(panel.document)-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
-			longestLinePixelWidth += metrics.emWidth; // add extra monospace width for cursor to sit on end of line
-
-			if longestLinePixelWidth > codeBox.rect.w {
-				gutterWidth := 0;
-				if lineNumbers {
-					maxLinesRun := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp);
-					gutterWidth = xx maxLinesRun.width;
-				}
-
-				// We only want to scroll horizontally such that the longest line is still mostly visible
-				// i.e. not the whole length of the line, just how much is going off screen
-				codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
-			}
-			else {
-				codeBox.viewBounds.x = 0;
-			}
-
-			signal := signal_from_box(codeBox);
-
-			// mouse cursor control
-			set_cursor_to_mouse_location :: (doc: DocumentHandle, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
-				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
-
-				x, y, success := get_mouse_pointer_position(window, false);
-				mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
-				mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
-
-				metrics := get_font_metrics(box.font, xx box.fontSize);
-				clickedLine := clamp(cast(s64) (mouseY / metrics.lineSpacing), 0, numDocumentLines - 1);
-
-				// collect the line content of this line (so we can figure out how wide it is in pixels)
-				lineContent := get_line_content(doc, clickedLine,,temp);
-				run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
-				column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
-				cursor.head = min(get_size(doc)-1, lineContent.startByteOffset + column);
-
-				// update the virtual column
-				cursor.virtualColumn = 0;
-				for lineContent.text {
-					if it_index == column then break;
-					if it == #char "\t" {
-						cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
-					}
-					else {
-						cursor.virtualColumn += 1;
-					}
-				}
-			}
-
-			if signal.pressed {
-				keep_primary_selection(panel, panel_get_primary_cursor(panel));
-				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
-				panel_get_primary_cursor(panel).anchor = panel_get_primary_cursor(panel).head;
-			}
-
-			if signal.doubleClicked {
-				keep_primary_selection(panel, panel_get_primary_cursor(panel));
-				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
-				move_prev_word_start(panel, panel_get_primary_cursor(panel));
-				move_word_end(panel, panel_get_primary_cursor(panel));
-			}
-
-			if signal.holding {
-				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
-				x, y, success := get_mouse_pointer_position(window, false);
-				if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
-					_, range := panel_calculate_visible_lines(panel);
-					currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
-					panel_scroll_to_line(panel, currentLine - range);
-				}
-				else if y < cast(int, codeBox.rect.y) {
-					currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
-					panel_scroll_to_line(panel, currentLine);
-				}
-			}
-
-			scroll_bar(codeContainerInner,
-						ui_key("codeScrollVertical"),
-						.Y,
-						codeBox.viewOffset.y/codeBox.viewBounds.y,
-						cast(float, numDocumentLines),
-						codeBox.rect.h/metrics.lineSpacing,
-						codeBox.key);
-		}
-
-		scroll_bar(codeContainerOuter,
-					ui_key("codeScrollHorizontal"),
-					.X,
-					codeBox.viewOffset.x/codeBox.viewBounds.x,
-					longestLinePixelWidth,
-					codeBox.rect.w,
-					codeBox.key);
-	}
-
-	// Draw the search/select dialog
-	if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
-		searchContainer := box(panelBox);
-		add_flags(searchContainer, .DRAW_BACKGROUND | .DRAW_SIDE_TOP);
-		set_size(searchContainer, grow(), fit());
-		set_padding(searchContainer, em(0.4));
-		set_background_color(searchContainer, style.backgroundLight);
-		set_border_thickness(searchContainer, 1.0);
-		set_child_gap(searchContainer, em(0.4));
-		{
-			// regex toggle, highlighted while enabled
-			clicked, regexToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchRegexEnabled, ".*");
-			set_font(regexToggle, fontCode);
+			text(header, lineEndingText);
+			
+			spacer(header, .X, fixed(em(2.0)));
+			
+			// file type
+			language := document_get_language(panel.document);
+			text(header, ifx language then language.name else path_extension(document_get_path(panel.document)));
+			
+			spacer(header, .X, fixed(em(2.0)));
+			
+			// panel options button
+			panelOptsKey := ui_key("panelopts");
+			menuOpen := is_context_menu_open(panelOptsKey);
+			clicked, panelOptsToggle := toggle(header, fixed(em(1.5)), text_content(), *menuOpen, style.iconVerticalEllipsis);
+			set_font(panelOptsToggle, fontIcons);
 			if clicked {
-				// rerun the search so the results reflect the new mode
-				if panel.searchInput.onEditCallback {
-					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+				if menuOpen {
+					context_menu_open(panelOptsKey);
 				}
-			}
-
-			// case sensitive toggle, highlighted while enabled
-			caseClicked, caseToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchCaseSensitive, "Aa");
-			set_font(caseToggle, fontCode);
-			if caseClicked {
-				if panel.searchInput.onEditCallback {
-					panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+				else {
+					context_menu_close();
 				}
 			}
 			
-			// TODO(ui): input field widget here
-			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
-			inputBox := box(searchContainer, ui_key("search_input"));
-			add_flags(inputBox, .DRAW_BACKGROUND);
-			set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
-			set_corner_radius(inputBox, em(0.2));
-			set_background_color(inputBox, style.backgroundLighter);
-			set_font(inputBox, fontCode);
-			set_text_padding(inputBox, em(0.5));
-			set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
+			menu := context_menu_begin(key=panelOptsKey,
+									   width=fixed(em(12.0)),
+									   anchorBoxKey=panelOptsToggle.key,
+									   anchorOffset=.{0.0, em(1.9)});
+			if menu {
+				if context_menu_item(menu, "Line Numbers", style.iconNumList).pressed {
+					lineNumbers = !lineNumbers;
+				}
+				context_menu_item(menu, "View Line Endings", "");
+				context_menu_item(menu, "Line Wrapping", style.iconAlignLeft);
+			}
+		}
+		
+		build_ui_panel_dialogs(panelBox, panel);
+		
+		// Draw the main code screen
+		codeContainerOuter := box(panelBox);
+		{
+			add_flags(codeContainerOuter, .DRAW_BACKGROUND);
+			set_child_layout_axis(codeContainerOuter, .Y);
+			set_size(codeContainerOuter, grow(), grow());
+			
+			longestLinePixelWidth:= 0.0;
+			
+			codeContainerInner := box(codeContainerOuter);
+			add_flags(codeContainerInner, .DRAW_BACKGROUND);
+			set_size(codeContainerInner, grow(), grow());
+			
+			codeBox := box(codeContainerInner, ui_key("code"));
+			{
+				add_flags(codeBox, .CLIP_CONTENTS | .MOUSE_CLICKABLE);
+				set_size(codeBox, grow(), grow());
+				set_font(codeBox, fontCode);
+				set_custom_draw(codeBox, custom_draw_code, cast(*void) panel);
+				
+				numDocumentLines := get_number_of_lines(panel.document);
+				metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
+				codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
+				
+				if codeBox.firstTouchedFrame == uiState.frameIndex {
+					codeBox.viewOffsetTarget.y = codeScrollInitialOffset;
+					codeBox.viewOffsetTarget.y = clamp(codeBox.viewOffsetTarget.y, codeBox.viewBounds.y, 0);
+				}
+				
+				// TODO: cache this calculation, it won't change much and it can be slow
+				longestLinePixelWidth = cast(float, generate_text_run(get_line_content(panel.document, document_get_longest_line(panel.document)-1,,temp).text, xx codeBox.fontSize, codeBox.font,,temp).width);
+				longestLinePixelWidth += metrics.emWidth; // add extra monospace width for cursor to sit on end of line
+				
+				if longestLinePixelWidth > codeBox.rect.w {
+					gutterWidth := 0;
+					if lineNumbers {
+						maxLinesRun := generate_text_run(tprint(" % ", numDocumentLines), xx codeBox.fontSize, codeBox.font,,temp);
+						gutterWidth = xx maxLinesRun.width;
+					}
+					
+					// We only want to scroll horizontally such that the longest line is still mostly visible
+					// i.e. not the whole length of the line, just how much is going off screen
+					codeBox.viewBounds.x = abs(longestLinePixelWidth - codeBox.rect.w + gutterWidth);
+				}
+				else {
+					codeBox.viewBounds.x = 0;
+				}
+				
+				signal := signal_from_box(codeBox);
+				
+				// mouse cursor control
+				set_cursor_to_mouse_location :: (doc: DocumentHandle, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
+					gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
+					
+					x, y, success := get_mouse_pointer_position(window, false);
+					mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
+					mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
+					
+					metrics := get_font_metrics(box.font, xx box.fontSize);
+					clickedLine := clamp(cast(s64) (mouseY / metrics.lineSpacing), 0, numDocumentLines - 1);
+					
+					// collect the line content of this line (so we can figure out how wide it is in pixels)
+					lineContent := get_line_content(doc, clickedLine,,temp);
+					run := generate_text_run(lineContent.text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
+					column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
+					cursor.head = min(get_size(doc)-1, lineContent.startByteOffset + column);
+					
+					// update the virtual column
+					cursor.virtualColumn = 0;
+					for lineContent.text {
+						if it_index == column then break;
+						if it == #char "\t" {
+							cursor.virtualColumn += chars_to_tabstop(cursor.virtualColumn);
+						}
+						else {
+							cursor.virtualColumn += 1;
+						}
+					}
+				}
+				
+				if signal.pressed {
+					keep_primary_selection(panel, panel_get_primary_cursor(panel));
+					set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
+					panel_get_primary_cursor(panel).anchor = panel_get_primary_cursor(panel).head;
+				}
+				
+				if signal.doubleClicked {
+					keep_primary_selection(panel, panel_get_primary_cursor(panel));
+					set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
+					move_prev_word_start(panel, panel_get_primary_cursor(panel));
+					move_word_end(panel, panel_get_primary_cursor(panel));
+				}
+				
+				if signal.holding {
+					set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
+					x, y, success := get_mouse_pointer_position(window, false);
+					if y > cast(int, codeBox.rect.y + codeBox.rect.h) {
+						_, range := panel_calculate_visible_lines(panel);
+						currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
+						panel_scroll_to_line(panel, currentLine - range);
+					}
+					else if y < cast(int, codeBox.rect.y) {
+						currentLine := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head).line;
+						panel_scroll_to_line(panel, currentLine);
+					}
+				}
+				
+				scroll_bar(codeContainerInner,
+						   ui_key("codeScrollVertical"),
+						   .Y,
+						   codeBox.viewOffset.y/codeBox.viewBounds.y,
+						   cast(float, numDocumentLines),
+						   codeBox.rect.h/metrics.lineSpacing,
+						   codeBox.key);
+			}
+			
+			scroll_bar(codeContainerOuter,
+					   ui_key("codeScrollHorizontal"),
+					   .X,
+					   codeBox.viewOffset.x/codeBox.viewBounds.x,
+					   longestLinePixelWidth,
+					   codeBox.rect.w,
+					   codeBox.key);
+		}
+		
+		// Draw the search/select dialog
+		if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
+			searchContainer := box(panelBox);
+			{
+				add_flags(searchContainer, .DRAW_BACKGROUND | .DRAW_SIDE_TOP);
+				set_size(searchContainer, grow(), fit());
+				set_padding(searchContainer, em(0.4));
+				set_background_color(searchContainer, style.backgroundLight);
+				set_border_thickness(searchContainer, 1.0);
+				set_child_gap(searchContainer, em(0.4));
+				
+				// regex toggle, highlighted while enabled
+				clicked, regexToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchRegexEnabled, ".*");
+				set_font(regexToggle, fontCode);
+				if clicked {
+					// rerun the search so the results reflect the new mode
+					if panel.searchInput.onEditCallback {
+						panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+					}
+				}
+				
+				// case sensitive toggle, highlighted while enabled
+				caseClicked, caseToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchCaseSensitive, "Aa");
+				set_font(caseToggle, fontCode);
+				if caseClicked {
+					if panel.searchInput.onEditCallback {
+						panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
+					}
+				}
+				
+				// TODO(ui): input field widget here
+				fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+				inputBox := box(searchContainer, ui_key("search_input"));
+				add_flags(inputBox, .DRAW_BACKGROUND);
+				set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
+				set_corner_radius(inputBox, em(0.2));
+				set_background_color(inputBox, style.backgroundLighter);
+				set_font(inputBox, fontCode);
+				set_text_padding(inputBox, em(0.5));
+				set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
+			}
 		}
 	}
 }
@@ -756,27 +769,27 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 		}
 
 		commandPaletteContainer := box(parent);
-		add_flags(commandPaletteContainer, .DRAW_BACKGROUND);
-		set_child_layout_axis(commandPaletteContainer, .Y);
-		set_size(commandPaletteContainer, fixed(paletteWidth), fit());
-		set_padding(commandPaletteContainer, em(0.4));
-		set_background_color(commandPaletteContainer, style.backgroundLight);
-		set_corner_radius(commandPaletteContainer, em(0.5));
-		set_fixed_x(commandPaletteContainer, panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2);
-		set_fixed_y(commandPaletteContainer, em(3.0));
 		{
+			add_flags(commandPaletteContainer, .DRAW_BACKGROUND);
+			set_child_layout_axis(commandPaletteContainer, .Y);
+			set_size(commandPaletteContainer, fixed(paletteWidth), fit());
+			set_padding(commandPaletteContainer, em(0.4));
+			set_background_color(commandPaletteContainer, style.backgroundLight);
+			set_corner_radius(commandPaletteContainer, em(0.5));
+			set_fixed_x(commandPaletteContainer, panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2);
+			set_fixed_y(commandPaletteContainer, em(3.0));
+			
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 			inputBox := box(commandPaletteContainer);
-			add_flags(inputBox, .DRAW_BACKGROUND);
-			set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
-			set_padding(inputBox, em(0.4));
-			set_child_gap(inputBox, em(0.2));
-			set_corner_radius(inputBox, em(0.2));
-			set_background_color(inputBox, style.backgroundLighter);
-			set_text_padding(inputBox, em(0.5));
-
-			// Draw everything inside the input field
 			{
+				add_flags(inputBox, .DRAW_BACKGROUND);
+				set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
+				set_padding(inputBox, em(0.4));
+				set_child_gap(inputBox, em(0.2));
+				set_corner_radius(inputBox, em(0.2));
+				set_background_color(inputBox, style.backgroundLighter);
+				set_text_padding(inputBox, em(0.5));
+				
 				if panel.commandPalette.pendingCommandMode {
 					pendingCommandLabel := text(inputBox, panel.commandPalette.pendingCommand.cmd.prettyName);
 					add_flags(pendingCommandLabel, .DRAW_BACKGROUND);
@@ -835,20 +848,22 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 					if suggestion.sortKey == 0 continue;
 
 					entryBox := box(listBox, ui_key("suggestion##%", it));
-					add_flags(entryBox, .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND);
-					set_size(entryBox, grow(), fixed(elementHeight));
-					set_padding(entryBox, em(argHandler.suggestionPadding));
-					set_background_color(entryBox, ifx selected style.backgroundLighter else style.backgroundLight);
-					signal := signal_from_box(entryBox);
-					if signal.pressed {
-						panel.commandPalette.selection = xx it;
-						queue_command(find_command_by_name("command_palette_execute_command"), panel);
-					}
-					if argHandler.drawSuggestion {
-						argHandler.drawSuggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
-					}
-					else {
-						default_draw_suggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
+					{
+						add_flags(entryBox, .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND);
+						set_size(entryBox, grow(), fixed(elementHeight));
+						set_padding(entryBox, em(argHandler.suggestionPadding));
+						set_background_color(entryBox, ifx selected style.backgroundLighter else style.backgroundLight);
+						signal := signal_from_box(entryBox);
+						if signal.pressed {
+							panel.commandPalette.selection = xx it;
+							queue_command(find_command_by_name("command_palette_execute_command"), panel);
+						}
+						if argHandler.drawSuggestion {
+							argHandler.drawSuggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
+						}
+						else {
+							default_draw_suggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
+						}
 					}
 				}
 
@@ -857,10 +872,11 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 
 			// Draw the control hints box at the bottom
 			hintsBox := box(commandPaletteContainer, ui_key("hintsBox"));
-			add_flags(hintsBox, .DRAW_SIDE_TOP);
-			set_size(hintsBox, grow(), fit());
-			set_border_thickness(hintsBox, 1.0);
 			{
+				add_flags(hintsBox, .DRAW_SIDE_TOP);
+				set_size(hintsBox, grow(), fit());
+				set_border_thickness(hintsBox, 1.0);
+				
 				spacer(hintsBox, .X, grow());
 
 				textCol := uiState.defaultPalette.text;

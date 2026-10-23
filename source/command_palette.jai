@@ -992,11 +992,12 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 	
 	
 	fileNameBox := box(parent, ui_key("##filenameBox%", index));
-	add_flags(fileNameBox, .CLIP_CONTENTS);
-	set_child_layout_axis(fileNameBox, .X);
-	set_size(fileNameBox, percent(0.2), grow());
-	set_child_alignment(fileNameBox, .CENTER);
 	{
+		add_flags(fileNameBox, .CLIP_CONTENTS);
+		set_child_layout_axis(fileNameBox, .X);
+		set_size(fileNameBox, percent(0.2), grow());
+		set_child_alignment(fileNameBox, .CENTER);
+		
 		fileName := path_filename(searchResult.filePath);
 		text(fileNameBox, fileName);
 
