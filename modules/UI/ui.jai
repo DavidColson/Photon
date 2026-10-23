@@ -1,17 +1,4 @@
 
-UIBoxDeclaration :: struct {
-	flags: UIBoxFlags;
-	layout: UILayoutData;
-	fixedX: float;
-	fixedY: float;
-	palette: UIPalette;
-	cornerRadius: Vector4;
-	borderThickness: float;
-	fontSize: float;
-	font: *Font;
-	textPadding: float;
-	textAlignment: UIAlignment;
-}
 
 UIBox :: struct {
 	key: UIKey;
@@ -23,15 +10,25 @@ UIBox :: struct {
 	tail: *UIBox;
 	parent: *UIBox;
 
-	// per frame information (must be cleared in box())
-	using declaration: UIBoxDeclaration;
-	text: string; // property data to move into property struct
-	textRun: TextRun; // property data
-	textHighlights: []TextHighlight; // property data
-	customDrawFunction: (*UIBox, *void); // property data
-	customDrawUdata: *void; // property data
+	// per frame information, reset in box() and configured with the set_* functions
+	using properties: struct {
+		flags: UIBoxFlags;
+		text: string;
+		textHighlights: []TextHighlight;
+		textPadding: float;
+		textAlignment: UIAlignment;
+		layout: UILayoutData;
+		palette: UIPalette;
+		cornerRadius: Vector4;
+		borderThickness: float;
+		fontSize: float;
+		font: *Font;
+		customDrawFunction: (*UIBox, *void);
+		customDrawUdata: *void;
+	}
 	
 	// per frame information (must be cleared in box())
+	textRun: TextRun;
 	fixedPosition: [UIAxis.COUNT]float; // parent relative
 	fixedSize: [UIAxis.COUNT]float;
 	childCount: s32;
@@ -146,10 +143,8 @@ UIState :: struct {
 	frameAlloc: Allocator;
 
 	// Per frame UI data
-	rootbox: *UIBox;
+	rootBox: *UIBox;
 	tooltip: *UIBox;
-	parentStack: [32]*UIBox;
-	parentStackTop: s32 = 1;
 
 	defaultPalette: UIPalette;
 	defaultFont: *Font;
@@ -197,7 +192,7 @@ find_box :: (key: UIKey) -> bool, *UIBox {
 	return success, box;
 }
 
-box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
+box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 	// attempt to get the box from persistent data using it's key
 	success, box := table_find(*uiState.boxTable, key);
 
@@ -232,60 +227,20 @@ box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 	box.prev = null;
 	box.head = null;
 	box.tail = null;
-	box.parent = top_parent();
+	box.parent = parent;
 	box.childCount = 0;
 	box.fixedPosition = .[0,0];
 	box.fixedSize = .[0,0];
 	box.key = key;
-	box.declaration = data;
-	box.customDrawFunction = null;
 	box.lastTouchedFrame = uiState.frameIndex;
 
-	// A lot of this code will have to move to setters for the corresponding properties
-	if data.fixedX != 0.0 {
-		box.fixedPosition[UIAxis.X] = data.fixedX;
-		box.flags |= .FLOATING_X;
-		assert(box.layout.size[UIAxis.X].type != .GROW || box.layout.size[UIAxis.X].type != .PERCENT, "Grow and percent sized boxes cannot be floating, they need some defined size"); 
-	}
-	if data.fixedY != 0.0 {
-		box.fixedPosition[UIAxis.Y] = data.fixedY;
-		box.flags |= .FLOATING_Y;
-		assert(box.layout.size[UIAxis.Y].type != .GROW || box.layout.size[UIAxis.Y].type != .PERCENT, "Grow and percent sized boxes cannot be floating, they need some defined size"); 
-	}
-
-	if box.flags & .DRAW_TEXT || box.flags & .DRAW_TEXT_HIGHLIGHTS {
-		box.text = display_string_from_key(box.key.keyStr);
-	}
-
-	// override palette defaults if specified
+	// reset properties to defaults, these are then overridden by the setters below
+	box.properties = .{};
 	box.palette = uiState.defaultPalette;
-	for 0..size_of(UIPalette)/size_of(Vector4)-1 {
-		if  data.palette.colors[it].x != 0 || 
-			data.palette.colors[it].y != 0 ||
-			data.palette.colors[it].z != 0 ||
-			data.palette.colors[it].w != 0
-		{
-			box.palette.colors[it] = data.palette.colors[it];
-		}
-	}
-
-	// override text/font defaults
 	box.font = uiState.defaultFont;
-	if data.font != null {
-		box.font = data.font;
-	}
 	box.fontSize = uiState.defaultFontSize;
-	if data.fontSize != 0.0 {
-		box.fontSize = data.fontSize;
-	}
 	box.textPadding = uiState.defaultTextPadding;
-	if data.textPadding != 0.0 {
-		box.textPadding = data.textPadding;
-	}
 	box.textAlignment = uiState.defaultTextAlignment;
-	if data.textAlignment != uiState.defaultTextAlignment {
-		box.textAlignment = data.textAlignment;
-	}
 
 	// insert into parent's list of children
 	if box.parent {
@@ -294,6 +249,59 @@ box :: (key: UIKey = ui_key_nil, data: UIBoxDeclaration) -> *UIBox {
 	}
 
 	return box;
+}
+
+// box property setters
+
+add_flags :: (box: *UIBox, flags: UIBoxFlags) { box.flags |= flags; }
+remove_flags :: (box: *UIBox, flags: UIBoxFlags) { box.flags &= ~flags; }
+
+// floating boxes are positioned relative to their parent and take no space in its layout
+set_fixed_x :: (box: *UIBox, fixedX: float) {
+	box.fixedPosition[UIAxis.X] = fixedX;
+	box.flags |= .FLOATING_X;
+}
+
+set_fixed_y :: (box: *UIBox, fixedY: float) {
+	box.fixedPosition[UIAxis.Y] = fixedY;
+	box.flags |= .FLOATING_Y;
+}
+
+// text
+set_text :: (box: *UIBox, text: string) { box.text = text; }
+set_text_highlights :: (box: *UIBox, highlights: []TextHighlight) { box.textHighlights = highlights; }
+set_text_padding :: (box: *UIBox, padding: float) { box.textPadding = padding; }
+set_text_alignment :: (box: *UIBox, alignment: UIAlignment) { box.textAlignment = alignment; }
+set_font :: (box: *UIBox, font: *Font) { box.font = font; }
+set_font_size :: (box: *UIBox, fontSize: float) { box.fontSize = fontSize; }
+
+// layout
+set_child_layout_axis :: (box: *UIBox, axis: UIAxis) { box.layout.childLayoutAxis = axis; }
+set_padding :: (box: *UIBox, padding: float) { box.layout.padding = .{padding, padding, padding, padding}; }
+set_padding :: (box: *UIBox, padding: Vector4) { box.layout.padding = padding; } // left, right, top, bottom
+set_child_gap :: (box: *UIBox, gap: float) { box.layout.childGap = gap; }
+set_child_alignment :: (box: *UIBox, alignment: UIAlignment) { box.layout.childAlignment = alignment; }
+set_width :: (box: *UIBox, size: UISize) { box.layout.width = size; }
+set_height :: (box: *UIBox, size: UISize) { box.layout.height = size; }
+set_size :: (box: *UIBox, axis: UIAxis, size: UISize) { box.layout.size[axis] = size; }
+set_size :: (box: *UIBox, width: UISize, height: UISize) { box.layout.width = width; box.layout.height = height; }
+
+// palette
+set_background_color :: (box: *UIBox, color: Vector4) { box.palette.background = color; }
+set_hot_color :: (box: *UIBox, color: Vector4) { box.palette.hot = color; }
+set_active_color :: (box: *UIBox, color: Vector4) { box.palette.active = color; }
+set_text_color :: (box: *UIBox, color: Vector4) { box.palette.text = color; }
+set_text_highlight_color :: (box: *UIBox, color: Vector4) { box.palette.textHighlight = color; }
+set_border_color :: (box: *UIBox, color: Vector4) { box.palette.border = color; }
+
+// decoration
+set_corner_radius :: (box: *UIBox, radius: float) { box.cornerRadius = .{radius, radius, radius, radius}; }
+set_corner_radius :: (box: *UIBox, radii: Vector4) { box.cornerRadius = radii; }
+set_border_thickness :: (box: *UIBox, thickness: float) { box.borderThickness = thickness; }
+
+set_custom_draw :: (box: *UIBox, function: (*UIBox, *void), udata: *void) {
+	box.customDrawFunction = function;
+	box.customDrawUdata = udata;
 }
 
 signal_from_box :: (box: *UIBox) -> UISignal {
@@ -420,14 +428,16 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 	return signal;
 }
 
-begin_ui :: () {
-	uiState.rootbox = box(ui_key_nil, .{
-		layout=.{childLayoutAxis=.Y, width=fixed(xx renderState.windowWidth), height=fixed(xx renderState.windowHeight)},
-	}); 
+// Returns the root box which all other boxes should descend from
+begin_ui :: () -> *UIBox {
+	uiState.rootBox = box(null);
+	set_child_layout_axis(uiState.rootBox, .Y);
+	set_size(uiState.rootBox, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
+
 	uiState.hotBoxKeyLastFrame = uiState.hotBoxKey;
 	uiState.hotBoxKey = ui_key_nil;
 	uiState.tooltip = null;
-	push_parent(uiState.rootbox);
+	return uiState.rootBox;
 }
 
 // Returns true if animations are still playing and the app should redraw next frame
@@ -444,49 +454,54 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 	}
 
 	// layout all the boxes
-	compute_layout(uiState.rootbox, .X);
-	compute_layout(uiState.rootbox, .Y);
+	compute_layout(uiState.rootBox, .X);
+	compute_layout(uiState.rootBox, .Y);
+	set_rect_from_fixed(uiState.rootBox);
 
-	// set the root box rect 
-	uiState.rootbox.rect.x = uiState.rootbox.fixedPosition[0];
-	uiState.rootbox.rect.y = uiState.rootbox.fixedPosition[1];
-	uiState.rootbox.rect.w = uiState.rootbox.fixedSize[0];
-	uiState.rootbox.rect.h = uiState.rootbox.fixedSize[1];
-
-	// adjust position of floating popups to be within bounds (i.e. context menu/tooltips)
+	// floating popups (i.e. context menu/tooltips) are detached roots, so lay them out separately
+	// adjusting their positions to be within the window bounds
 	floatingRoots := *UIBox.[uiState.tooltip, uiState.contextMenu];
 	for floatingRoots {
 		if it != null {
-			xBounds := uiState.rootbox.rect.w - em(0.3, it.fontSize); // padding
-			yBounds := uiState.rootbox.rect.h - em(0.3, it.fontSize); // padding
+			compute_layout(it, .X);
+			compute_layout(it, .Y);
+			set_rect_from_fixed(it);
+
+			xBounds := uiState.rootBox.rect.w - em(0.3, it.fontSize); // padding
+			yBounds := uiState.rootBox.rect.h - em(0.3, it.fontSize); // padding
 			xShiftDown := max(it.rect.x, 0) - it.rect.x;
 			xShiftUp := min(it.rect.x+it.rect.w, xBounds) - (it.rect.x+it.rect.w);
 			it.rect.x += xShiftDown + xShiftUp;
-			yShiftDown := max(it.rect.x, 0) - it.rect.x;
+			yShiftDown := max(it.rect.y, 0) - it.rect.y;
 			yShiftUp := min(it.rect.y+it.rect.h, yBounds) - (it.rect.y+it.rect.h);
 			it.rect.y += yShiftDown + yShiftUp;
 
+			// reposition children now the popup has moved
 			compute_layout(it, .X);
 			compute_layout(it, .Y);
 		}
 	}
 
 	// do animations
-	for :depth_first uiState.rootbox {
-		box := it;
+	animationRoots := *UIBox.[uiState.rootBox, uiState.tooltip, uiState.contextMenu];
+	for root: animationRoots {
+		if root == null continue;
+		for :depth_first root {
+			box := it;
 
-		// scroll animations
-		box.viewOffset.x += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
-		box.viewOffset.y += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
-		if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
-		if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
+			// scroll animations
+			box.viewOffset.x += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
+			box.viewOffset.y += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
+			if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
+			if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
 
-		// figure out if we need redraws because there are animations playing
-		if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then needsRedraw = true;
-		if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then needsRedraw = true;
+			// figure out if we need redraws because there are animations playing
+			if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then needsRedraw = true;
+			if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then needsRedraw = true;
+		}
 	}
 
-	render_ui_recursive(uiState.rootbox);
+	render_ui_recursive(uiState.rootBox);
 	for floatingRoots {
 		if it != null then render_ui_recursive(it);
 	}
@@ -501,7 +516,6 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 
 	reset(*uiState.frameArena, overwrite_memory=true);
 	uiState.frameIndex += 1;
-	uiState.parentStackTop = 1;
 	return needsRedraw;
 }
 
@@ -537,25 +551,6 @@ depth_first :: (box: *UIBox, body: Code, flags: For_Flags) #expand {
 	}
 }
 
-// parent stack
-
-push_parent :: (box: *UIBox) {
-	uiState.parentStack[uiState.parentStackTop] = box;
-	uiState.parentStackTop += 1;
-}
-
-pop_parent :: () -> *UIBox {
-	if uiState.parentStackTop != 1 {
-		uiState.parentStackTop -= 1;
-		return uiState.parentStack[uiState.parentStackTop]; 
-	}
-	return uiState.parentStack[0];
-}
-
-top_parent :: () -> *UIBox {
-	return uiState.parentStack[uiState.parentStackTop-1]; 
-}
-
 // keying
 
 ui_key_nil :: UIKey.{0,""};
@@ -577,32 +572,32 @@ compare_key :: (key1: UIKey, key2: UIKey) -> bool {
 	return key1.keyVal == key2.keyVal;
 }
 
-display_string_from_key :: (str: string) -> string {
-    index := find_index_from_left(str, "##");
-	if index < 0
-		return str;
-	return slice(str, 0, index);
-}
-
 // Basic widgets
 
 // @todo: actually use these
-label :: (text: string) -> UISignal, *UIBox {
-	label := box(ui_key(text), .{flags=.DRAW_TEXT});
+label :: (parent: *UIBox, text: string) -> UISignal, *UIBox {
+	label := box(parent);
+	add_flags(label, .DRAW_TEXT);
+	set_text(label, text);
+	set_size(label, text_content(), text_content());
 	return signal_from_box(label), label;
 }
 
-label :: (textFormat: string, args: ..Any) -> UISignal, *UIBox {
-	label := box(ui_key(textFormat, ..args), .{flags=.DRAW_TEXT});
-	return signal_from_box(label), label;
+label :: (parent: *UIBox, textFormat: string, args: ..Any) -> UISignal, *UIBox {
+	signal, box := label(parent, tprint(textFormat, ..args));
+	return signal, box;
 }
 
-button :: (text: string) -> UISignal {
-	button := box(ui_key(text), .{flags=.DRAW_BACKGROUND | .DRAW_TEXT | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE});
+button :: (parent: *UIBox, key: UIKey, text: string) -> UISignal {
+	button := box(parent, key);
+	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE);
+	set_text(button, text);
+	set_size(button, text_content(), text_content());
 	return signal_from_box(button);
 }
 
-tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) {
+// Tooltips are detached floating roots, build their contents as children of the returned box
+tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
 	success, anchor := find_box(anchorBoxKey);
 	fixedX, fixedY := 0.0;
 	if success {
@@ -615,26 +610,19 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 		fixedY = cast(float, y + 20);
 	}
 
-	uiState.tooltip = box(ui_key("tooltip"), .{
-		flags=.DRAW_BACKGROUND | .DRAW_BORDER,
-		layout=.{ 
-			childLayoutAxis = .X,
-			width=fit(),
-			height=fit(),
-			padding=padding_all(em(0.5))
-		},
-		palette=.{ background=uiState.popupBackground },
-		borderThickness=1.0,
-		cornerRadius=corner_rad_all(em(0.4)),
-		fixedX = fixedX,
-		fixedY = fixedY,
-	});
+	tooltip := box(null, ui_key("tooltip"));
+	add_flags(tooltip, .DRAW_BACKGROUND | .DRAW_BORDER);
+	set_child_layout_axis(tooltip, .X);
+	set_size(tooltip, fit(), fit());
+	set_padding(tooltip, em(0.5));
+	set_background_color(tooltip, uiState.popupBackground);
+	set_border_thickness(tooltip, 1.0);
+	set_corner_radius(tooltip, em(0.4));
+	set_fixed_x(tooltip, fixedX);
+	set_fixed_y(tooltip, fixedY);
 
-	push_parent(uiState.tooltip);
-}
-
-tooltip_end :: () {
-	pop_parent();
+	uiState.tooltip = tooltip;
+	return tooltip;
 }
 
 is_context_menu_open :: (key: UIKey) -> bool {
@@ -649,133 +637,104 @@ context_menu_close :: () {
 	uiState.nextActiveContextMenu = ui_key_nil;
 }
 
-context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, anchorOffset: Vector2 = .{0.0,0.0}) -> bool {
-	if uiState.activeContextMenu == key {
+// Returns null if the context menu is not open, otherwise the menu box to add context_menu_items to
+// Context menus are detached floating roots
+context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
+	if uiState.activeContextMenu != key return null;
 
-		success, anchor := find_box(anchorBoxKey);
-		fixedX, fixedY := 0.0;
-		if success {
-			fixedX = anchor.rect.x + anchorOffset.x;
-			fixedY = anchor.rect.y + anchorOffset.y;
-		}
-		else {
-			x, y, success := get_mouse_pointer_position(renderState.window, false);
-			fixedX = cast(float, x + 20);
-			fixedY = cast(float, y + 20);
-		}
-
-		uiState.contextMenu = box(ui_key("context"), .{
-			flags=.DRAW_BACKGROUND | .DRAW_BORDER,
-			layout=.{ 
-				childLayoutAxis = .Y,
-				width=width,
-				height=fit(),
-				padding=padding_all(em(0.5)),
-				childGap=em(0.2),
-			},
-			palette=.{ background=uiState.popupBackground },
-			borderThickness=1.0,
-			cornerRadius=corner_rad_all(em(0.4)),
-			fixedX = fixedX,
-			fixedY = fixedY,
-		});
-
-		push_parent(uiState.contextMenu);
-		return true;
+	success, anchor := find_box(anchorBoxKey);
+	fixedX, fixedY := 0.0;
+	if success {
+		fixedX = anchor.rect.x + anchorOffset.x;
+		fixedY = anchor.rect.y + anchorOffset.y;
 	}
-	return false;
+	else {
+		x, y, success := get_mouse_pointer_position(renderState.window, false);
+		fixedX = cast(float, x + 20);
+		fixedY = cast(float, y + 20);
+	}
+
+	menu := box(null, ui_key("context"));
+	add_flags(menu, .DRAW_BACKGROUND | .DRAW_BORDER);
+	set_child_layout_axis(menu, .Y);
+	set_size(menu, width, fit());
+	set_padding(menu, em(0.5));
+	set_child_gap(menu, em(0.2));
+	set_background_color(menu, uiState.popupBackground);
+	set_border_thickness(menu, 1.0);
+	set_corner_radius(menu, em(0.4));
+	set_fixed_x(menu, fixedX);
+	set_fixed_y(menu, fixedY);
+
+	uiState.contextMenu = menu;
+	return menu;
 }
 
-context_menu_item :: (text: string, icon: string) -> UISignal {
-	id := top_parent().childCount;
-	row := box(ui_key("menuitem%", id), .{
-		flags=.DRAW_BACKGROUND | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE,
-		layout=.{ 
-			childLayoutAxis = .X,
-			width=grow(),
-			height=fit(),
-		},
-		palette=.{background = uiState.popupBackground}
-	});
+context_menu_item :: (menu: *UIBox, text: string, icon: string) -> UISignal {
+	id := menu.childCount;
+	row := box(menu, ui_key("menuitem%", id));
+	add_flags(row, .DRAW_BACKGROUND | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE);
+	set_child_layout_axis(row, .X);
+	set_size(row, grow(), fit());
+	set_background_color(row, uiState.popupBackground);
 	{
-		push_parent(row); defer pop_parent();
-
 		// icon
+		iconBox := box(row);
+		set_width(iconBox, fixed(em(2.0)));
 		if icon.count {
-			box(ui_key(icon), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=fixed(em(2.0)), height=text_content() },
-				font=uiState.defaultIconFont
-			});
-		}
-		else {
-			box(ui_key_nil, .{ layout=.{ width=fixed(em(2.0)) }, });
+			add_flags(iconBox, .DRAW_TEXT);
+			set_text(iconBox, icon);
+			set_height(iconBox, text_content());
+			set_font(iconBox, uiState.defaultIconFont);
 		}
 
 		// text
-		box(ui_key("%##%", text, id), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		textBox := box(row);
+		add_flags(textBox, .DRAW_TEXT);
+		set_text(textBox, text);
+		set_size(textBox, text_content(), text_content());
 	}
 	return signal_from_box(row);
 }
 
-
-context_menu_end :: () {
-	pop_parent();
+spacer :: (parent: *UIBox, axis: UIAxis, size: UISize) {
+	spacer := box(parent);
+	set_size(spacer, axis, size);
 }
 
-spacer :: (axis: UIAxis, size: UISize) {
-	if axis == .X {
-		box(ui_key_nil, .{ layout=.{ width=size } });
-	}
-	else {
-		box(ui_key_nil, .{ layout=.{ height=size } });
-	}
-}
-
-scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange:float, visibleRange: float, boxToScroll: UIKey) {
+scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange:float, visibleRange: float, boxToScroll: UIKey) {
 	scrollAxis := axis;
 	otherAxis := axis ^ 1;
 
 	if abs(scrollableRange) < abs(visibleRange) return;
-	
-	layout := UILayoutData.{ padding=padding_all(em(0.3))};
-	layout.size[axis^1] = fixed(em(1.2));
-	layout.size[axis] = grow();
-	container := box(ui_key_nil, .{layout = layout});
+
+	container := box(parent);
+	set_padding(container, em(0.3));
+	set_size(container, otherAxis, fixed(em(1.2)));
+	set_size(container, scrollAxis, grow());
 	{
-		push_parent(container); defer pop_parent();
-
-		scrollBarOuter := box(ui_key_nil, .{
-			flags=.DRAW_BACKGROUND,
-			layout=.{childLayoutAxis = axis, width=grow(), height=grow()},
-			cornerRadius=corner_rad_all(em(0.3)),
-			palette=.{background=uiState.popupBackground}
-		});
+		scrollBarOuter := box(container);
+		add_flags(scrollBarOuter, .DRAW_BACKGROUND);
+		set_child_layout_axis(scrollBarOuter, axis);
+		set_size(scrollBarOuter, grow(), grow());
+		set_corner_radius(scrollBarOuter, em(0.3));
+		set_background_color(scrollBarOuter, uiState.popupBackground);
 		{
-			push_parent(scrollBarOuter); defer pop_parent();
-
 			handleSizePct := max(abs(visibleRange/scrollableRange), 0.05);
 			spaceBeforePct := (1.0-handleSizePct) * scrollOffsetPct;
 
 			// space before
-			layout = UILayoutData.{};
-			layout.size[axis^1] = grow();
-			layout.size[axis] = percent(spaceBeforePct);
-			box(ui_key_nil, .{layout = layout});
+			spaceBefore := box(scrollBarOuter);
+			set_size(spaceBefore, otherAxis, grow());
+			set_size(spaceBefore, scrollAxis, percent(spaceBeforePct));
 
 			// handle
-			layout = UILayoutData.{};
-			layout.size[axis^1] = grow();
-			layout.size[axis] = percent(handleSizePct);
-			scrollHandle := box(key, .{
-				flags=.DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS,
-				layout=layout,
-				palette=.{background=uiState.scrollBarHandle},
-				cornerRadius=corner_rad_all(em(0.3))
-			});
+			scrollHandle := box(scrollBarOuter, key);
+			add_flags(scrollHandle, .DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
+			set_size(scrollHandle, otherAxis, grow());
+			set_size(scrollHandle, scrollAxis, percent(handleSizePct));
+			set_background_color(scrollHandle, uiState.scrollBarHandle);
+			set_corner_radius(scrollHandle, em(0.3));
 
 			// dragging handling
 			if boxToScroll != ui_key_nil {
@@ -803,25 +762,28 @@ scroll_bar :: (key: UIKey, axis: UIAxis, scrollOffsetPct: float, scrollableRange
 	}
 }
 
-scroll_list_begin :: (listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: int, selectedElementChanged: bool) -> rangeStart: int, rangeEnd: int {
-	outerContainer := box(ui_key_nil, .{ flags=0, layout=.{width=grow(), height=fit(), }});
-	push_parent(outerContainer);
+// Returns the list container, add list elements in the given range as children of it, then call scroll_list_end
+scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: int, selectedElementChanged: bool) -> container: *UIBox, rangeStart: int, rangeEnd: int {
+	outerContainer := box(parent);
+	set_size(outerContainer, grow(), fit());
 
 	maxContainerHeightInner := maxContainerHeight - em(0.4)*2; // without the padding
 
-	container := box(listKey, .{
-		flags=.CLIP_CONTENTS, 
-		layout=.{ childLayoutAxis = .Y, width=grow(), height=fit(0.0, maxContainerHeight), padding=.{0,0, em(0.4), em(0.4)} },
-	});
+	container := box(outerContainer, listKey);
+	add_flags(container, .CLIP_CONTENTS);
+	set_child_layout_axis(container, .Y);
+	set_size(container, grow(), fit(0.0, maxContainerHeight));
+	set_padding(container, .{0,0, em(0.4), em(0.4)});
 
 	// scroll bar if there are too many elements to display
 	if container.viewBounds.y != 0.0 {
-		scrollData:= scroll_bar(scrollBarKey,
-								.Y,
-								container.viewOffset.y/container.viewBounds.y,
-								container.viewBounds.y,
-								container.layout.height.max - em(0.4)*2,
-								container.key);
+		scroll_bar(outerContainer,
+					scrollBarKey,
+					.Y,
+					container.viewOffset.y/container.viewBounds.y,
+					container.viewBounds.y,
+					container.layout.height.max - em(0.4)*2,
+					container.key);
 	}
 
 	elementsBefore := cast(int, floor(abs(container.viewOffset.y) / elementHeight));
@@ -830,12 +792,12 @@ scroll_list_begin :: (listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: 
 	container.viewBounds.y = min(cast(float, -(maxElements * elementHeight - maxContainerHeightInner)), 0.0);
 	signal_from_box(container);
 
-	// keyboard scrolling behaviour 
+	// keyboard scrolling behaviour
 	// @todo: don't really like the fact that we need to do this, need a better way to deal with it
 	// I guess the best solution is that the signal above is what actually changes the element and we manage it inside UI
 	if selectedElementChanged {
 		elementsBeforeTarget := cast(int, floor(abs(container.viewOffsetTarget.y) / elementHeight));
-		if selectedElement < elementsBeforeTarget+1 { 
+		if selectedElement < elementsBeforeTarget+1 {
 			distance := elementsBeforeTarget - selectedElement;
 			container.viewOffsetTarget.y = -selectedElement*elementHeight;
 		}
@@ -844,25 +806,19 @@ scroll_list_begin :: (listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: 
 		}
 	}
 
-	push_parent(container);
-
 	// spacer to fill gap of elements that are offscreen
-	spacer(.Y, fixed(elementsBefore*elementHeight));
+	spacer(container, .Y, fixed(elementsBefore*elementHeight));
 
 	rangeEnd := min(elementsBefore+elementsOnScreen-1, maxElements-1);
-	rangeStart := elementsBefore; 
-	return rangeStart, rangeEnd;
+	rangeStart := elementsBefore;
+	return container, rangeStart, rangeEnd;
 }
 
-scroll_list_end :: () {
-	container := pop_parent(); // list element container
-
+scroll_list_end :: (container: *UIBox) {
 	container.viewOffset.y = clamp(container.viewOffset.y, container.viewBounds.y, 0);
 	container.viewOffset.x = clamp(container.viewOffset.x, container.viewBounds.x, 0);
 	container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
 	container.viewOffsetTarget.x = clamp(container.viewOffsetTarget.x, container.viewBounds.x, 0);
-
-	pop_parent(); // outer container (inc scroll bar)
 }
 
 // @todo: widgets:
@@ -1009,14 +965,27 @@ render_ui_recursive :: (box: *UIBox) {
 
 // Layout algorithm
 
-compute_layout :: (root: *UIBox, axis: UIAxis) {	
-	compute_standalone_sizes(root, axis); // text, fixed 
+set_rect_from_fixed :: (box: *UIBox) {
+	box.rect.x = box.fixedPosition[0];
+	box.rect.y = box.fixedPosition[1];
+	box.rect.w = box.fixedSize[0];
+	box.rect.h = box.fixedSize[1];
+}
+
+compute_layout :: (root: *UIBox, axis: UIAxis) {
+	compute_standalone_sizes(root, axis); // text, fixed
 	compute_downward_dependant_sizes(root, axis); // fit sizing
 	compute_upward_dependant_sizes(root, axis); // growable/percent
 	compute_positions(root, axis);
 }
 
 compute_standalone_sizes :: (root: *UIBox, axis: UIAxis) {
+	floating := ifx axis == .X then UIBoxFlags.FLOATING_X else .FLOATING_Y;
+	if root.flags & floating {
+		sizeType := root.layout.size[axis].type;
+		assert(sizeType != .GROW && sizeType != .PERCENT, "Grow and percent sized boxes cannot be floating, they need some defined size");
+	}
+
 	if root.layout.size[axis].type == {
 		case .FIXED;
 			root.fixedSize[axis] = root.layout.size[axis].min;

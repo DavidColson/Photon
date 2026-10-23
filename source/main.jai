@@ -302,7 +302,7 @@ update :: (deltaTime: float64) {
 }
 
 build_ui :: () {
-	begin_ui();
+	root := begin_ui();
 
 	// TODO: should eventually be moved to a new and better style system
 	uiState.defaultPalette = .{
@@ -323,7 +323,7 @@ build_ui :: () {
 	uiState.doubleClickTimeSeconds = style.doubleClickTimeSeconds;
 
 	// Draw notifications
-	
+
 	fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
 
 	maxWidth := 0.0;
@@ -333,20 +333,14 @@ build_ui :: () {
 	}
 
 	it := numActiveNotifications;
-	notificationBox := box(ui_key("notifBox"), .{
-		flags=0,
-		layout=.{
-			childLayoutAxis = .Y,
-			width=fit(),
-			height=fit(),
-			childAlignment=.RIGHT,
-			childGap=em(0.5)
-		},
-		fixedX= windowWidth - maxWidth - em(2.5),
-		fixedY= em(3.0),
-	});
+	notificationBox := box(root, ui_key("notifBox"));
+	set_child_layout_axis(notificationBox, .Y);
+	set_size(notificationBox, fit(), fit());
+	set_child_alignment(notificationBox, .RIGHT);
+	set_child_gap(notificationBox, em(0.5));
+	set_fixed_x(notificationBox, windowWidth - maxWidth - em(2.5));
+	set_fixed_y(notificationBox, em(3.0));
 	{
-		push_parent(notificationBox); defer pop_parent();
 		while it > 0 {
 			notif := notifications[it-1];
 			fadeOutTime := cast(float) notificationTime*0.3;
@@ -357,17 +351,18 @@ build_ui :: () {
 			backgroundCol.w = alpha;
 			textCol := style.backgroundMid;
 			textCol.w = alpha;
-			box(ui_key("%##%", notif.content, it), .{
-				flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-				layout=.{ width=text_content(), height=text_content() },
-				palette=.{background=backgroundCol, text=textCol},
-				textPadding=em(0.4),
-				cornerRadius=corner_rad_all(em(0.3))
-			});
+			notifLabel := box(notificationBox);
+			add_flags(notifLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
+			set_text(notifLabel, notif.content);
+			set_size(notifLabel, text_content(), text_content());
+			set_background_color(notifLabel, backgroundCol);
+			set_text_color(notifLabel, textCol);
+			set_text_padding(notifLabel, em(0.4));
+			set_corner_radius(notifLabel, em(0.3));
 			it -= 1;
 		}
 	}
-	
+
 	// Draw the panel
 	// @todo: wrap this up somehow so zero handles resolve to null
 	// this is ugly as heck
@@ -375,18 +370,18 @@ build_ui :: () {
 		slot := bucket_array_find_pointer(*openDocuments.documents, focusedPanel.document.locator);
 		if slot {
 			if slot.state == .INVALID {
-				build_ui_loading_panel(*focusedPanel);
+				build_ui_loading_panel(root, *focusedPanel);
 			}
 			else {
-				build_ui_panel(*focusedPanel);
+				build_ui_panel(root, *focusedPanel);
 			}
 		}
 		else {
-			build_ui_empty_panel(*focusedPanel);
+			build_ui_empty_panel(root, *focusedPanel);
 		}
 	}
 	else {
-		build_ui_empty_panel(*focusedPanel);
+		build_ui_empty_panel(root, *focusedPanel);
 	}
 
 	if end_ui(deltaTime) then requestRedraw = true;
@@ -394,224 +389,177 @@ build_ui :: () {
 	render_frame(style.backgroundDark);
 }
 
-build_ui_empty_panel :: (panel: *Panel) {
-	panelBox := box(ui_key("panel1"), .{
-		flags=.DRAW_BACKGROUND,
-		layout=.{
-			childLayoutAxis = .Y,
-			width=fixed(panel.layoutRect.w),
-			height=fixed(panel.layoutRect.h),
-			childAlignment=.CENTER
-		},
-	});
-	push_parent(panelBox); defer pop_parent();
+build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
+	panelBox := box(parent, ui_key("panel1"));
+	add_flags(panelBox, .DRAW_BACKGROUND);
+	set_child_layout_axis(panelBox, .Y);
+	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
+	set_child_alignment(panelBox, .CENTER);
 
-	header := box(ui_key_nil, .{
-		flags=.DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM,
-		layout=.{ 
-			childLayoutAxis = .X,
-			width=grow(),
-			height=fit(),
-			padding= padding_all(em(0.3))
-		},
-		palette=.{ background=style.backgroundLight },
-		borderThickness=1.0
-	});
+	header := box(panelBox);
+	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+	set_size(header, grow(), fit());
+	set_padding(header, em(0.3));
+	set_background_color(header, style.backgroundLight);
+	set_border_thickness(header, 1.0);
 	{
-		// TODO: parent will now be a parameter of every get_node call
-		push_parent(header); defer pop_parent();
-		box(ui_key("DUMMY"), .{
-			flags=0,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		// empty box to give the header the height of a line of text
+		dummy := box(header);
+		set_size(dummy, text_content(), text_content());
 	}
-	
 
-	build_ui_panel_dialogs(panel);
+	build_ui_panel_dialogs(panelBox, panel);
 
-	spacer(.Y, fixed(em(5.0)));
+	spacer(panelBox, .Y, fixed(em(5.0)));
 
-	// Box should change to get_node("key") or get_node() (for no key)
-	// properties should all be set with setters, basically everything in the box declaration
-	// should be getters
- 	box(ui_key("No Document Loaded"), .{
-		flags=.DRAW_TEXT,
-		layout=.{ width=text_content(), height=text_content() },
-	});
+	noDocLabel := box(panelBox);
+	add_flags(noDocLabel, .DRAW_TEXT);
+	set_text(noDocLabel, "No Document Loaded");
+	set_size(noDocLabel, text_content(), text_content());
 
-	spacer(.Y, fixed(em(3.0)));
+	spacer(panelBox, .Y, fixed(em(3.0)));
 
-	box(ui_key("Open file with '<space>O'"), .{
-		flags=.DRAW_TEXT,
-		layout=.{ width=text_content(), height=text_content() },
-	});
-	box(ui_key("Open command palette with ':'"), .{
-		flags=.DRAW_TEXT,
-		layout=.{ width=text_content(), height=text_content() },
-	});
+	openFileHint := box(panelBox);
+	add_flags(openFileHint, .DRAW_TEXT);
+	set_text(openFileHint, "Open file with '<space>O'");
+	set_size(openFileHint, text_content(), text_content());
+
+	paletteHint := box(panelBox);
+	add_flags(paletteHint, .DRAW_TEXT);
+	set_text(paletteHint, "Open command palette with ':'");
+	set_size(paletteHint, text_content(), text_content());
 }
 
-build_ui_loading_panel :: (panel: *Panel) {
-	panelBox := box(ui_key("panel1"), .{
-		flags=.DRAW_BACKGROUND,
-		layout=.{
-			childLayoutAxis = .Y,
-			width=fixed(panel.layoutRect.w),
-			height=fixed(panel.layoutRect.h),
-			childAlignment=.CENTER
-		},
-	});
-	push_parent(panelBox); defer pop_parent();
+build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
+	panelBox := box(parent, ui_key("panel1"));
+	add_flags(panelBox, .DRAW_BACKGROUND);
+	set_child_layout_axis(panelBox, .Y);
+	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
+	set_child_alignment(panelBox, .CENTER);
 
-	header := box(ui_key_nil, .{
-		flags=.DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM,
-		layout=.{ 
-			childLayoutAxis = .X,
-			width=grow(),
-			height=fit(),
-			padding= padding_all(em(0.3))
-		},
-		palette=.{ background=style.backgroundLight },
-		borderThickness=1.0
-	});
+	header := box(panelBox);
+	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+	set_size(header, grow(), fit());
+	set_padding(header, em(0.3));
+	set_background_color(header, style.backgroundLight);
+	set_border_thickness(header, 1.0);
 	{
-		push_parent(header); defer pop_parent();
-		box(ui_key("DUMMY"), .{
-			flags=0,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		// empty box to give the header the height of a line of text
+		dummy := box(header);
+		set_size(dummy, text_content(), text_content());
 	}
 
-	spacer(.Y, fixed(em(5.0)));
-	
+	spacer(panelBox, .Y, fixed(em(5.0)));
+
 	shouldShowSpinner :=  asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33;
 	if shouldShowSpinner {
-		loadingBox := box(ui_key_nil, .{
-			layout=.{ 
-				childLayoutAxis = .X,
-				width=fit(),
-				height=fit(),
-				padding= padding_all(em(0.3))
-			},
-		});
+		loadingBox := box(panelBox);
+		set_size(loadingBox, fit(), fit());
+		set_padding(loadingBox, em(0.3));
 		{
-			push_parent(loadingBox); defer pop_parent();
-			box(ui_key("Loading % ...", document_get_path(panel.document)), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-			});
+			loadingLabel := box(loadingBox);
+			add_flags(loadingLabel, .DRAW_TEXT);
+			set_text(loadingLabel, tprint("Loading % ...", document_get_path(panel.document)));
+			set_size(loadingLabel, text_content(), text_content());
 
-			spinner := box(ui_key_nil, .{
-				layout=.{ width=text_content(), height=text_content() },
-				fontSize=em(1.0),
-				font=fontIcons
-			});
-			spinner.customDrawFunction = custom_draw_spinner;
-			spinner.customDrawUdata = cast(*void) panel;
+			spinner := box(loadingBox);
+			set_size(spinner, text_content(), text_content());
+			set_font_size(spinner, em(1.0));
+			set_font(spinner, fontIcons);
+			set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
 		}
 	}
 }
 
-build_ui_panel :: (panel: *Panel) {
-	panelBox := box(ui_key("panel1"), .{
-		flags=.DRAW_BACKGROUND,
-		layout=.{childLayoutAxis = .Y, width=fixed(panel.layoutRect.w), height=fixed(panel.layoutRect.h)},
-	});
-	push_parent(panelBox); defer pop_parent();
+build_ui_panel :: (parent: *UIBox, panel: *Panel) {
+	panelBox := box(parent, ui_key("panel1"));
+	add_flags(panelBox, .DRAW_BACKGROUND);
+	set_child_layout_axis(panelBox, .Y);
+	set_size(panelBox, fixed(panel.layoutRect.w), fixed(panel.layoutRect.h));
 
-	header := box(ui_key_nil, .{
-		flags=.DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM,
-		layout=.{ 
-			childLayoutAxis = .X,
-			width=grow(),
-			height=fit(),
-			padding= padding_all(em(0.3)),
-			childAlignment=.CENTER
-		},
-		palette=.{ background=style.backgroundLight },
-		borderThickness=1.0
-	});
+	header := box(panelBox);
+	add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
+	set_size(header, grow(), fit());
+	set_padding(header, em(0.3));
+	set_child_alignment(header, .CENTER);
+	set_background_color(header, style.backgroundLight);
+	set_border_thickness(header, 1.0);
 	{
-		push_parent(header); defer pop_parent();
-
 		// mode
 		modeText := "NORMAL";
 		if editorMode == .INSERT {
 			modeText = "INSERT";
 		}
-		box(ui_key(modeText), .{
-			flags=.DRAW_BACKGROUND | .DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-			palette=.{ background=style.backgroundDark },
-		});
+		modeLabel := box(header);
+		add_flags(modeLabel, .DRAW_BACKGROUND | .DRAW_TEXT);
+		set_text(modeLabel, modeText);
+		set_size(modeLabel, text_content(), text_content());
+		set_background_color(modeLabel, style.backgroundDark);
 
-		spacer(.X, fixed(em(0.5)));
+		spacer(header, .X, fixed(em(0.5)));
 
-		// filename
-		fileLabel := box(ui_key(path_filename(document_get_path(panel.document))), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		// filename (keyed as it's the anchor for the tooltip)
+		fileLabel := box(header, ui_key("header_filename"));
+		add_flags(fileLabel, .DRAW_TEXT);
+		set_text(fileLabel, path_filename(document_get_path(panel.document)));
+		set_size(fileLabel, text_content(), text_content());
 		if signal_from_box(fileLabel).hovering {
-			tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
-			box(ui_key(document_get_path(panel.document)), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-			});
-			tooltip_end();
+			tooltip := tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
+			pathLabel := box(tooltip);
+			add_flags(pathLabel, .DRAW_TEXT);
+			set_text(pathLabel, document_get_path(panel.document));
+			set_size(pathLabel, text_content(), text_content());
 		}
 
 		// lock icon @todo: implement for real
 		if document_is_read_only(panel.document) {
-			box(ui_key(style.iconLock), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-				fontSize=em(0.7),
-				font=fontIcons
-			});
+			lockIcon := box(header);
+			add_flags(lockIcon, .DRAW_TEXT);
+			set_text(lockIcon, style.iconLock);
+			set_size(lockIcon, text_content(), text_content());
+			set_font_size(lockIcon, em(0.7));
+			set_font(lockIcon, fontIcons);
 		}
 
 		// icon for file save status
 		if document_is_unsaved(panel.document) {
-			box(ui_key(style.iconCircle), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-				fontSize=em(0.7),
-				font=fontIcons
-			});
+			unsavedIcon := box(header);
+			add_flags(unsavedIcon, .DRAW_TEXT);
+			set_text(unsavedIcon, style.iconCircle);
+			set_size(unsavedIcon, text_content(), text_content());
+			set_font_size(unsavedIcon, em(0.7));
+			set_font(unsavedIcon, fontIcons);
 		}
 
-		spacer(.X, grow());
+		spacer(header, .X, grow());
 
 		// pending keys
 		pendingKeys := string.{keyMap.pendingKeyString.count, keyMap.pendingKeyString.data};
-		box(ui_key(pendingKeys), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		pendingKeysLabel := box(header);
+		add_flags(pendingKeysLabel, .DRAW_TEXT);
+		set_text(pendingKeysLabel, pendingKeys);
+		set_size(pendingKeysLabel, text_content(), text_content());
 
 		if project_is_loading() || (asyncWorker.pendingTasks != 0 && to_milliseconds(current_time_monotonic() - asyncWorker.waitStartTime) > 33) {
-			spacer(.X, fixed(em(2.0)));
+			spacer(header, .X, fixed(em(2.0)));
 
-			spinner := box(ui_key_nil, .{
-				layout=.{ width=text_content(), height=text_content() },
-				fontSize=em(1.0),
-				font=fontIcons
-			});
-			spinner.customDrawFunction = custom_draw_spinner;
-			spinner.customDrawUdata = cast(*void) panel;
+			spinner := box(header);
+			set_size(spinner, text_content(), text_content());
+			set_font_size(spinner, em(1.0));
+			set_font(spinner, fontIcons);
+			set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
 		}
 
-		spacer(.X, fixed(em(2.0)));
+		spacer(header, .X, fixed(em(2.0)));
 
 		// location
 		cursorCoordinate := get_coordinate_from_offset(panel.document, panel_get_primary_cursor(panel).head);
-		box(ui_key("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		locationLabel := box(header);
+		add_flags(locationLabel, .DRAW_TEXT);
+		set_text(locationLabel, tprint("Ln: % Col: % Byte: %", cursorCoordinate.line+1, cursorCoordinate.col, panel_get_primary_cursor(panel).head));
+		set_size(locationLabel, text_content(), text_content());
 
-		spacer(.X, fixed(em(2.0)));
+		spacer(header, .X, fixed(em(2.0)));
 
 		// line endings
 		lineEndingText := "[Mixed]";
@@ -625,100 +573,81 @@ build_ui_panel :: (panel: *Panel) {
 		else if lineEndings == .MIXED_MAJORITY_LF {
 			lineEndingText = "[Mixed]";
 		}
-		box(ui_key(lineEndingText), .{
-			flags=.DRAW_TEXT,
-			layout=.{ width=text_content(), height=text_content() },
-		});
+		lineEndingLabel := box(header);
+		add_flags(lineEndingLabel, .DRAW_TEXT);
+		set_text(lineEndingLabel, lineEndingText);
+		set_size(lineEndingLabel, text_content(), text_content());
 
-		spacer(.X, fixed(em(2.0)));
+		spacer(header, .X, fixed(em(2.0)));
 
 		// file type
 		language := document_get_language(panel.document);
-		if language {
-			box(ui_key(language.name), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-			});
-		}
-		else {
-			box(ui_key(path_extension(document_get_path(panel.document))), .{
-				flags=.DRAW_TEXT,
-				layout=.{ width=text_content(), height=text_content() },
-			});
-		}
+		fileTypeLabel := box(header);
+		add_flags(fileTypeLabel, .DRAW_TEXT);
+		set_text(fileTypeLabel, ifx language then language.name else path_extension(document_get_path(panel.document)));
+		set_size(fileTypeLabel, text_content(), text_content());
 
-		spacer(.X, fixed(em(2.0)));
+		spacer(header, .X, fixed(em(2.0)));
 
 		// panel options button
 		panelOptsKey := ui_key("panelopts");
-		if is_context_menu_open(panelOptsKey) { 
-			button := box(ui_key(style.iconVerticalEllipsis), .{
-				flags=.DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE,
-				layout=.{ width=fixed(em(1.5)), height=text_content() },
-				palette=.{background=style.activeHighlight},
-				font=fontIcons,
-				textAlignment=.CENTER,
-				cornerRadius=corner_rad_all(em(0.3))
-			});
-			if signal_from_box(button).pressed {
-				context_menu_close();
-			}
+		panelOptsButtonKey := ui_key("panelopts_button");
+		menuOpen := is_context_menu_open(panelOptsKey);
+		button := box(header, panelOptsButtonKey);
+		add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
+		set_text(button, style.iconVerticalEllipsis);
+		set_size(button, fixed(em(1.5)), text_content());
+		set_font(button, fontIcons);
+		set_text_alignment(button, .CENTER);
+		set_corner_radius(button, em(0.3));
+		if menuOpen {
+			set_background_color(button, style.activeHighlight);
 		}
 		else {
-			button := box(ui_key(style.iconVerticalEllipsis), .{
-				flags=.DRAW_BACKGROUND | .DRAW_TEXT | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE,
-				layout=.{ width=fixed(em(1.5)), height=text_content() },
-				font=fontIcons,
-				textAlignment=.CENTER,
-				cornerRadius=corner_rad_all(em(0.3))
-			});
-			if signal_from_box(button).pressed {
+			add_flags(button, .DRAW_HOT_EFFECTS);
+		}
+		if signal_from_box(button).pressed {
+			if menuOpen {
+				context_menu_close();
+			}
+			else {
 				context_menu_open(panelOptsKey);
 			}
 		}
 
-		if context_menu_begin(key=panelOptsKey,
+		menu := context_menu_begin(key=panelOptsKey,
 								width=fixed(em(12.0)),
-								anchorBoxKey=ui_key(style.iconVerticalEllipsis),
-								anchorOffset=.{0.0, em(1.9)}) {
-
-			if context_menu_item("Line Numbers", style.iconNumList).pressed {
+								anchorBoxKey=panelOptsButtonKey,
+								anchorOffset=.{0.0, em(1.9)});
+		if menu {
+			if context_menu_item(menu, "Line Numbers", style.iconNumList).pressed {
 				lineNumbers = !lineNumbers;
 			}
-			context_menu_item("View Line Endings", "");
-			context_menu_item("Line Wrapping", style.iconAlignLeft);
-			context_menu_end();
+			context_menu_item(menu, "View Line Endings", "");
+			context_menu_item(menu, "Line Wrapping", style.iconAlignLeft);
 		}
 	}
 
-	build_ui_panel_dialogs(panel);
+	build_ui_panel_dialogs(panelBox, panel);
 
 	// Draw the main code screen
-	codeContainerOuter := box(ui_key_nil, .{
-		flags=.DRAW_BACKGROUND,
-		layout=.{childLayoutAxis = .Y, width=grow(), height=grow()},
-	});
+	codeContainerOuter := box(panelBox);
+	add_flags(codeContainerOuter, .DRAW_BACKGROUND);
+	set_child_layout_axis(codeContainerOuter, .Y);
+	set_size(codeContainerOuter, grow(), grow());
 	{
-		push_parent(codeContainerOuter); defer pop_parent();
-
-		
 		longestLinePixelWidth:= 0.0;
 
-		codeContainerInner := box(ui_key_nil, .{
-			flags=.DRAW_BACKGROUND,
-			layout=.{childLayoutAxis = .X, width=grow(), height=grow()},
-		});
+		codeContainerInner := box(codeContainerOuter);
+		add_flags(codeContainerInner, .DRAW_BACKGROUND);
+		set_size(codeContainerInner, grow(), grow());
+
+		codeBox := box(codeContainerInner, ui_key("code"));
+		add_flags(codeBox, .CLIP_CONTENTS | .MOUSE_CLICKABLE);
+		set_size(codeBox, grow(), grow());
+		set_font(codeBox, fontCode);
+		set_custom_draw(codeBox, custom_draw_code, cast(*void) panel);
 		{
-			push_parent(codeContainerInner); defer pop_parent();
-
-			codeBox := box(ui_key("code"), .{
-				flags=.CLIP_CONTENTS | .MOUSE_CLICKABLE,
-				layout=.{width=grow(), height=grow()},
-				font=fontCode
-			});
-			codeBox.customDrawFunction = custom_draw_code;
-			codeBox.customDrawUdata = cast(*void) panel;
-
 			numDocumentLines := get_number_of_lines(panel.document);
 			metrics := get_font_metrics(codeBox.font, xx codeBox.fontSize);
 			codeBox.viewBounds.y = cast(float, -(metrics.lineSpacing * numDocumentLines) + metrics.lineSpacing * 5);
@@ -752,7 +681,7 @@ build_ui_panel :: (panel: *Panel) {
 			// mouse cursor control
 			set_cursor_to_mouse_location :: (doc: DocumentHandle, cursor: *Cursor, numDocumentLines: s64, box: *UIBox) {
 				gutterWidth := generate_text_run(tprint(" % ", numDocumentLines), xx box.fontSize, box.font,,temp).width;
-		
+
 				x, y, success := get_mouse_pointer_position(window, false);
 				mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x - gutterWidth);
 				mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
@@ -778,13 +707,13 @@ build_ui_panel :: (panel: *Panel) {
 					}
 				}
 			}
-		
+
 			if signal.pressed {
 				keep_primary_selection(panel, panel_get_primary_cursor(panel));
 				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
 				panel_get_primary_cursor(panel).anchor = panel_get_primary_cursor(panel).head;
 			}
-			
+
 			if signal.doubleClicked {
 				keep_primary_selection(panel, panel_get_primary_cursor(panel));
 				set_cursor_to_mouse_location (panel.document, panel_get_primary_cursor(panel), numDocumentLines, codeBox);
@@ -806,58 +735,47 @@ build_ui_panel :: (panel: *Panel) {
 				}
 			}
 
-			scrollData:= scroll_bar(ui_key("codeScrollVertical"),
-									.Y,
-									codeBox.viewOffset.y/codeBox.viewBounds.y,
-									cast(float, numDocumentLines),
-									codeBox.rect.h/metrics.lineSpacing,
-									ui_key("code"));
+			scroll_bar(codeContainerInner,
+						ui_key("codeScrollVertical"),
+						.Y,
+						codeBox.viewOffset.y/codeBox.viewBounds.y,
+						cast(float, numDocumentLines),
+						codeBox.rect.h/metrics.lineSpacing,
+						codeBox.key);
 		}
 
-		success, codeBox:= find_box(ui_key("code"));
-		scrollData:= scroll_bar(ui_key("codeScrollHorizontal"),
-								.X,
-								codeBox.viewOffset.x/codeBox.viewBounds.x,
-								longestLinePixelWidth,
-								codeBox.rect.w,
-								ui_key("code"));
-
-		
+		scroll_bar(codeContainerOuter,
+					ui_key("codeScrollHorizontal"),
+					.X,
+					codeBox.viewOffset.x/codeBox.viewBounds.x,
+					longestLinePixelWidth,
+					codeBox.rect.w,
+					codeBox.key);
 	}
 
 	// Draw the search/select dialog
 	if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
-		searchContainer := box(ui_key_nil, .{
-			flags=.DRAW_BACKGROUND | .DRAW_SIDE_TOP,
-			layout=.{ 
-				childLayoutAxis = .X,
-				width=grow(),
-				height=fit(),
-				padding= padding_all(em(0.4))
-			},
-			palette=.{ background=style.backgroundLight },
-			borderThickness=1.0
-		});
+		searchContainer := box(panelBox);
+		add_flags(searchContainer, .DRAW_BACKGROUND | .DRAW_SIDE_TOP);
+		set_size(searchContainer, grow(), fit());
+		set_padding(searchContainer, em(0.4));
+		set_background_color(searchContainer, style.backgroundLight);
+		set_border_thickness(searchContainer, 1.0);
 		{
-			push_parent(searchContainer); defer pop_parent();
-
 			// regex toggle, highlighted while enabled
-			regexFlags := UIBoxFlags.DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE;
-			regexPalette: UIPalette;
+			regexButton := box(searchContainer, ui_key("search_regex_toggle"));
+			add_flags(regexButton, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
+			set_text(regexButton, ".*");
+			set_size(regexButton, fixed(em(2.0)), grow());
+			set_font(regexButton, fontCode);
+			set_text_alignment(regexButton, .CENTER);
+			set_corner_radius(regexButton, em(0.2));
 			if panel.searchRegexEnabled {
-				regexPalette.background = style.activeHighlight;
+				set_background_color(regexButton, style.activeHighlight);
 			}
 			else {
-				regexFlags |= .DRAW_HOT_EFFECTS;
+				add_flags(regexButton, .DRAW_HOT_EFFECTS);
 			}
-			regexButton := box(ui_key(".*##search_regex_toggle"), .{
-				flags=regexFlags,
-				layout=.{ width=fixed(em(2.0)), height=grow() },
-				palette=regexPalette,
-				font=fontCode,
-				textAlignment=.CENTER,
-				cornerRadius=corner_rad_all(em(0.2))
-			});
 			if signal_from_box(regexButton).pressed {
 				panel.searchRegexEnabled = !panel.searchRegexEnabled;
 				// rerun the search so the results reflect the new mode
@@ -866,25 +784,22 @@ build_ui_panel :: (panel: *Panel) {
 				}
 			}
 
-			spacer(.X, fixed(em(0.2)));
+			spacer(searchContainer, .X, fixed(em(0.2)));
 
 			// case sensitive toggle, highlighted while enabled
-			caseFlags := UIBoxFlags.DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE;
-			casePalette: UIPalette;
+			caseButton := box(searchContainer, ui_key("search_case_toggle"));
+			add_flags(caseButton, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
+			set_text(caseButton, "Aa");
+			set_size(caseButton, fixed(em(2.0)), grow());
+			set_font(caseButton, fontCode);
+			set_text_alignment(caseButton, .CENTER);
+			set_corner_radius(caseButton, em(0.2));
 			if panel.searchCaseSensitive {
-				casePalette.background = style.activeHighlight;
+				set_background_color(caseButton, style.activeHighlight);
 			}
 			else {
-				caseFlags |= .DRAW_HOT_EFFECTS;
+				add_flags(caseButton, .DRAW_HOT_EFFECTS);
 			}
-			caseButton := box(ui_key("Aa##search_case_toggle"), .{
-				flags=caseFlags,
-				layout=.{ width=fixed(em(2.0)), height=grow() },
-				palette=casePalette,
-				font=fontCode,
-				textAlignment=.CENTER,
-				cornerRadius=corner_rad_all(em(0.2))
-			});
 			if signal_from_box(caseButton).pressed {
 				panel.searchCaseSensitive = !panel.searchCaseSensitive;
 				// rerun the search so the results reflect the new mode
@@ -893,76 +808,58 @@ build_ui_panel :: (panel: *Panel) {
 				}
 			}
 
-			spacer(.X, fixed(em(0.4)));
+			spacer(searchContainer, .X, fixed(em(0.4)));
 
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
-			inputBox := box(ui_key("search_input"), .{
-				flags=.DRAW_BACKGROUND,
-				layout=.{
-					width=grow(),
-					height=fixed(fontMetrics.lineSpacing+em(0.8)),
-				},
-				cornerRadius=corner_rad_all(em(0.2)),
-				palette=.{ background=style.backgroundLighter },
-				font=fontCode,
-				textPadding=em(0.5)
-			});
-			inputBox.customDrawFunction = custom_draw_input_field;
-			inputBox.customDrawUdata = cast(*void, *panel.searchInput);
+			inputBox := box(searchContainer, ui_key("search_input"));
+			add_flags(inputBox, .DRAW_BACKGROUND);
+			set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
+			set_corner_radius(inputBox, em(0.2));
+			set_background_color(inputBox, style.backgroundLighter);
+			set_font(inputBox, fontCode);
+			set_text_padding(inputBox, em(0.5));
+			set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
 
 			// @todo: buttons for regex mode, caps, whole word search etc
 		}
 	}
 }
 
-build_ui_panel_dialogs :: (panel: *Panel) {
+build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 	if editorMode == .COMMAND_PALETTE {
 		paletteWidth := panel.layoutRect.w * 0.5;
 		if panel.commandPalette.currentHandler {
 			paletteWidth = panel.layoutRect.w * panel.commandPalette.currentHandler.rowWidthPercent;
 		}
-		
-		commandPaletteContainer := box(ui_key_nil, .{
-			flags=.DRAW_BACKGROUND,
-			layout=.{ 
-				childLayoutAxis = .Y,
-				width=fixed(paletteWidth),
-				height=fit(),
-				padding= padding_all(em(0.4)),
-			},
-			palette=.{ background=style.backgroundLight },
-			cornerRadius=corner_rad_all(em(0.5)),
-			fixedX=panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2,
-			fixedY=em(3.0)
-		});
-		{
-			push_parent(commandPaletteContainer); defer pop_parent();
 
+		commandPaletteContainer := box(parent);
+		add_flags(commandPaletteContainer, .DRAW_BACKGROUND);
+		set_child_layout_axis(commandPaletteContainer, .Y);
+		set_size(commandPaletteContainer, fixed(paletteWidth), fit());
+		set_padding(commandPaletteContainer, em(0.4));
+		set_background_color(commandPaletteContainer, style.backgroundLight);
+		set_corner_radius(commandPaletteContainer, em(0.5));
+		set_fixed_x(commandPaletteContainer, panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2);
+		set_fixed_y(commandPaletteContainer, em(3.0));
+		{
 			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
-			inputBox := box(ui_key_nil, .{
-				flags=.DRAW_BACKGROUND,
-				layout=.{
-					width=grow(),
-					height=fixed(fontMetrics.lineSpacing+em(0.8)),
-					childLayoutAxis=.X,
-					padding=padding_all(em(0.4)),
-					childGap=em(0.2)
-				},
-				cornerRadius=corner_rad_all(em(0.2)),
-				palette=.{ background=style.backgroundLighter },
-				textPadding=em(0.5)
-			});
-			
+			inputBox := box(commandPaletteContainer);
+			add_flags(inputBox, .DRAW_BACKGROUND);
+			set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
+			set_padding(inputBox, em(0.4));
+			set_child_gap(inputBox, em(0.2));
+			set_corner_radius(inputBox, em(0.2));
+			set_background_color(inputBox, style.backgroundLighter);
+			set_text_padding(inputBox, em(0.5));
+
 			// Draw everything inside the input field
 			{
-				push_parent(inputBox); defer pop_parent();
-				
 				if panel.commandPalette.pendingCommandMode {
-					pendingCommandLabel := box(ui_key("%", panel.commandPalette.pendingCommand.cmd.prettyName), .{
-						flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-						layout=.{ width=text_content(), height=text_content() },
-					});
-					
+					pendingCommandLabel := box(inputBox);
+					add_flags(pendingCommandLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
+					set_text(pendingCommandLabel, panel.commandPalette.pendingCommand.cmd.prettyName);
+					set_size(pendingCommandLabel, text_content(), text_content());
+
 					// only arguments before currentArgIndex are filled in, later slots are null or stale
 					pendingCommand := *panel.commandPalette.pendingCommand;
 					for 0..panel.commandPalette.currentArgIndex-1 {
@@ -978,41 +875,34 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 						else {
 							valueText = tprint("%", Any.{argType, argValue});
 						}
-						box(ui_key("%##pendingArg%", valueText, it), .{
-							flags=.DRAW_TEXT | .DRAW_BACKGROUND,
-							layout=.{ width=text_content(), height=text_content() },
-						});
+						argLabel := box(inputBox);
+						add_flags(argLabel, .DRAW_TEXT | .DRAW_BACKGROUND);
+						set_text(argLabel, valueText);
+						set_size(argLabel, text_content(), text_content());
 					}
 				}
-				
+
 				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
 					currentArg := panel.commandPalette.currentArgIndex;
 					// TODO: capitalize and undo camelcase on this name
-					box(ui_key("%", panel.commandPalette.pendingCommand.cmd.args[currentArg].name), .{
-						flags=.DRAW_TEXT,
-						layout=.{ width=text_content(), height=text_content() },
-					});
+					argNameLabel := box(inputBox);
+					add_flags(argNameLabel, .DRAW_TEXT);
+					set_text(argNameLabel, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
+					set_size(argNameLabel, text_content(), text_content());
 				}
 				else {
-					inputArea := box(ui_key("commandPaletteInput"), .{
-						flags=0,
-						layout=.{
-							width=grow(),
-							height=fixed(xx fontMetrics.lineSpacing),
-							childLayoutAxis=.X
-						},
-					});
-					
-					inputArea.customDrawFunction = custom_draw_input_field;
-					inputArea.customDrawUdata = cast(*void, *panel.commandPalette.input);
+					inputArea := box(inputBox, ui_key("commandPaletteInput"));
+					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
+					set_custom_draw(inputArea, custom_draw_input_field, cast(*void, *panel.commandPalette.input));
 				}
 			}
-			
+
 			// Draw the list of suggestions, that are currently relevant
 			argHandler := panel.commandPalette.currentHandler;
 			if argHandler && argHandler.populate {
 				elementHeight := fontMetrics.characterHeight*argHandler.rowHeightLines;
-				rangeStart, rangeEnd := scroll_list_begin(ui_key("suggestionList"), ui_key("suggestionListScroller"),
+				listBox, rangeStart, rangeEnd := scroll_list_begin(commandPaletteContainer,
+															ui_key("suggestionList"), ui_key("suggestionListScroller"),
 															panel.layoutRect.h/2,
 															elementHeight,
 															panel.commandPalette.numToDisplay,
@@ -1020,63 +910,53 @@ build_ui_panel_dialogs :: (panel: *Panel) {
 															panel.commandPalette.selectionChange);
 
 				if panel.commandPalette.selectionChange then panel.commandPalette.selectionChange = false;
-				
+
 				for rangeStart..rangeEnd {
 					suggestion := panel.commandPalette.suggestionList[it];
 					selected := it == panel.commandPalette.selection;
-					
+
 					if suggestion.sortKey == 0 continue;
-					
-					entryBox := box(ui_key("suggestion##%", it), .{
-						flags=.DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND,
-						layout=.{ width=grow(), height=fixed(elementHeight), padding=padding_all(em(argHandler.suggestionPadding)) },
-						palette=.{ background=ifx selected style.backgroundLighter else style.backgroundLight },
-					});
+
+					entryBox := box(listBox, ui_key("suggestion##%", it));
+					add_flags(entryBox, .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND);
+					set_size(entryBox, grow(), fixed(elementHeight));
+					set_padding(entryBox, em(argHandler.suggestionPadding));
+					set_background_color(entryBox, ifx selected style.backgroundLighter else style.backgroundLight);
 					signal := signal_from_box(entryBox);
 					if signal.pressed {
 						panel.commandPalette.selection = xx it;
 						queue_command(find_command_by_name("command_palette_execute_command"), panel);
 					}
-					{
-						push_parent(entryBox); defer pop_parent();
-						if argHandler.drawSuggestion {
-							argHandler.drawSuggestion(*panel.commandPalette, *suggestion, it, selected, signal);
-						}
-						else {
-							default_draw_suggestion(*panel.commandPalette, *suggestion, it, selected, signal);
-						}
+					if argHandler.drawSuggestion {
+						argHandler.drawSuggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
+					}
+					else {
+						default_draw_suggestion(entryBox, *panel.commandPalette, *suggestion, it, selected, signal);
 					}
 				}
-				
-				scroll_list_end(); 
+
+				scroll_list_end(listBox);
 			}
 
 			// Draw the control hints box at the bottom
-			hintsBox := box(ui_key("hintsBox"), .{
-				flags=.DRAW_SIDE_TOP,
-				layout=.{ 
-					childLayoutAxis = .X,
-					width=grow(),
-					height=fit(),
-				},
-				borderThickness=1.0
-			});
+			hintsBox := box(commandPaletteContainer, ui_key("hintsBox"));
+			add_flags(hintsBox, .DRAW_SIDE_TOP);
+			set_size(hintsBox, grow(), fit());
+			set_border_thickness(hintsBox, 1.0);
 			{
-				push_parent(hintsBox); defer pop_parent();
-
-				spacer(.X, grow());
+				spacer(hintsBox, .X, grow());
 
 				textCol := uiState.defaultPalette.text;
 				textCol.w = 0.6;
-				box(ui_key("<up><down> to navigate <enter> to use <escape> to dismiss"), .{
-					flags=.DRAW_TEXT,
-					layout=.{ width=text_content(), height=text_content() },
-					textAlignment=.CENTER,
-					textPadding=em(0.5),
-					palette=.{text = textCol}
-				});
+				hintsLabel := box(hintsBox);
+				add_flags(hintsLabel, .DRAW_TEXT);
+				set_text(hintsLabel, "<up><down> to navigate <enter> to use <escape> to dismiss");
+				set_size(hintsLabel, text_content(), text_content());
+				set_text_alignment(hintsLabel, .CENTER);
+				set_text_padding(hintsLabel, em(0.5));
+				set_text_color(hintsLabel, textCol);
 
-				spacer(.X, grow());
+				spacer(hintsBox, .X, grow());
 			}
 		}
 	}
