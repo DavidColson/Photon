@@ -427,7 +427,7 @@ command_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion
 	if mappingStr {
 		mappingLabel := text(parent, mappingStr);
 		add_flags(mappingLabel, .DRAW_BACKGROUND);
-		set_background_color(mappingLabel, style.backgroundMid);
+		set_background_color(mappingLabel, editorColours.boxBackground);
 		set_text_padding(mappingLabel, em(0.3));
 	}
 }
@@ -921,7 +921,7 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 				matchEndX - matchStartX,
 				xx metrics.lineSpacing
 			},
-			color = style.textSelection2,
+			color = editorColours.searchMatch,
 			cornerRadii = box.cornerRadius,
 		});
 		
@@ -982,11 +982,11 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 				}
 			}
 			else {
-				draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+				draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 			}
 		}
 		else {
-			draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+			draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 		}
 	}
 	
@@ -1010,10 +1010,8 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 			}
 		}
 		
-		textCol := uiState.defaultPalette.text;
-		textCol.w = 0.6;
 		filePathLabel := text(fileNameBox, filePath);
-		set_text_color(filePathLabel, textCol);
+		set_text_color(filePathLabel, editorColours.textDim);
 		set_font_size(filePathLabel, em(0.8));
 	}
 
@@ -1021,14 +1019,14 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 	set_size(lineNumLabel, fixed(em(2.0)), grow());
 	set_font(lineNumLabel, fontCode);
 	set_text_alignment(lineNumLabel, .RIGHT);
-	set_background_color(lineNumLabel, ifx selected then style.backgroundLighter else style.backgroundMid);
+	set_background_color(lineNumLabel, ifx selected then editorColours.selectedBackground else editorColours.boxBackground);
 
-	color := style.backgroundMid;
+	color := editorColours.boxBackground;
 	if selected {
-		color = style.backgroundLighter;
+		color = editorColours.selectedBackground;
 	}
 	if signal.hovering {
-		color = style.hotHighlight;
+		color = editorColours.boxHot;
 	}
 	// text is drawn by the custom draw function so it can be syntax highlighted
 	searchResultLabel := box(parent);
@@ -1271,8 +1269,8 @@ path_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion: *
 	}
 
 	isDirectory := entry.kind != .FILE;
-	iconLabel := text(parent, ifx isDirectory then style.iconFolder else style.iconFile);
-	set_font(iconLabel, fontIcons);
+	iconLabel := text(parent, ifx isDirectory then Icons.folder else Icons.file);
+	set_font(iconLabel, uiState.iconFont);
 
 	highlighted_text(parent, suggestion.name, suggestion.fuzzyMatches);
 }

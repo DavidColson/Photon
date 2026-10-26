@@ -17,8 +17,24 @@ UIBox :: struct {
 		textHighlights: []TextHighlight;
 		textPadding: float;
 		textAlignment: UIAlignment;
-		layout: UILayoutData;
-		palette: UIPalette;
+		layout: struct {
+			childLayoutAxis: UIAxis;
+			padding: Vector4; // left, right, top, bottom
+			childGap: float;
+			childAlignment: UIAlignment;
+			width: UISize;
+			height: UISize;
+			#overlay (width) size: [2]UISize = ---;
+		};
+		colours: struct {
+			background: Vector4;
+			hot: Vector4;
+			active: Vector4;
+			text: Vector4;
+			textHighlight: Vector4;
+			border: Vector4;
+			#overlay (background) colors: [6]Vector4 = ---;
+		};
 		cornerRadius: Vector4;
 		borderThickness: float;
 		fontSize: float;
@@ -48,14 +64,57 @@ UIBox :: struct {
 	lastClickTime: float64;
 }
 
-UILayoutData :: struct {
-	childLayoutAxis: UIAxis;
-	padding: Vector4; // left, right, top, bottom
-	childGap: float;
-	childAlignment: UIAlignment;
-	width: UISize;
-	height: UISize;
-    #overlay (width) size: [2]UISize = ---;
+UIColours :: struct {
+	// Base box colours, applied to every box in box()
+	text := #run hex_to_color_vec4("C3C7D0");
+	textDim := #run hex_to_color_vec4("C3C7D099"); // hints and secondary labels
+	textHighlight := #run hex_to_color_vec4("7e90bd");
+	boxBackground := #run hex_to_color_vec4("282C34");
+	boxHot := #run hex_to_color_vec4("636f85");
+	boxActive := #run hex_to_color_vec4("7e90bd");
+	boxBorder := #run hex_to_color_vec4("5C6476");
+
+	// Widget colours
+	popupBackground := #run hex_to_color_vec4("3B414C"); // tooltips, context menus and dialogs
+	textInputBackground := #run hex_to_color_vec4("4e5665");
+	selectedBackground := #run hex_to_color_vec4("4e5665"); // selected list rows TODO: we need to specify a keyboard hot colour or a mouse hot colour
+	
+	scrollBarBackground := #run hex_to_color_vec4("3B414C");
+	scrollBarHandle := #run hex_to_color_vec4("4e5665");
+	scrollBarHandleHot := #run hex_to_color_vec4("636f85");
+	scrollBarHandleActive := #run hex_to_color_vec4("7e90bd");
+}
+
+UIStyle :: struct {
+	// Fonts
+	fontSize := 15.0;
+	font := string.["segoeui.ttf"];
+	iconFontData: string; // embedded font file, no icon font if empty
+
+	// Base box styling (sizes in em units)
+	boxTextPadding := 0.2;
+	boxPadding := Vector4.{0, 0, 0, 0};
+	boxChildGap := 0.0;
+	
+	// Widget styling
+	buttonCornerRadius := 0.2;
+	buttonTextAlign := UIAlignment.CENTER;
+	
+	// TODO: once we refactor popups
+	// it may be desirable to more specific about these
+	// so we have styling for context menus and tooltips specifically
+	// or what have you
+	popupPadding := 0.5;
+	popupChildGap := 0.2;
+	popupCornerRadius := 0.4;
+	popupBorderThickness := 1.0; // pixels
+	
+	scrollBarThickness := 1.2;
+	scrollBarPadding := 0.3;
+	scrollBarCornerRadius := 0.3;
+
+	// Animation
+	scrollAnimRate := 14.0;
 }
 
 // @todo: this needs to be much better
@@ -121,16 +180,6 @@ UIAlignment :: enum {
 	RIGHT;
 }
 
-UIPalette :: struct {
-	background: Vector4;
-	hot: Vector4;
-	active: Vector4;
-	text: Vector4;
-	textHighlight: Vector4;
-	border: Vector4;
-	#overlay (background) colors: [6]Vector4 = ---;
-}
-
 UIKey :: struct {
 	keyVal:u64;
 	keyStr: string; // debug, @todo remove in release?
@@ -146,18 +195,16 @@ UIState :: struct {
 	rootBox: *UIBox;
 	tooltip: *UIBox;
 
-	defaultPalette: UIPalette;
-	defaultFont: *Font;
-	defaultFontSize := 15.0;
-	defaultTextPadding := 0.0;
-	defaultTextAlignment:UIAlignment = .LEFT;
-	defaultIconFont: *Font;
+	// Styling information, pointers so the user can extend the style data
+	style: *UIStyle;
+	colours: *UIColours;
 
-	// TODO: these should be superceded by a new style/theme system
-	// Style settings, the app should set these to match its theme
-	popupBackground: Vector4; // tooltips, context menus and scroll bar tracks
-	scrollBarHandle: Vector4;
-	scrollAnimRate := 14.0;
+	// Loaded from the style in init_ui
+	font: *Font;
+	iconFont: *Font;
+	fontSize: float; // style font size with dpi scaling applied, updated in begin_ui
+	dpiScale := 1.0;
+
 	doubleClickTimeSeconds := 0.4;
 
 	// Persistent UI data
@@ -177,7 +224,8 @@ UIState :: struct {
 }
 uiState: UIState;
 
-init_ui :: () {
+// style and colours may point to structs extending UIStyle/UIColours, they must outlive the UI
+init_ui :: (style: *UIStyle, colours: *UIColours) {
 	uiState.alloc = Allocator.{ proc = flat_pool_allocator_proc, data = *uiState.arena };
 	uiState.frameAlloc = Allocator.{ proc = flat_pool_allocator_proc, data = *uiState.frameArena };
 
@@ -185,6 +233,28 @@ init_ui :: () {
 	init(*uiState.boxTable, 4096);
 
 	uiState.frameIndex = 0;
+
+	uiState.style = style;
+	uiState.colours = colours;
+	uiState.fontSize = style.fontSize * uiState.dpiScale;
+	uiState.font = load_first_font(style.font);
+	if style.iconFontData.count > 0 {
+		uiState.iconFont = load_font_from_memory(style.iconFontData);
+	}
+}
+
+ui_set_dpi_scale :: (scale: float) {
+	uiState.dpiScale = scale;
+	uiState.fontSize = uiState.style.fontSize * scale;
+}
+
+// Loads the first font in the list that succeeds, i.e. a preferred font with fallbacks
+load_first_font :: (filenames: []string) -> *Font, bool {
+	for filenames {
+		font, success := load_font(it);
+		if success return font, true;
+	}
+	return null, false;
 }
 
 find_box :: (key: UIKey) -> bool, *UIBox {
@@ -236,11 +306,17 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 
 	// reset properties to defaults, these are then overridden by the setters below
 	box.properties = .{};
-	box.palette = uiState.defaultPalette;
-	box.font = uiState.defaultFont;
-	box.fontSize = uiState.defaultFontSize;
-	box.textPadding = uiState.defaultTextPadding;
-	box.textAlignment = uiState.defaultTextAlignment;
+	box.colours.background = uiState.colours.boxBackground;
+	box.colours.hot = uiState.colours.boxHot;
+	box.colours.active = uiState.colours.boxActive;
+	box.colours.text = uiState.colours.text;
+	box.colours.textHighlight = uiState.colours.textHighlight;
+	box.colours.border = uiState.colours.boxBorder;
+	box.font = uiState.font;
+	box.fontSize = uiState.fontSize;
+	box.textPadding = em(uiState.style.boxTextPadding);
+	box.layout.childGap = em(uiState.style.boxChildGap);
+	box.layout.padding = .{em(uiState.style.boxPadding.x), em(uiState.style.boxPadding.y), em(uiState.style.boxPadding.z), em(uiState.style.boxPadding.z) };
 
 	// insert into parent's list of children
 	if box.parent {
@@ -287,12 +363,12 @@ set_size :: (box: *UIBox, axis: UIAxis, size: UISize) { box.layout.size[axis] = 
 set_size :: (box: *UIBox, width: UISize, height: UISize) { box.layout.width = width; box.layout.height = height; }
 
 // palette
-set_background_color :: (box: *UIBox, color: Vector4) { box.palette.background = color; }
-set_hot_color :: (box: *UIBox, color: Vector4) { box.palette.hot = color; }
-set_active_color :: (box: *UIBox, color: Vector4) { box.palette.active = color; }
-set_text_color :: (box: *UIBox, color: Vector4) { box.palette.text = color; }
-set_text_highlight_color :: (box: *UIBox, color: Vector4) { box.palette.textHighlight = color; }
-set_border_color :: (box: *UIBox, color: Vector4) { box.palette.border = color; }
+set_background_color :: (box: *UIBox, color: Vector4) { box.colours.background = color; }
+set_hot_color :: (box: *UIBox, color: Vector4) { box.colours.hot = color; }
+set_active_color :: (box: *UIBox, color: Vector4) { box.colours.active = color; }
+set_text_color :: (box: *UIBox, color: Vector4) { box.colours.text = color; }
+set_text_highlight_color :: (box: *UIBox, color: Vector4) { box.colours.textHighlight = color; }
+set_border_color :: (box: *UIBox, color: Vector4) { box.colours.border = color; }
 
 // decoration
 set_corner_radius :: (box: *UIBox, radius: float) { box.cornerRadius = .{radius, radius, radius, radius}; }
@@ -430,6 +506,9 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 
 // Returns the root box which all other boxes should descend from
 begin_ui :: () -> *UIBox {
+	// recomputed each frame so changes to the style apply immediately
+	uiState.fontSize = uiState.style.fontSize * uiState.dpiScale;
+
 	uiState.rootBox = box(null);
 	set_child_layout_axis(uiState.rootBox, .Y);
 	set_size(uiState.rootBox, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
@@ -490,8 +569,8 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 			box := it;
 
 			// scroll animations
-			box.viewOffset.x += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
-			box.viewOffset.y += cast(float) deltaTime * uiState.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
+			box.viewOffset.x += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
+			box.viewOffset.y += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
 			if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
 			if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
 
@@ -572,6 +651,38 @@ compare_key :: (key1: UIKey, key2: UIKey) -> bool {
 	return key1.keyVal == key2.keyVal;
 }
 
+// Colours
+// -----------------
+
+hex_to_color_vec4 :: (src_hex: string) -> Vector4 {
+	hex := src_hex;
+	if hex.count == 6 then hex = tprint("%FF", hex);
+	if hex.count != 8 return Vector4.{};
+
+	r := slice(hex, 0, 2);
+	g := slice(hex, 2, 2);
+	b := slice(hex, 4, 2);
+	a := slice(hex, 6, 2);
+
+	to_float :: (byte_str: string) -> float {
+		hex_digit_to_int :: (char: u8) -> int {
+			char = to_upper(char);
+			if #char "0" <= char && char <= #char "9" return char - #char "0";
+			if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
+			return -1;
+		}
+
+		d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
+		if d1 < 0 || d0 < 0 return -1;
+
+		return (16 * d1 + d0) / 255;
+	}
+
+	c := Vector4.{ to_float(r), to_float(g), to_float(b), to_float(a) };
+
+	return c;
+}
+
 // Widgets
 // ------------------
 
@@ -587,7 +698,7 @@ text :: (parent: *UIBox, textFormat: string, args: ..Any) -> *UIBox {
 	return text(parent, tprint(textFormat, ..args));
 }
 
-// Text where the highlighted ranges are drawn in the palette's textHighlight color, i.e. fuzzy search matches
+// Text where the highlighted ranges are drawn in the textHighlight colour, i.e. fuzzy search matches
 highlighted_text :: (parent: *UIBox, text: string, highlights: []TextHighlight) -> *UIBox {
 	label := box(parent);
 	add_flags(label, .DRAW_TEXT_HIGHLIGHTS);
@@ -602,8 +713,8 @@ button :: (parent: *UIBox, width: UISize, height: UISize, text: string) -> bool,
 	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
 	set_text(button, text);
 	set_size(button, width, height);
-	set_text_alignment(button, .CENTER);
-	set_corner_radius(button, em(0.2));
+	set_text_alignment(button, uiState.style.buttonTextAlign);
+	set_corner_radius(button, em(uiState.style.buttonCornerRadius));
 	signal := signal_from_box(button);
 	return signal.pressed, button;
 }
@@ -618,10 +729,10 @@ toggle :: (parent: *UIBox, width: UISize, height: UISize, value: *bool, text: st
 	add_flags(toggle, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
 	set_text(toggle, text);
 	set_size(toggle, width, height);
-	set_text_alignment(toggle, .CENTER);
-	set_corner_radius(toggle, em(0.2));
+	set_text_alignment(toggle, uiState.style.buttonTextAlign);
+	set_corner_radius(toggle, em(uiState.style.buttonCornerRadius));
 	if value.* {
-		set_background_color(toggle, uiState.defaultPalette.active);
+		set_background_color(toggle, uiState.colours.boxActive);
 	}
 	else {
 		add_flags(toggle, .DRAW_HOT_EFFECTS);
@@ -656,10 +767,10 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 	add_flags(tooltip, .DRAW_BACKGROUND | .DRAW_BORDER);
 	set_child_layout_axis(tooltip, .X);
 	set_size(tooltip, fit(), fit());
-	set_padding(tooltip, em(0.5));
-	set_background_color(tooltip, uiState.popupBackground);
-	set_border_thickness(tooltip, 1.0);
-	set_corner_radius(tooltip, em(0.4));
+	set_padding(tooltip, em(uiState.style.popupPadding));
+	set_background_color(tooltip, uiState.colours.popupBackground);
+	set_border_thickness(tooltip, uiState.style.popupBorderThickness);
+	set_corner_radius(tooltip, em(uiState.style.popupCornerRadius));
 	set_fixed_x(tooltip, fixedX);
 	set_fixed_y(tooltip, fixedY);
 
@@ -700,11 +811,11 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 	add_flags(menu, .DRAW_BACKGROUND | .DRAW_BORDER);
 	set_child_layout_axis(menu, .Y);
 	set_size(menu, width, fit());
-	set_padding(menu, em(0.5));
-	set_child_gap(menu, em(0.2));
-	set_background_color(menu, uiState.popupBackground);
-	set_border_thickness(menu, 1.0);
-	set_corner_radius(menu, em(0.4));
+	set_padding(menu, em(uiState.style.popupPadding));
+	set_child_gap(menu, em(uiState.style.popupChildGap));
+	set_background_color(menu, uiState.colours.popupBackground);
+	set_border_thickness(menu, uiState.style.popupBorderThickness);
+	set_corner_radius(menu, em(uiState.style.popupCornerRadius));
 	set_fixed_x(menu, fixedX);
 	set_fixed_y(menu, fixedY);
 
@@ -718,13 +829,13 @@ context_menu_item :: (menu: *UIBox, label: string, icon: string) -> UISignal {
 	add_flags(row, .DRAW_BACKGROUND | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE);
 	set_child_layout_axis(row, .X);
 	set_size(row, grow(), fit());
-	set_background_color(row, uiState.popupBackground);
+	set_background_color(row, uiState.colours.popupBackground);
 	{
 		// icon
 		if icon.count {
 			iconBox := text(row, icon);
 			set_width(iconBox, fixed(em(2.0)));
-			set_font(iconBox, uiState.defaultIconFont);
+			set_font(iconBox, uiState.iconFont);
 		}
 		else {
 			spacer(row, .X, fixed(em(2.0)));
@@ -748,16 +859,16 @@ scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float,
 	if abs(scrollableRange) < abs(visibleRange) return;
 
 	container := box(parent);
-	set_padding(container, em(0.3));
-	set_size(container, otherAxis, fixed(em(1.2)));
+	set_padding(container, em(uiState.style.scrollBarPadding));
+	set_size(container, otherAxis, fixed(em(uiState.style.scrollBarThickness)));
 	set_size(container, scrollAxis, grow());
 	{
 		scrollBarOuter := box(container);
 		add_flags(scrollBarOuter, .DRAW_BACKGROUND);
 		set_child_layout_axis(scrollBarOuter, axis);
 		set_size(scrollBarOuter, grow(), grow());
-		set_corner_radius(scrollBarOuter, em(0.3));
-		set_background_color(scrollBarOuter, uiState.popupBackground);
+		set_corner_radius(scrollBarOuter, em(uiState.style.scrollBarCornerRadius));
+		set_background_color(scrollBarOuter, uiState.colours.scrollBarBackground);
 		{
 			handleSizePct := max(abs(visibleRange/scrollableRange), 0.05);
 			spaceBeforePct := (1.0-handleSizePct) * scrollOffsetPct;
@@ -772,8 +883,10 @@ scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float,
 			add_flags(scrollHandle, .DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
 			set_size(scrollHandle, otherAxis, grow());
 			set_size(scrollHandle, scrollAxis, percent(handleSizePct));
-			set_background_color(scrollHandle, uiState.scrollBarHandle);
-			set_corner_radius(scrollHandle, em(0.3));
+			set_background_color(scrollHandle, uiState.colours.scrollBarHandle);
+			set_hot_color(scrollHandle, uiState.colours.scrollBarHandleHot);
+			set_active_color(scrollHandle, uiState.colours.scrollBarHandleActive);
+			set_corner_radius(scrollHandle, em(uiState.style.scrollBarCornerRadius));
 
 			// dragging handling
 			if boxToScroll != ui_key_nil {
@@ -868,7 +981,7 @@ grow :: (min: float = 0.0, max: float=0.0) -> UISize { return .{type=.GROW, min=
 percent :: (percent: float) -> UISize { return .{type=.PERCENT, percent=percent};}
 text_content :: () -> UISize { return .{type=.TEXT};}
 
-em :: (size: float, fontSize: float = 0.0) -> float { return ifx fontSize == 0.0 then size*uiState.defaultFontSize else size*fontSize; }
+em :: (size: float, fontSize: float = 0.0) -> float { return ifx fontSize == 0.0 then size*uiState.fontSize else size*fontSize; }
 
 corner_rad_all :: (v: float) -> Vector4 {return .{v,v,v,v};}
 padding_all :: (v: float) -> Vector4 {return .{v,v,v,v};}
@@ -881,17 +994,17 @@ padding_all :: (v: float) -> Vector4 {return .{v,v,v,v};}
 
 render_ui_recursive :: (box: *UIBox) {
 	if box.flags & .DRAW_BACKGROUND {
-		color := box.palette.background;
+		color := box.colours.background;
 
 		if (box.flags & .DRAW_HOT_EFFECTS && 
 			(uiState.hotBoxKey != ui_key_nil && box.key == uiState.hotBoxKey))
 			|| box.flags & .FOCUS_HOT {
-			color = box.palette.hot;
+			color = box.colours.hot;
 		}
 		if (box.flags & .DRAW_ACTIVE_EFFECTS &&
 			(uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey))
 			|| box.flags & .FOCUS_ACTIVE {
-			color = box.palette.active;
+			color = box.colours.active;
 		}
 
 		submit_instance(.{
@@ -921,7 +1034,7 @@ render_ui_recursive :: (box: *UIBox) {
 				xPos = box.rect.x + Min(box.rect.w - box.textRun.width - box.textPadding, box.rect.w);
 		}
 		xPos = floor(xPos);
-		draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+		draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 	}
 
 	if box.flags & .DRAW_TEXT_HIGHLIGHTS {
@@ -940,7 +1053,7 @@ render_ui_recursive :: (box: *UIBox) {
 				xPos = box.rect.x + Min(box.rect.w - box.textRun.width - box.textPadding, box.rect.w);
 		}
 		xPos = floor(xPos);
-		draw_text_run_highlights(box.textRun, xPos, yPos, box.textHighlights, box.palette.text, box.palette.textHighlight);
+		draw_text_run_highlights(box.textRun, xPos, yPos, box.textHighlights, box.colours.text, box.colours.textHighlight);
 	}
 
 	if box.customDrawFunction {
@@ -963,7 +1076,7 @@ render_ui_recursive :: (box: *UIBox) {
 	if box.flags & .DRAW_BORDER {
 		submit_instance(.{
 			dstRect = box.rect,
-			color = box.palette.border,
+			color = box.colours.border,
 			cornerRadii = box.cornerRadius,
 			borderThickness = box.borderThickness
 		});
@@ -972,25 +1085,25 @@ render_ui_recursive :: (box: *UIBox) {
 	if box.flags & .DRAW_SIDE_TOP {
 		submit_instance(.{
 			dstRect = .{box.rect.x, box.rect.y - floor(box.borderThickness/2), box.rect.w, box.borderThickness},
-			color = box.palette.border,
+			color = box.colours.border,
 		});
 	}
 	if box.flags & .DRAW_SIDE_BOTTOM {
 		submit_instance(.{
 			dstRect = .{box.rect.x, box.rect.y + box.rect.h - floor(box.borderThickness/2), box.rect.w, box.borderThickness},
-			color = box.palette.border,
+			color = box.colours.border,
 		});
 	}
 	if box.flags & .DRAW_SIDE_LEFT {
 		submit_instance(.{
 			dstRect = .{box.rect.x - floor(box.borderThickness/2), box.rect.y, box.borderThickness, box.rect.h},
-			color = box.palette.border,
+			color = box.colours.border,
 		});
 	}
 	if box.flags & .DRAW_SIDE_RIGHT {
 		submit_instance(.{
 			dstRect = .{box.rect.x + box.rect.w - floor(box.borderThickness/2), box.rect.y, box.borderThickness, box.rect.h},
-			color = box.palette.border,
+			color = box.colours.border,
 		});
 	}
 }

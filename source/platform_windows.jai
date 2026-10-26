@@ -76,9 +76,9 @@ platform_set_backup_timer :: (window: Window_Type, callback: BackupTimerCallback
 platform_set_border_color :: () {
 	using DwmAttribute;
 	col : u32 = 0xFFFFFFFF;
-	r : u32 = cast(u32)(style.backgroundMid.x * 255.0);
-	g : u32 = cast(u32)(style.backgroundMid.y * 255.0);
-	b : u32 = cast(u32)(style.backgroundMid.z * 255.0);
+	r : u32 = cast(u32)(editorColours.boxBackground.x * 255.0);
+	g : u32 = cast(u32)(editorColours.boxBackground.y * 255.0);
+	b : u32 = cast(u32)(editorColours.boxBackground.z * 255.0);
 	// COLORREF format is 0x00bbggrr
 	col = 0x00000000;
 	col |= b << 16;

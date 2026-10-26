@@ -238,7 +238,7 @@ panel_scroll_to_line :: (panel: *Panel, targetLine: s64) {
 	}
 	else {
 		// when the box doesn't exist, we may want to set it's initial scroll setup for when it gets created
-		metrics := get_font_metrics(fontCode, xx style.fontSize);
+		metrics := get_font_metrics(fontCode, xx uiState.fontSize);
 		codeScrollInitialOffset = cast(float, -targetLine * metrics.lineSpacing);
 	}
 	
@@ -260,7 +260,7 @@ panel_calculate_visible_lines :: (panel: *Panel, useAnimTarget:bool=false) -> s6
 	}
 	
 	// fallback for when there is no codebox to use
-	metrics := get_font_metrics(fontCode, xx style.fontSize);
+	metrics := get_font_metrics(fontCode, xx uiState.fontSize);
 	return 0, cast(s64, panel.layoutRect.h / metrics.lineSpacing)-1;
 }
 

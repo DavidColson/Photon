@@ -14,44 +14,27 @@ Notification :: struct {
 	timer: float64;
 }
 
-style : struct {
-	// colors
-	backgroundDark := #run hex_to_color_vec4("1C1F25");
-	backgroundMid := #run hex_to_color_vec4("282C34");
-	backgroundLight := #run hex_to_color_vec4("3B414C");
-	backgroundLighter := #run hex_to_color_vec4("4e5665");
+// Editor specific styling, extending the UI's base style
+editorStyle : struct {
+	using #as base: UIStyle;
 
-	hotHighlight := #run hex_to_color_vec4("636f85");
-	activeHighlight := #run hex_to_color_vec4("7e90bd");
+	codeFont := string.["CaskaydiaMonoNerdFont-Regular.ttf", "consola.ttf"]; // first one that loads is used
+	
+	// TODO: expose styling properties for command palette
+}
 
-	textPrimary := #run hex_to_color_vec4("C3C7D0");
-	textSecondary := #run hex_to_color_vec4("5C6370");
-	textHighlight := #run hex_to_color_vec4("7e90bd");
+// Editor specific colours, extending the UI's base palette
+editorColours : struct {
+	using #as base: UIColours;
+
+	windowBackground := #run hex_to_color_vec4("1C1F25");
+	headerBackground := #run hex_to_color_vec4("3B414C");
+	searchBarBackground := #run hex_to_color_vec4("3B414C");
+	notificationBackground := #run hex_to_color_vec4("7e90bd");
+	notificationText := #run hex_to_color_vec4("282C34");
+	gutterText := #run hex_to_color_vec4("5C6370");
 	textSelection := #run hex_to_color_vec4("434d60");
-	textSelection2 := #run hex_to_color_vec4("8c262e"); // used for highlights in search dialogs
-
-	borders := #run hex_to_color_vec4("5C6476");
-
-	// fonts
-	fontSize := 15;
-	codeFont := string.["CaskaydiaMonoNerdFont-Regular.ttf", "consola.ttf"];
-	uiFont := string.["segoeui.ttf"];
-
-	// Icons
-	iconVerticalEllipsis :: #run to_string(*convert_utf32_to_utf8(0xf142));
-	iconCircle :: #run to_string(*convert_utf32_to_utf8(0xf111));
-	iconLock :: #run to_string(*convert_utf32_to_utf8(0xf023));
-	iconNumList :: #run to_string(*convert_utf32_to_utf8(0xf0cb));
-	iconAlignLeft :: #run to_string(*convert_utf32_to_utf8(0xf036));
-	iconFolder :: #run to_string(*convert_utf32_to_utf8(0xf07c));
-	iconFile :: #run to_string(*convert_utf32_to_utf8(0xf15b));
-	iconSpinner :: #run to_string(*convert_utf32_to_utf8(0xf110));
-
-	// animations
-	scrollAnimRate := 14;
-
-	// input timing
-	doubleClickTimeSeconds := 0.4;
+	searchMatch := #run hex_to_color_vec4("8c262e");
 
 	// Code colors
 	// Must match the order of HighlightType
@@ -65,7 +48,19 @@ style : struct {
 	codeNamespace := #run hex_to_color_vec4("E5C07B");
 	codeComment := #run hex_to_color_vec4("5C6370");
 	#overlay (codeDefault) codeColors: [HighlightType.COUNT]Vector4 = ---;
-};
+}
+
+// Glyphs in the icon font
+Icons :: struct {
+	verticalEllipsis :: #run to_string(*convert_utf32_to_utf8(0xf142));
+	circle :: #run to_string(*convert_utf32_to_utf8(0xf111));
+	lock :: #run to_string(*convert_utf32_to_utf8(0xf023));
+	numList :: #run to_string(*convert_utf32_to_utf8(0xf0cb));
+	alignLeft :: #run to_string(*convert_utf32_to_utf8(0xf036));
+	folder :: #run to_string(*convert_utf32_to_utf8(0xf07c));
+	file :: #run to_string(*convert_utf32_to_utf8(0xf15b));
+	spinner :: #run to_string(*convert_utf32_to_utf8(0xf110));
+}
 
 EDITOR_MODE_NUM :: #run enum_highest_value(EditorMode) + 1;
 
@@ -101,9 +96,7 @@ numActiveNotifications := 0;
 notificationTime: float64 = 10;
 
 // fonts
-fontUI: *Font;
-fontCode: *Font;
-fontIcons: *Font;
+fontCode: *Font; // the ui and icon fonts are owned by the UI, see uiState.font and uiState.iconFont
 
 // options
 textSize :: 15;
@@ -161,7 +154,8 @@ main :: () {
 	init_renderer(window, windowWidth, windowHeight);
 	init_font_cache();
 	load_fonts();
-	init_ui();
+	editorStyle.iconFontData = #run read_entire_file("fonts/Font Awesome 6 Free-Solid-900.otf");
+	init_ui(*editorStyle, *editorColours);
 	initialize_commands_and_keymap();
 	init_async(*asyncWorker);
 	init_parallel_for_pool(*parallelPool);
@@ -302,33 +296,16 @@ update :: (deltaTime: float64) {
 }
 
 build_ui :: () {
+	ui_set_dpi_scale(dpiScale);
 	root := begin_ui();
-
-	// TODO: should eventually be moved to a new and better style system
-	uiState.defaultPalette = .{
-		text = style.textPrimary,
-		textHighlight = style.textHighlight,
-		background=style.backgroundMid,
-		hot=style.hotHighlight,
-		active=style.activeHighlight,
-		border=style.borders
-	};
-	uiState.defaultFont = fontUI;
-	uiState.defaultIconFont = fontIcons;
-	uiState.defaultFontSize = style.fontSize * dpiScale;
-	uiState.defaultTextPadding = em(0.2);
-	uiState.popupBackground = style.backgroundLight;
-	uiState.scrollBarHandle = style.backgroundLighter;
-	uiState.scrollAnimRate = xx style.scrollAnimRate;
-	uiState.doubleClickTimeSeconds = style.doubleClickTimeSeconds;
 
 	// Draw notifications
 
-	fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 
 	maxWidth := 0.0;
 	for * notifications {
-		textRun := generate_text_run(it.content, xx uiState.defaultFontSize, uiState.defaultFont,,temp);
+		textRun := generate_text_run(it.content, xx uiState.fontSize, uiState.font,,temp);
 		maxWidth = max(maxWidth, textRun.width);
 	}
 
@@ -348,9 +325,9 @@ build_ui :: () {
 			timeFactor := cast(float) clamp(notif.timer, 0.0, fadeOutTime) / fadeOutTime;
 			alpha := lerp(0.0, 1.0, timeFactor);
 
-			backgroundCol := style.activeHighlight;
+			backgroundCol := editorColours.notificationBackground;
 			backgroundCol.w = alpha;
-			textCol := style.backgroundMid;
+			textCol := editorColours.notificationText;
 			textCol.w = alpha;
 			notifLabel := text(notificationBox, notif.content);
 			add_flags(notifLabel, .DRAW_BACKGROUND);
@@ -385,7 +362,7 @@ build_ui :: () {
 
 	if end_ui(deltaTime) then requestRedraw = true;
 
-	render_frame(style.backgroundDark);
+	render_frame(editorColours.windowBackground);
 }
 
 build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
@@ -401,7 +378,7 @@ build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
 			add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
 			set_size(header, grow(), fit());
 			set_padding(header, em(0.3));
-			set_background_color(header, style.backgroundLight);
+			set_background_color(header, editorColours.headerBackground);
 			set_border_thickness(header, 1.0);
 			
 			// empty box to give the header the height of a line of text
@@ -436,7 +413,7 @@ build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
 			add_flags(header, .DRAW_BACKGROUND | .DRAW_SIDE_BOTTOM);
 			set_size(header, grow(), fit());
 			set_padding(header, em(0.3));
-			set_background_color(header, style.backgroundLight);
+			set_background_color(header, editorColours.headerBackground);
 			set_border_thickness(header, 1.0);
 			
 			// empty box to give the header the height of a line of text
@@ -458,7 +435,7 @@ build_ui_loading_panel :: (parent: *UIBox, panel: *Panel) {
 				spinner := box(loadingBox);
 				set_size(spinner, text_content(), text_content());
 				set_font_size(spinner, em(1.0));
-				set_font(spinner, fontIcons);
+				set_font(spinner, uiState.iconFont);
 				set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
 			}
 		}
@@ -478,7 +455,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			set_size(header, grow(), fit());
 			set_padding(header, em(0.3));
 			set_child_alignment(header, .CENTER);
-			set_background_color(header, style.backgroundLight);
+			set_background_color(header, editorColours.headerBackground);
 			set_border_thickness(header, 1.0);
 			
 			// mode
@@ -488,7 +465,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			}
 			modeLabel := text(header, modeText);
 			add_flags(modeLabel, .DRAW_BACKGROUND);
-			set_background_color(modeLabel, style.backgroundDark);
+			set_background_color(modeLabel, editorColours.windowBackground);
 			
 			spacer(header, .X, fixed(em(0.5)));
 			
@@ -504,16 +481,16 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			
 			// lock icon @todo: implement for real
 			if document_is_read_only(panel.document) {
-				lockIcon := text(header, style.iconLock);
+				lockIcon := text(header, Icons.lock);
 				set_font_size(lockIcon, em(0.7));
-				set_font(lockIcon, fontIcons);
+				set_font(lockIcon, uiState.iconFont);
 			}
 			
 			// icon for file save status
 			if document_is_unsaved(panel.document) {
-				unsavedIcon := text(header, style.iconCircle);
+				unsavedIcon := text(header, Icons.circle);
 				set_font_size(unsavedIcon, em(0.7));
-				set_font(unsavedIcon, fontIcons);
+				set_font(unsavedIcon, uiState.iconFont);
 			}
 			
 			spacer(header, .X, grow());
@@ -528,7 +505,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				spinner := box(header);
 				set_size(spinner, text_content(), text_content());
 				set_font_size(spinner, em(1.0));
-				set_font(spinner, fontIcons);
+				set_font(spinner, uiState.iconFont);
 				set_custom_draw(spinner, custom_draw_spinner, cast(*void) panel);
 			}
 			
@@ -565,8 +542,8 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			// panel options button
 			panelOptsKey := ui_key("panelopts");
 			menuOpen := is_context_menu_open(panelOptsKey);
-			clicked, panelOptsToggle := toggle(header, fixed(em(1.5)), text_content(), *menuOpen, style.iconVerticalEllipsis);
-			set_font(panelOptsToggle, fontIcons);
+			clicked, panelOptsToggle := toggle(header, fixed(em(1.5)), text_content(), *menuOpen, Icons.verticalEllipsis);
+			set_font(panelOptsToggle, uiState.iconFont);
 			if clicked {
 				if menuOpen {
 					context_menu_open(panelOptsKey);
@@ -581,11 +558,11 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 									   anchorBoxKey=panelOptsToggle.key,
 									   anchorOffset=.{0.0, em(1.9)});
 			if menu {
-				if context_menu_item(menu, "Line Numbers", style.iconNumList).pressed {
+				if context_menu_item(menu, "Line Numbers", Icons.numList).pressed {
 					lineNumbers = !lineNumbers;
 				}
 				context_menu_item(menu, "View Line Endings", "");
-				context_menu_item(menu, "Line Wrapping", style.iconAlignLeft);
+				context_menu_item(menu, "Line Wrapping", Icons.alignLeft);
 			}
 		}
 		
@@ -723,7 +700,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				add_flags(searchContainer, .DRAW_BACKGROUND | .DRAW_SIDE_TOP);
 				set_size(searchContainer, grow(), fit());
 				set_padding(searchContainer, em(0.4));
-				set_background_color(searchContainer, style.backgroundLight);
+				set_background_color(searchContainer, editorColours.searchBarBackground);
 				set_border_thickness(searchContainer, 1.0);
 				set_child_gap(searchContainer, em(0.4));
 				
@@ -747,12 +724,12 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				}
 				
 				// TODO(ui): input field widget here
-				fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+				fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 				inputBox := box(searchContainer, ui_key("search_input"));
 				add_flags(inputBox, .DRAW_BACKGROUND);
 				set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
 				set_corner_radius(inputBox, em(0.2));
-				set_background_color(inputBox, style.backgroundLighter);
+				set_background_color(inputBox, editorColours.textInputBackground);
 				set_font(inputBox, fontCode);
 				set_text_padding(inputBox, em(0.5));
 				set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
@@ -774,12 +751,12 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 			set_child_layout_axis(commandPaletteContainer, .Y);
 			set_size(commandPaletteContainer, fixed(paletteWidth), fit());
 			set_padding(commandPaletteContainer, em(0.4));
-			set_background_color(commandPaletteContainer, style.backgroundLight);
+			set_background_color(commandPaletteContainer, editorColours.popupBackground);
 			set_corner_radius(commandPaletteContainer, em(0.5));
 			set_fixed_x(commandPaletteContainer, panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2);
 			set_fixed_y(commandPaletteContainer, em(3.0));
 			
-			fontMetrics := get_font_metrics(uiState.defaultFont, xx uiState.defaultFontSize);
+			fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 			inputBox := box(commandPaletteContainer);
 			{
 				add_flags(inputBox, .DRAW_BACKGROUND);
@@ -787,7 +764,7 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 				set_padding(inputBox, em(0.4));
 				set_child_gap(inputBox, em(0.2));
 				set_corner_radius(inputBox, em(0.2));
-				set_background_color(inputBox, style.backgroundLighter);
+				set_background_color(inputBox, editorColours.textInputBackground);
 				set_text_padding(inputBox, em(0.5));
 				
 				if panel.commandPalette.pendingCommandMode {
@@ -852,7 +829,7 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 						add_flags(entryBox, .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND);
 						set_size(entryBox, grow(), fixed(elementHeight));
 						set_padding(entryBox, em(argHandler.suggestionPadding));
-						set_background_color(entryBox, ifx selected style.backgroundLighter else style.backgroundLight);
+						set_background_color(entryBox, ifx selected editorColours.selectedBackground else editorColours.popupBackground);
 						signal := signal_from_box(entryBox);
 						if signal.pressed {
 							panel.commandPalette.selection = xx it;
@@ -879,12 +856,10 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 				
 				spacer(hintsBox, .X, grow());
 
-				textCol := uiState.defaultPalette.text;
-				textCol.w = 0.6;
 				hintsLabel := text(hintsBox, "<up><down> to navigate <enter> to use <escape> to dismiss");
 				set_text_alignment(hintsLabel, .CENTER);
 				set_text_padding(hintsLabel, em(0.5));
-				set_text_color(hintsLabel, textCol);
+				set_text_color(hintsLabel, editorColours.textDim);
 
 				spacer(hintsBox, .X, grow());
 			}
@@ -896,7 +871,7 @@ custom_draw_spinner :: (box: *UIBox, udata: *void) {
 	// there's no simple way to make a box rotate so for now spinners have custom drawing code
 	// that let us rotate them in the shader
 	
-	box.textRun = generate_text_run(style.iconSpinner, xx box.fontSize, box.font,,temp);
+	box.textRun = generate_text_run(Icons.spinner, xx box.fontSize, box.font,,temp);
 	metrics := get_font_metrics(box.font, xx box.fontSize);
 	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
 	xPos := box.rect.x;
@@ -915,7 +890,7 @@ custom_draw_spinner :: (box: *UIBox, udata: *void) {
 	// perfectly aligned. Something to look into one day
 	instance.srcRect.x = instance.srcRect.x+0.5;
 	instance.srcRect.y = instance.srcRect.y+0.5;
-	instance.color = box.palette.text;
+	instance.color = box.colours.text;
 	instance.angle = cast(float, time) / 1000.0 * 10;
 	submit_instance(instance);
 
@@ -940,17 +915,17 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 		directory := path_strip_filename(text);
 		leaf := path_filename(text);
 
-		dimmed := box.palette.text;
+		dimmed := box.colours.text;
 		dimmed.w *= 0.6;
 
 		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
 		draw_text_run(directoryRun, xPos, yPos, dimmed);
 
 		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
-		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.palette.text);
+		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.colours.text);
 	}
 	else {
-		draw_text_run(box.textRun, xPos, yPos, box.palette.text);
+		draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 	}
 
 	// calculate cursor position
@@ -965,7 +940,7 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 			2,
 			cursorHeight
 		},
-		color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary,
+		color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else editorColours.text,
 		shader = .RECTS
 	});
 }
@@ -977,9 +952,9 @@ highlight_color_at :: (highlights: [] Highlight, byteOffset: s64, currentIndex: 
 	if currentIndex.* < highlights.count
 	&& byteOffset >= highlights[currentIndex.*].start
 	&& byteOffset <  highlights[currentIndex.*].end {
-		return style.codeColors[highlights[currentIndex.*].type];
+		return editorColours.codeColors[highlights[currentIndex.*].type];
 	}
-	return style.codeDefault;
+	return editorColours.codeDefault;
 }
 
 // @todo: probably want to move this somewhere else? Potentially the panel file?
@@ -1104,7 +1079,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 		y :float = textAreaY;
 		for line: linesOnScreen {
 			run := generate_text_run(line.text, xx box.fontSize, box.font,,temp);
-			draw_text_run(run, x, y, style.textPrimary);
+			draw_text_run(run, x, y, editorColours.text);
 			y += metrics.lineSpacing;
 		}
 	}
@@ -1141,12 +1116,12 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 					cursorRun.width,
 					xx metrics.lineSpacing
 				},
-				color = (ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else style.textPrimary) * (ifx it_index != panel.primaryCursor then 0.9 else 1.0),
+				color = (ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else editorColours.text) * (ifx it_index != panel.primaryCursor then 0.9 else 1.0),
 				shader = .RECTS
 			});
 			
 			if cursorChar != 0 {
-				draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), style.backgroundMid);
+				draw_text_run(cursorRun, cursorX, textAreaY + metrics.lineSpacing * (cursorLine-startVisibleLine), editorColours.boxBackground);
 			}
 		}
 	}
@@ -1160,7 +1135,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 				cast(float)gutterWidth,
 				cast(float)box.rect.h
 			},
-			color = style.backgroundMid,
+			color = editorColours.boxBackground,
 			shader = .RECTS
 		});
 
@@ -1168,7 +1143,7 @@ custom_draw_code :: (box: *UIBox, udata: *void) {
 		y :float = box.rect.y + startOffset + box.viewOffset.y;
 		for startVisibleLine..endVisibleLine {
 			lineNoRun := generate_text_run(tprint("% ", it+1), xx box.fontSize, box.font,,temp);
-			draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, style.textSecondary);
+			draw_text_run(lineNoRun, box.rect.x + (gutterWidth - lineNoRun.width), y, editorColours.gutterText);
 			y += metrics.lineSpacing;
 		}
 	}
@@ -1224,7 +1199,7 @@ draw_document_range :: (doc: DocumentHandle, start: s64, end: s64, font: *Font, 
 				cast(float)selectionW,
 				cast(float)metrics.lineSpacing
 			},
-			color = style.textSelection,
+			color = editorColours.textSelection,
 			shader = .RECTS
 		});
 	}
@@ -1247,47 +1222,8 @@ do_backup_callback :: () {
 }
 
 load_fonts :: () {
-	fontUI,_ = load_font("segoeui.ttf");
-
-	// attempt to load my personal font, then fallback to consolas
-	// @todo: ideally my font would be in a config file somewhere not in here
-	success: bool;
-	fontCode,success = load_font("CaskaydiaMonoNerdFont-Regular.ttf");
-	if !success { 
-		fontCode,_ = load_font("consola.ttf");
-	}
-
-	fontIcons = load_font_from_memory(#run read_entire_file("fonts/Font Awesome 6 Free-Solid-900.otf"));
-}
-
-// color stuff
-hex_to_color_vec4 :: (src_hex: string) -> Vector4 {
-	hex := src_hex;
-	if hex.count == 6 then hex = tprint("%FF", hex);
-	if hex.count != 8 return Vector4.{};
-
-	r := slice(hex, 0, 2);
-	g := slice(hex, 2, 2);
-	b := slice(hex, 4, 2);
-	a := slice(hex, 6, 2);
-
-	to_float :: (byte_str: string) -> float {
-		hex_digit_to_int :: (char: u8) -> int {
-			char = to_upper(char);
-			if #char "0" <= char && char <= #char "9" return char - #char "0";
-			if #char "A" <= char && char <= #char "F" return 10 + char - #char "A";
-			return -1;
-		}
-
-		d1, d0 := cast(float)hex_digit_to_int(byte_str[0]), cast(float) hex_digit_to_int(byte_str[1]);
-		if d1 < 0 || d0 < 0 return -1;
-
-		return (16 * d1 + d0) / 255;
-	}
-
-	c := Vector4.{ to_float(r), to_float(g), to_float(b), to_float(a) };
-
-	return c;
+	// @todo: ideally the code font would be in a config file somewhere not in here
+	fontCode = load_first_font(editorStyle.codeFont);
 }
 
 // fuzzy searching
