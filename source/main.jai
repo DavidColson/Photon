@@ -20,7 +20,8 @@ editorStyle : struct {
 
 	codeFont := string.["CaskaydiaMonoNerdFont-Regular.ttf", "consola.ttf"]; // first one that loads is used
 	
-	// TODO: expose styling properties for command palette
+	commandPaletteCornerRadius := 0.5;
+	commandPalettePadding := 0.4;
 }
 
 // Editor specific colours, extending the UI's base palette
@@ -750,9 +751,9 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 			add_flags(commandPaletteContainer, .DRAW_BACKGROUND);
 			set_child_layout_axis(commandPaletteContainer, .Y);
 			set_size(commandPaletteContainer, fixed(paletteWidth), fit());
-			set_padding(commandPaletteContainer, em(0.4));
+			set_padding(commandPaletteContainer, em(editorStyle.commandPalettePadding));
 			set_background_color(commandPaletteContainer, editorColours.popupBackground);
-			set_corner_radius(commandPaletteContainer, em(0.5));
+			set_corner_radius(commandPaletteContainer, em(editorStyle.commandPaletteCornerRadius));
 			set_fixed_x(commandPaletteContainer, panel.layoutRect.x+(panel.layoutRect.w-paletteWidth)/2);
 			set_fixed_y(commandPaletteContainer, em(3.0));
 			

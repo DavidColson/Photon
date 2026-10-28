@@ -79,6 +79,11 @@ UIColours :: struct {
 	textInputBackground := #run hex_to_color_vec4("4e5665");
 	selectedBackground := #run hex_to_color_vec4("4e5665"); // selected list rows TODO: we need to specify a keyboard hot colour or a mouse hot colour
 	
+	buttonBackground := #run hex_to_color_vec4("282C34");
+	buttonHot := #run hex_to_color_vec4("636f85");
+	buttonActive := #run hex_to_color_vec4("7e90bd");
+	buttonBorder := #run hex_to_color_vec4("5C6476");
+	
 	scrollBarBackground := #run hex_to_color_vec4("3B414C");
 	scrollBarHandle := #run hex_to_color_vec4("4e5665");
 	scrollBarHandleHot := #run hex_to_color_vec4("636f85");
@@ -714,6 +719,10 @@ button :: (parent: *UIBox, width: UISize, height: UISize, text: string) -> bool,
 	set_text(button, text);
 	set_size(button, width, height);
 	set_text_alignment(button, uiState.style.buttonTextAlign);
+	set_background_color(button, uiState.colours.buttonBackground);
+	set_hot_color(button, uiState.colours.buttonHot);
+	set_active_color(button, uiState.colours.buttonActive);
+	set_border_color(button, uiState.colours.buttonBorder);
 	set_corner_radius(button, em(uiState.style.buttonCornerRadius));
 	signal := signal_from_box(button);
 	return signal.pressed, button;
@@ -730,9 +739,13 @@ toggle :: (parent: *UIBox, width: UISize, height: UISize, value: *bool, text: st
 	set_text(toggle, text);
 	set_size(toggle, width, height);
 	set_text_alignment(toggle, uiState.style.buttonTextAlign);
+	set_background_color(toggle, uiState.colours.buttonBackground);
+	set_hot_color(toggle, uiState.colours.buttonHot);
+	set_active_color(toggle, uiState.colours.buttonActive);
+	set_border_color(toggle, uiState.colours.buttonBorder);
 	set_corner_radius(toggle, em(uiState.style.buttonCornerRadius));
 	if value.* {
-		set_background_color(toggle, uiState.colours.boxActive);
+		set_background_color(toggle, uiState.colours.buttonActive);
 	}
 	else {
 		add_flags(toggle, .DRAW_HOT_EFFECTS);
