@@ -476,8 +476,8 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			set_text(fileLabel, path_filename(document_get_path(panel.document)));
 			set_size(fileLabel, text_content(), text_content());
 			if signal_from_box(fileLabel).hovering {
-				tooltip := tooltip_begin(fileLabel.key, .{0.0, em(1.9)});
-				text(tooltip, document_get_path(panel.document));
+				pathTooltip := tooltip(fileLabel.key, .{0.0, em(1.9)});
+				text(pathTooltip, document_get_path(panel.document));
 			}
 			
 			// lock icon @todo: implement for real
@@ -554,10 +554,10 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				}
 			}
 			
-			menu := context_menu_begin(key=panelOptsKey,
-									   width=fixed(em(12.0)),
-									   anchorBoxKey=panelOptsToggle.key,
-									   anchorOffset=.{0.0, em(1.9)});
+			menu := context_menu(key=panelOptsKey,
+								 width=fixed(em(12.0)),
+								 anchorBoxKey=panelOptsToggle.key,
+								 anchorOffset=.{0.0, em(1.9)});
 			if menu {
 				if context_menu_item(menu, "Line Numbers", Icons.numList).pressed {
 					lineNumbers = !lineNumbers;

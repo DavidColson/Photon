@@ -3,12 +3,13 @@
 UIBox :: struct {
 	key: UIKey;
 
-	// tree
-	next: *UIBox; // siblings
-	prev: *UIBox;
-	head: *UIBox; // chilren
-	tail: *UIBox;
-	parent: *UIBox;
+	using tree: struct {
+		next: *UIBox; // siblings
+		prev: *UIBox;
+		head: *UIBox; // chilren
+		tail: *UIBox;
+		parent: *UIBox;
+	}
 
 	// per frame information, reset in box() and configured with the set_* functions
 	using properties: struct {
@@ -43,7 +44,7 @@ UIBox :: struct {
 		customDrawUdata: *void;
 	}
 	
-	// per frame information (must be cleared in box())
+	// per frame working data (must be cleared in box())
 	textRun: TextRun;
 	fixedPosition: [UIAxis.COUNT]float; // parent relative
 	fixedSize: [UIAxis.COUNT]float;
@@ -197,8 +198,8 @@ UIState :: struct {
 	frameAlloc: Allocator;
 
 	// Per frame UI data
-	rootBox: *UIBox;
-	tooltip: *UIBox;
+	root: *UIBox;
+	popupRoot: *UIBox;
 
 	// Styling information, pointers so the user can extend the style data
 	style: *UIStyle;
@@ -216,7 +217,6 @@ UIState :: struct {
 	boxTable: Table(UIKey, *UIBox, given_compare_function=compare_key, given_hash_function=x=>get_hash(x.keyVal));
 	freeListHead: *UIBox;
 	freeListTail: *UIBox;
-	contextMenu: *UIBox; // at some point it may be desirable to have a "popup" stack like imgui?
 	activeContextMenu: UIKey;
 	nextActiveContextMenu: UIKey;
 	hotBoxKey: UIKey;
@@ -298,10 +298,7 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 	}
 
 	// setup box
-	box.next = null;
-	box.prev = null;
-	box.head = null;
-	box.tail = null;
+	box.tree = .{};
 	box.parent = parent;
 	box.childCount = 0;
 	box.fixedPosition = .[0,0];
@@ -330,6 +327,10 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 	}
 
 	return box;
+}
+
+popup :: (key: UIKey = ui_key_nil) -> *UIBox {
+	return box(uiState.popupRoot, key);
 }
 
 // box property setters
@@ -389,11 +390,11 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 	signal: UISignal;
 
 	// figure out if this box's parent is a floating root parent
-	contextMenuIsAncestor: bool = false;
+	isPopup: bool = false;
 	parent: *UIBox = box.parent;
 	while parent {
-		if parent == uiState.contextMenu {
-			contextMenuIsAncestor = true;
+		if parent == uiState.popupRoot {
+			isPopup = true;
 			break;
 		}
 		parent = parent.parent;
@@ -401,8 +402,9 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 
 	// if it isn't, then get the context menu's rectangle
 	blacklistRect: Rect;
-	if !contextMenuIsAncestor && uiState.contextMenu != null {
-		blacklistRect = uiState.contextMenu.rect;
+	if !isPopup && uiState.activeContextMenu != ui_key_nil {
+		found, contextMenu := find_box(uiState.activeContextMenu);
+		if found then blacklistRect = contextMenu.rect;
 	}
 
     x, y, success := get_mouse_pointer_position(renderState.window, false);
@@ -471,8 +473,12 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 				}
 
 				// clicking somewhere outside of context menu
-				if uiState.contextMenu && uiState.activeContextMenu != ui_key_nil && !contains_point(uiState.contextMenu.rect, xx x, xx y) && it.key_pressed {
-					context_menu_close();
+			
+				if uiState.activeContextMenu != ui_key_nil {
+					found, contextMenu := find_box(uiState.activeContextMenu);
+					if found && !contains_point(contextMenu.rect, xx x, xx y) && it.key_pressed {
+						context_menu_close();
+					}
 				}
 
 			case .MOUSE_V_WHEEL;
@@ -514,14 +520,17 @@ begin_ui :: () -> *UIBox {
 	// recomputed each frame so changes to the style apply immediately
 	uiState.fontSize = uiState.style.fontSize * uiState.dpiScale;
 
-	uiState.rootBox = box(null);
-	set_child_layout_axis(uiState.rootBox, .Y);
-	set_size(uiState.rootBox, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
+	uiState.root = box(null);
+	set_child_layout_axis(uiState.root, .Y);
+	set_size(uiState.root, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
+	
+	uiState.popupRoot = box(null);
+	set_child_layout_axis(uiState.popupRoot, .Y);
+	set_size(uiState.popupRoot, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
 
 	uiState.hotBoxKeyLastFrame = uiState.hotBoxKey;
 	uiState.hotBoxKey = ui_key_nil;
-	uiState.tooltip = null;
-	return uiState.rootBox;
+	return uiState.root;
 }
 
 // Returns true if animations are still playing and the app should redraw next frame
@@ -538,60 +547,44 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 	}
 
 	// layout all the boxes
-	compute_layout(uiState.rootBox, .X);
-	compute_layout(uiState.rootBox, .Y);
-	set_rect_from_fixed(uiState.rootBox);
+	compute_layout(uiState.root, .X);
+	compute_layout(uiState.root, .Y);
+	set_rect_from_fixed(uiState.root);
 
-	// floating popups (i.e. context menu/tooltips) are detached roots, so lay them out separately
-	// adjusting their positions to be within the window bounds
-	floatingRoots := *UIBox.[uiState.tooltip, uiState.contextMenu];
-	for floatingRoots {
-		if it != null {
-			compute_layout(it, .X);
-			compute_layout(it, .Y);
-			set_rect_from_fixed(it);
-
-			xBounds := uiState.rootBox.rect.w - em(0.3, it.fontSize); // padding
-			yBounds := uiState.rootBox.rect.h - em(0.3, it.fontSize); // padding
-			xShiftDown := max(it.rect.x, 0) - it.rect.x;
-			xShiftUp := min(it.rect.x+it.rect.w, xBounds) - (it.rect.x+it.rect.w);
-			it.rect.x += xShiftDown + xShiftUp;
-			yShiftDown := max(it.rect.y, 0) - it.rect.y;
-			yShiftUp := min(it.rect.y+it.rect.h, yBounds) - (it.rect.y+it.rect.h);
-			it.rect.y += yShiftDown + yShiftUp;
-
-			// reposition children now the popup has moved
-			compute_layout(it, .X);
-			compute_layout(it, .Y);
-		}
+	// floating popups (i.e. context menu/tooltips) are all children of popupRoot, so we do their layout separately
+	// Currently we have to do it twice, once to lay them out to figure out their size, then we reposition them
+	// if they're off screen or such, then redo the layout to update all the children. Maybe we can do better I dunno?
+	popup := uiState.popupRoot.head;
+	while popup {
+		compute_layout(popup, .X);
+		compute_layout(popup, .Y);
+		set_rect_from_fixed(popup);
+		
+		xBounds := uiState.root.rect.w - em(0.3, popup.fontSize); // padding
+		yBounds := uiState.root.rect.h - em(0.3, popup.fontSize); // padding
+		xShiftDown := max(popup.rect.x, 0) - popup.rect.x;
+		xShiftUp := min(popup.rect.x+popup.rect.w, xBounds) - (popup.rect.x+popup.rect.w);
+		popup.rect.x += xShiftDown + xShiftUp;
+		yShiftDown := max(popup.rect.y, 0) - popup.rect.y;
+		yShiftUp := min(popup.rect.y+popup.rect.h, yBounds) - (popup.rect.y+popup.rect.h);
+		popup.rect.y += yShiftDown + yShiftUp;
+		
+		// repospopupion children now the popup has moved
+		compute_layout(popup, .X);
+		compute_layout(popup, .Y);
+		
+		popup = popup.next;
 	}
 
 	// do animations
-	animationRoots := *UIBox.[uiState.rootBox, uiState.tooltip, uiState.contextMenu];
-	for root: animationRoots {
-		if root == null continue;
-		for :depth_first root {
-			box := it;
-
-			// scroll animations
-			box.viewOffset.x += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
-			box.viewOffset.y += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
-			if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
-			if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
-
-			// figure out if we need redraws because there are animations playing
-			if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then needsRedraw = true;
-			if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then needsRedraw = true;
-		}
-	}
-
-	render_ui_recursive(uiState.rootBox);
-	for floatingRoots {
-		if it != null then render_ui_recursive(it);
-	}
+	needsRedraw |= update_animations_recursive(uiState.root, deltaTime);
+	needsRedraw |= update_animations_recursive(uiState.popupRoot, deltaTime);
+	
+	// render
+	render_ui_recursive(uiState.root);
+	render_ui_recursive(uiState.popupRoot);
 
 	if uiState.activeContextMenu != ui_key_nil && uiState.nextActiveContextMenu == ui_key_nil {
-		uiState.contextMenu = null;
 		uiState.activeContextMenu = ui_key_nil;
 	}
 	else if uiState.activeContextMenu == ui_key_nil && uiState.nextActiveContextMenu != ui_key_nil {
@@ -762,8 +755,7 @@ toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
 	return clicked, toggle;
 }
 
-// Tooltips are detached floating roots, build their contents as children of the returned box
-tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
+tooltip :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
 	success, anchor := find_box(anchorBoxKey);
 	fixedX, fixedY := 0.0;
 	if success {
@@ -776,7 +768,7 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 		fixedY = cast(float, y + 20);
 	}
 
-	tooltip := box(null, ui_key("tooltip"));
+	tooltip := popup(ui_key("tooltip"));
 	add_flags(tooltip, .DRAW_BACKGROUND | .DRAW_BORDER);
 	set_child_layout_axis(tooltip, .X);
 	set_size(tooltip, fit(), fit());
@@ -787,7 +779,6 @@ tooltip_begin :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0
 	set_fixed_x(tooltip, fixedX);
 	set_fixed_y(tooltip, fixedY);
 
-	uiState.tooltip = tooltip;
 	return tooltip;
 }
 
@@ -804,8 +795,7 @@ context_menu_close :: () {
 }
 
 // Returns null if the context menu is not open, otherwise the menu box to add context_menu_items to
-// Context menus are detached floating roots
-context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
+context_menu :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
 	if uiState.activeContextMenu != key return null;
 
 	success, anchor := find_box(anchorBoxKey);
@@ -820,7 +810,7 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 		fixedY = cast(float, y + 20);
 	}
 
-	menu := box(null, ui_key("context"));
+	menu := popup(key);
 	add_flags(menu, .DRAW_BACKGROUND | .DRAW_BORDER);
 	set_child_layout_axis(menu, .Y);
 	set_size(menu, width, fit());
@@ -832,7 +822,6 @@ context_menu_begin :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, 
 	set_fixed_x(menu, fixedX);
 	set_fixed_y(menu, fixedY);
 
-	uiState.contextMenu = menu;
 	return menu;
 }
 
@@ -1349,6 +1338,26 @@ compute_positions :: (root: *UIBox, axis: UIAxis) {
 			child = child.next;
 		}
 	}
+}
+
+// Animations
+
+update_animations_recursive :: (root: *UIBox, deltaTime: float64) -> bool {
+	needsRedraw := false;
+	for :depth_first root {
+		box := it;
+		
+		// scroll animations
+		box.viewOffset.x += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.x - box.viewOffset.x);
+		box.viewOffset.y += cast(float) deltaTime * uiState.style.scrollAnimRate * (box.viewOffsetTarget.y - box.viewOffset.y);
+		if abs(box.viewOffset.x - box.viewOffsetTarget.x) < 0.001 then box.viewOffset.x = box.viewOffsetTarget.x;
+		if abs(box.viewOffset.y - box.viewOffsetTarget.y) < 0.001 then box.viewOffset.y = box.viewOffsetTarget.y;
+		
+		// figure out if we need redraws because there are animations playing
+		if abs(box.viewOffset.x - box.viewOffsetTarget.x) > 0.0 then needsRedraw = true;
+		if abs(box.viewOffset.y - box.viewOffsetTarget.y) > 0.0 then needsRedraw = true;
+	}
+	return needsRedraw;
 }
 
 // Linked list functions
