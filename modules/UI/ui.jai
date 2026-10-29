@@ -1007,6 +1007,7 @@ scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxC
 			if selectedElement.* > (elementsBeforeTarget+elementsOnScreen-2) {
 				container.viewOffsetTarget.y = -(selectedElement.*+1)*elementHeight+(maxContainerHeight-em(0.4));
 			}
+			remove it;
 		}
 	}
 
