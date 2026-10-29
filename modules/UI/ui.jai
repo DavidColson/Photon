@@ -123,6 +123,39 @@ UIStyle :: struct {
 	scrollAnimRate := 14.0;
 }
 
+UIEvent :: struct {
+	// What kind of event is this?
+	Type :: enum {
+		NAVIGATE;
+		EDIT;
+		TEXT;
+		PRESS;
+		RELEASE;
+		SCROLL;
+	}
+	// This is an abstract idea of "what binding does the event relate to"
+	Action :: enum {
+		NONE;
+		ACCEPT;
+		CANCEL;
+		LEFT_MOUSE;
+		MIDDLE_MOUSE;
+		RIGHT_MOUSE;
+	}
+	// For navigate and edit, what is the unit of delta
+	Unit :: enum {
+		NONE;
+		CHAR;
+		WORD;
+		LINE;
+	}
+	type: Type;
+	action: Action;
+	unit: Unit;
+	text: string;
+	delta: [2]s32;
+}
+
 // @todo: this needs to be much better
 // Needs different mouse buttons, needs
 // transient states like "onpressed" to be implemented better than now
@@ -225,7 +258,7 @@ UIState :: struct {
 
 	frameIndex: u64;
 
-	events: [..]Input.Event;
+	events: [..]UIEvent;
 }
 uiState: UIState;
 
@@ -386,6 +419,13 @@ set_custom_draw :: (box: *UIBox, function: (*UIBox, *void), udata: *void) {
 	box.customDrawUdata = udata;
 }
 
+// Events and input handling
+// ---------------------------
+
+push_event :: (uiState: *UIState, type: UIEvent.Type, delta: [2]s32 = .[0,0], action: UIEvent.Action = .NONE, unit: UIEvent.Unit = .NONE, text: string = "") {
+	array_add(*uiState.events, .{ type, action, unit, text, delta });
+}
+
 signal_from_box :: (box: *UIBox) -> UISignal {
 	signal: UISignal;
 
@@ -426,9 +466,9 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 
 	for uiState.events {
 		if it.type == {
-			case .KEYBOARD;
+			case .PRESS;
 				// left click press
-				if box.flags & .MOUSE_CLICKABLE && it.key_pressed && it.key_code == .MOUSE_BUTTON_LEFT && box_contains_cursor { 
+				if box.flags & .MOUSE_CLICKABLE && it.action == .LEFT_MOUSE && box_contains_cursor { 
 					uiState.activeBoxKey = box.key;
 					if box.leftClickStateLastFrame == false {
 						signal.pressed = true;
@@ -437,10 +477,18 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					box.dragPrevPos = .{xx x,xx y};
 					remove it;
 				}
+				
+				// clicking somewhere outside of context menu
+				if uiState.activeContextMenu != ui_key_nil {
+					found, contextMenu := find_box(uiState.activeContextMenu);
+					if found && !contains_point(contextMenu.rect, xx x, xx y) {
+						context_menu_close();
+					}
+				}
+			case .RELEASE;
 				// left click release inside box
 				if box.flags & .MOUSE_CLICKABLE
-					&& !it.key_pressed
-					&& it.key_code == .MOUSE_BUTTON_LEFT
+					&& it.action == .LEFT_MOUSE
 					&& uiState.activeBoxKey == box.key
 					&& box_contains_cursor { 
 
@@ -461,8 +509,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 
 				// left click release outside box
 				if box.flags & .MOUSE_CLICKABLE
-					&& !it.key_pressed
-					&& it.key_code == .MOUSE_BUTTON_LEFT
+					&& it.action == .LEFT_MOUSE
 					&& uiState.activeBoxKey == box.key
 					&& !box_contains_cursor { 
 
@@ -472,27 +519,11 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					remove it;
 				}
 
-				// clicking somewhere outside of context menu
-			
-				if uiState.activeContextMenu != ui_key_nil {
-					found, contextMenu := find_box(uiState.activeContextMenu);
-					if found && !contains_point(contextMenu.rect, xx x, xx y) && it.key_pressed {
-						context_menu_close();
-					}
-				}
-
-			case .MOUSE_V_WHEEL;
-                if it.wheel_delta && box_contains_cursor {
+			case .SCROLL;
+                if box_contains_cursor {
 					metrics := get_font_metrics(box.font, xx box.fontSize);
-					box.viewOffsetTarget.y += (Input.mouse_wheel_delta.vertical/it.typical_wheel_delta)*metrics.lineSpacing*3;
-					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
-					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
-					remove it;
-				}
-			case .MOUSE_H_WHEEL;
-                if it.wheel_delta && box_contains_cursor {
-					metrics := get_font_metrics(box.font, xx box.fontSize);
-					box.viewOffsetTarget.x += (Input.mouse_wheel_delta.horizontal/it.typical_wheel_delta)*metrics.lineSpacing*3;
+					box.viewOffsetTarget.x += it.delta[0]*metrics.lineSpacing*3;
+					box.viewOffsetTarget.y += it.delta[1]*metrics.lineSpacing*3;
 					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
 					remove it;

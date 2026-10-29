@@ -409,7 +409,7 @@ command_dispatcher :: (cmd: *Command, repeatCount: int, args: []*void) {
 input_handler :: (event: Input.Event) {
 	keyString: string;
 	keyStringIsText := false;
-
+	
 	if event.type == .TEXT_INPUT {
 		char: Utf8_Char = convert_utf32_to_utf8(event.utf32);
 
@@ -435,6 +435,14 @@ input_handler :: (event: Input.Event) {
 		builder.allocator = temp;
 		init_string_builder(*builder);
 
+		// Send mouse inputs to the UI system
+		if event.key_code == {
+		case .MOUSE_BUTTON_LEFT;
+			push_event(*uiState, ifx event.key_pressed then .PRESS else .RELEASE, action = .LEFT_MOUSE);
+		case .MOUSE_BUTTON_RIGHT;
+			push_event(*uiState, ifx event.key_pressed then .PRESS else .RELEASE, action = .RIGHT_MOUSE);
+		}
+		
 		// modifiers first
 		if event.ctrl_pressed {
 			append(*builder, "ctrl+");
@@ -445,56 +453,67 @@ input_handler :: (event: Input.Event) {
 		if event.shift_pressed {
 			append(*builder, "shift+");
 		}
-
+		
 		gotInput := true;
-		if event.key_pressed && event.key_code == .BACKSPACE {
-			append(*builder, "<backspace>");
-		}
-		else if event.key_pressed && event.key_code == .ESCAPE {
-			append(*builder, "<escape>");
-		}
-		else if event.key_pressed && event.key_code == .ARROW_UP {
-			append(*builder, "<up>");
-		}
-		else if event.key_pressed && event.key_code == .ARROW_DOWN {
-			append(*builder, "<down>");
-		}
-		else if event.key_pressed && event.key_code == .ARROW_LEFT {
-			append(*builder, "<left>");
-		}
-		else if event.key_pressed && event.key_code == .ARROW_RIGHT {
-			append(*builder, "<right>");
-		}
-		else if event.key_pressed && event.key_code == .ENTER {
-			append(*builder, "<enter>");
-		}
-		else if event.key_pressed && event.key_code == .TAB {
-			append(*builder, "<tab>");
-		}
-		else if event.key_pressed && event.key_code == .PAGE_UP {
-			append(*builder, "<pageup>");
-		}
-		else if event.key_pressed && event.key_code == .PAGE_DOWN {
-			append(*builder, "<pagedown>");
-		}
-		else if event.key_pressed && event.key_code == .DELETE {
-			append(*builder, "<delete>");
-		}
-		else if event.key_pressed && event.key_code == #char " " {
-			append(*builder, "<space>");
-		}
-		else if event.key_pressed && event.key_code >= 33 && event.key_code <= 96 && event.modifier_flags.packed {
-			// Note we only take characters as events here if there are modifiers on, otherwise we let the text
-			// input case handle it
-			// this is to disambiguate for example ctrl+shift+s vs ctrl+S
-			lowered:u8 = to_lower(cast(u8)event.key_code); 
-			append(*builder, lowered);
+		if event.key_pressed {
+			if event.key_code == .BACKSPACE {
+				append(*builder, "<backspace>");
+			}
+			else if event.key_code == .ESCAPE {
+				append(*builder, "<escape>");
+			}
+			else if event.key_code == .ARROW_UP {
+				append(*builder, "<up>");
+			}
+			else if event.key_code == .ARROW_DOWN {
+				append(*builder, "<down>");
+			}
+			else if event.key_code == .ARROW_LEFT {
+				append(*builder, "<left>");
+			}
+			else if event.key_code == .ARROW_RIGHT {
+				append(*builder, "<right>");
+			}
+			else if event.key_code == .ENTER {
+				append(*builder, "<enter>");
+			}
+			else if event.key_code == .TAB {
+				append(*builder, "<tab>");
+			}
+			else if event.key_code == .PAGE_UP {
+				append(*builder, "<pageup>");
+			}
+			else if event.key_code == .PAGE_DOWN {
+				append(*builder, "<pagedown>");
+			}
+			else if event.key_code == .DELETE {
+				append(*builder, "<delete>");
+			}
+			else if event.key_code == #char " " {
+				append(*builder, "<space>");
+			}
+			else if event.key_code >= 33 && event.key_code <= 96 && event.modifier_flags.packed {
+				// Note we only take characters as events here if there are modifiers on, otherwise we let the text
+				// input case handle it
+				// this is to disambiguate for example ctrl+shift+s vs ctrl+S
+				lowered:u8 = to_lower(cast(u8)event.key_code); 
+				append(*builder, lowered);
+			}
+			else {
+				gotInput = false;
+			}
 		}
 		else {
 			gotInput = false;
 		}
 
 		if gotInput keyString = builder_to_string(*builder,,temp);
+	}
+	else if event.type ==  .MOUSE_V_WHEEL {
+		push_event(*uiState, .SCROLL, delta = .[0, Input.mouse_wheel_delta.vertical/event.typical_wheel_delta]);
+	}
+	else if event.type ==  .MOUSE_H_WHEEL {
+		push_event(*uiState, .SCROLL, delta = .[Input.mouse_wheel_delta.horizontal/event.typical_wheel_delta, 0]);
 	}
 
 	if keyString.count == 0 return;

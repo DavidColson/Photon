@@ -233,11 +233,6 @@ update :: (deltaTime: float64) {
 		}
 	}
 
-	for Input.events_this_frame {
-		if it.type == .QUIT then pendingQuit = true;
-		array_add(*uiState.events, it);
-	}
-
 	watcher_update();
 	project_update();
 	
@@ -245,19 +240,18 @@ update :: (deltaTime: float64) {
 	if newDpiScale != dpiScale && newDpiScale != 0.0 {
 		dpiScale = newDpiScale;
 	}
+	
+	for Input.events_this_frame {
+		if it.type == .QUIT then pendingQuit = true;
+		input_handler(it);
+	}
 
 	build_ui();
 
 	flush_pending_commands();
 	
-	// after ui has taken any inputs it wants, we'll give the rest to the default input handler
-	for uiState.events {
-		input_handler(it);
-	}
-	// input_handler may have just mutated document/editor state (e.g. inserted text) that hasn't
-	// been rendered yet this frame; request another frame so we don't go back to sleep and wait
-	// on the next OS message before showing it
-	if uiState.events.count > 0 then requestRedraw = true;
+	if Input.events_this_frame.count > 0 then requestRedraw = true;
+	
 	array_reset_keeping_memory(*uiState.events);
 
 	// edits this frame (possibly from many cursors) only marked the syntax tree dirty, queue one reparse for all of them
@@ -269,7 +263,6 @@ update :: (deltaTime: float64) {
 	}
 
 	// update notifications
-
 	nNotificationsToRemove := 0;
 	it := 0;
 	while it < numActiveNotifications {
@@ -292,7 +285,6 @@ update :: (deltaTime: float64) {
 		requestRedraw = true;
 	}
 
-	// @todo: may want to support 120hz or higher? 
 	reset_temporary_storage();
 }
 
