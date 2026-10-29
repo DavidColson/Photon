@@ -2281,3 +2281,26 @@ normalize_line_endings :: (using panel: *Panel, cursor: *Cursor, endings: Normal
 	end_edit(document, panel);
 } @command
 
+
+// UI commands
+// We send the UI system events depending on what editor mode we're in, so each mode can decide what is appropriate for it
+
+ui_navigate_up :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate up", keybinding = .["<up>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[0, -1]);
+} @command
+ 
+ui_navigate_down :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate down", keybinding = .["<down>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[0, 1]);
+} @command
+
+ui_accept :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
+	push_event(*uiState, .PRESS, action = .ACCEPT);
+} @command
+
+// ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
+	// COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
+	// push_event(*uiState, .PRESS, action = .CANCEL);
+// }

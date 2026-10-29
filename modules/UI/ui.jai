@@ -29,12 +29,13 @@ UIBox :: struct {
 		};
 		colours: struct {
 			background: Vector4;
-			hot: Vector4;
+			hover: Vector4; // mouse hovered
+			hot: Vector4; // keyboard focused, i.e. the selected row in a list
 			active: Vector4;
 			text: Vector4;
 			textHighlight: Vector4;
 			border: Vector4;
-			#overlay (background) colors: [6]Vector4 = ---;
+			#overlay (background) colors: [7]Vector4 = ---;
 		};
 		cornerRadius: Vector4;
 		borderThickness: float;
@@ -57,7 +58,7 @@ UIBox :: struct {
 	viewOffset: Vector2;
 	viewOffsetTarget: Vector2;
 	viewBounds: Vector2;
-	hotTimer: float;
+	hoverTimer: float;
 	activeTimer: float;
 	dragPrevPos: Vector2;
 	// @todo: actually maintain the whole signal state from the previous frame for this
@@ -71,23 +72,24 @@ UIColours :: struct {
 	textDim := #run hex_to_color_vec4("C3C7D099"); // hints and secondary labels
 	textHighlight := #run hex_to_color_vec4("7e90bd");
 	boxBackground := #run hex_to_color_vec4("282C34");
-	boxHot := #run hex_to_color_vec4("636f85");
+	boxHover := #run hex_to_color_vec4("636f85"); // mouse hover
+	boxHot := #run hex_to_color_vec4("4e5665"); // keyboard focus/selection
 	boxActive := #run hex_to_color_vec4("7e90bd");
 	boxBorder := #run hex_to_color_vec4("5C6476");
 
 	// Widget colours
 	popupBackground := #run hex_to_color_vec4("3B414C"); // tooltips, context menus and dialogs
 	textInputBackground := #run hex_to_color_vec4("4e5665");
-	selectedBackground := #run hex_to_color_vec4("4e5665"); // selected list rows TODO: we need to specify a keyboard hot colour or a mouse hot colour
 	
 	buttonBackground := #run hex_to_color_vec4("282C34");
-	buttonHot := #run hex_to_color_vec4("636f85");
+	buttonHover := #run hex_to_color_vec4("636f85");
+	buttonHot := #run hex_to_color_vec4("4e5665");
 	buttonActive := #run hex_to_color_vec4("7e90bd");
 	buttonBorder := #run hex_to_color_vec4("5C6476");
 	
 	scrollBarBackground := #run hex_to_color_vec4("3B414C");
 	scrollBarHandle := #run hex_to_color_vec4("4e5665");
-	scrollBarHandleHot := #run hex_to_color_vec4("636f85");
+	scrollBarHandleHover := #run hex_to_color_vec4("636f85");
 	scrollBarHandleActive := #run hex_to_color_vec4("7e90bd");
 }
 
@@ -179,9 +181,9 @@ UIBoxFlags :: enum_flags {
 	DRAW_SIDE_TOP;
 	DRAW_SIDE_LEFT;
 	DRAW_SIDE_RIGHT;
-	DRAW_HOT_EFFECTS;
+	DRAW_HOVER_EFFECTS;
 	DRAW_ACTIVE_EFFECTS;
-	MOUSE_CLICKABLE;
+	CLICKABLE;
 	FLOATING_X;
 	FLOATING_Y;
 	FIXED_WIDTH;
@@ -252,8 +254,8 @@ UIState :: struct {
 	freeListTail: *UIBox;
 	activeContextMenu: UIKey;
 	nextActiveContextMenu: UIKey;
-	hotBoxKey: UIKey;
-	hotBoxKeyLastFrame: UIKey;
+	hoverBoxKey: UIKey;
+	hoverBoxKeyLastFrame: UIKey;
 	activeBoxKey: UIKey;
 
 	frameIndex: u64;
@@ -342,6 +344,7 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 	// reset properties to defaults, these are then overridden by the setters below
 	box.properties = .{};
 	box.colours.background = uiState.colours.boxBackground;
+	box.colours.hover = uiState.colours.boxHover;
 	box.colours.hot = uiState.colours.boxHot;
 	box.colours.active = uiState.colours.boxActive;
 	box.colours.text = uiState.colours.text;
@@ -403,6 +406,7 @@ set_size :: (box: *UIBox, width: UISize, height: UISize) { box.layout.width = wi
 
 // palette
 set_background_color :: (box: *UIBox, color: Vector4) { box.colours.background = color; }
+set_hover_color :: (box: *UIBox, color: Vector4) { box.colours.hover = color; }
 set_hot_color :: (box: *UIBox, color: Vector4) { box.colours.hot = color; }
 set_active_color :: (box: *UIBox, color: Vector4) { box.colours.active = color; }
 set_text_color :: (box: *UIBox, color: Vector4) { box.colours.text = color; }
@@ -450,17 +454,17 @@ signal_from_box :: (box: *UIBox) -> UISignal {
     x, y, success := get_mouse_pointer_position(renderState.window, false);
 	box_contains_cursor := !contains_point(blacklistRect, xx x, xx y) && contains_point(box.rect, xx x, xx y);
 	
-	if box_contains_cursor && uiState.hotBoxKey == ui_key_nil {
+	if box_contains_cursor && uiState.hoverBoxKey == ui_key_nil {
 		signal.hovering = true;
-		if box.flags & .MOUSE_CLICKABLE {
-			uiState.hotBoxKey = box.key;
+		if box.flags & .CLICKABLE {
+			uiState.hoverBoxKey = box.key;
 		}
 
-		if uiState.hotBoxKeyLastFrame != box.key {
+		if uiState.hoverBoxKeyLastFrame != box.key {
 			signal.hoverEnter = true;
 		}
 	}
-	else if uiState.hotBoxKeyLastFrame == box.key {
+	else if uiState.hoverBoxKeyLastFrame == box.key {
 		signal.hoverExit = true;
 	}
 
@@ -468,13 +472,20 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 		if it.type == {
 			case .PRESS;
 				// left click press
-				if box.flags & .MOUSE_CLICKABLE && it.action == .LEFT_MOUSE && box_contains_cursor { 
+				if box.flags & .CLICKABLE && it.action == .LEFT_MOUSE && box_contains_cursor { 
 					uiState.activeBoxKey = box.key;
 					if box.leftClickStateLastFrame == false {
 						signal.pressed = true;
 					}
 					box.leftClickStateLastFrame = true;
 					box.dragPrevPos = .{xx x,xx y};
+					remove it;
+				}
+			
+				// Keyboard accept on this box if it's focused
+				if box.flags & .CLICKABLE && box.flags & .FOCUS_HOT && it.action == .ACCEPT {
+					uiState.activeBoxKey = box.key;
+					signal.pressed = true;
 					remove it;
 				}
 				
@@ -487,7 +498,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 				}
 			case .RELEASE;
 				// left click release inside box
-				if box.flags & .MOUSE_CLICKABLE
+				if box.flags & .CLICKABLE
 					&& it.action == .LEFT_MOUSE
 					&& uiState.activeBoxKey == box.key
 					&& box_contains_cursor { 
@@ -508,13 +519,13 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 				}
 
 				// left click release outside box
-				if box.flags & .MOUSE_CLICKABLE
+				if box.flags & .CLICKABLE
 					&& it.action == .LEFT_MOUSE
 					&& uiState.activeBoxKey == box.key
 					&& !box_contains_cursor { 
 
 					box.leftClickStateLastFrame = false;
-					uiState.hotBoxKey = ui_key_nil;
+					uiState.hoverBoxKey = ui_key_nil;
 					uiState.activeBoxKey = ui_key_nil;
 					remove it;
 				}
@@ -559,8 +570,8 @@ begin_ui :: () -> *UIBox {
 	set_child_layout_axis(uiState.popupRoot, .Y);
 	set_size(uiState.popupRoot, fixed(xx renderState.windowWidth), fixed(xx renderState.windowHeight));
 
-	uiState.hotBoxKeyLastFrame = uiState.hotBoxKey;
-	uiState.hotBoxKey = ui_key_nil;
+	uiState.hoverBoxKeyLastFrame = uiState.hoverBoxKey;
+	uiState.hoverBoxKey = ui_key_nil;
 	return uiState.root;
 }
 
@@ -622,6 +633,9 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 		uiState.activeContextMenu = uiState.nextActiveContextMenu;
 	}
 
+	// Clear any unused input events
+	array_reset_keeping_memory(*uiState.events);
+	
 	reset(*uiState.frameArena, overwrite_memory=true);
 	uiState.frameIndex += 1;
 	return needsRedraw;
@@ -739,11 +753,12 @@ highlighted_text :: (parent: *UIBox, text: string, highlights: []TextHighlight) 
 
 button :: (parent: *UIBox, width: UISize, height: UISize, text: string) -> bool, *UIBox {
 	button := box(parent, ui_key(text));
-	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
+	add_flags(button, .DRAW_BACKGROUND | .DRAW_TEXT | .CLICKABLE | .DRAW_HOVER_EFFECTS | .DRAW_ACTIVE_EFFECTS);
 	set_text(button, text);
 	set_size(button, width, height);
 	set_text_alignment(button, uiState.style.buttonTextAlign);
 	set_background_color(button, uiState.colours.buttonBackground);
+	set_hover_color(button, uiState.colours.buttonHover);
 	set_hot_color(button, uiState.colours.buttonHot);
 	set_active_color(button, uiState.colours.buttonActive);
 	set_border_color(button, uiState.colours.buttonBorder);
@@ -759,11 +774,12 @@ button :: (parent: *UIBox, text: string) -> bool, *UIBox {
 
 toggle :: (parent: *UIBox, width: UISize, height: UISize, value: *bool, text: string) -> bool, *UIBox {
 	toggle := box(parent, ui_key(text));
-	add_flags(toggle, .DRAW_BACKGROUND | .DRAW_TEXT | .MOUSE_CLICKABLE);
+	add_flags(toggle, .DRAW_BACKGROUND | .DRAW_TEXT | .CLICKABLE);
 	set_text(toggle, text);
 	set_size(toggle, width, height);
 	set_text_alignment(toggle, uiState.style.buttonTextAlign);
 	set_background_color(toggle, uiState.colours.buttonBackground);
+	set_hover_color(toggle, uiState.colours.buttonHover);
 	set_hot_color(toggle, uiState.colours.buttonHot);
 	set_active_color(toggle, uiState.colours.buttonActive);
 	set_border_color(toggle, uiState.colours.buttonBorder);
@@ -772,7 +788,7 @@ toggle :: (parent: *UIBox, width: UISize, height: UISize, value: *bool, text: st
 		set_background_color(toggle, uiState.colours.buttonActive);
 	}
 	else {
-		add_flags(toggle, .DRAW_HOT_EFFECTS);
+		add_flags(toggle, .DRAW_HOVER_EFFECTS);
 	}
 	signal := signal_from_box(toggle);
 	if signal.pressed {
@@ -859,7 +875,7 @@ context_menu :: (key: UIKey, width: UISize, anchorBoxKey:UIKey = .{0,""}, anchor
 context_menu_item :: (menu: *UIBox, label: string, icon: string) -> UISignal {
 	id := menu.childCount;
 	row := box(menu, ui_key("menuitem%", id));
-	add_flags(row, .DRAW_BACKGROUND | .DRAW_HOT_EFFECTS | .MOUSE_CLICKABLE);
+	add_flags(row, .DRAW_BACKGROUND | .DRAW_HOVER_EFFECTS | .CLICKABLE);
 	set_child_layout_axis(row, .X);
 	set_size(row, grow(), fit());
 	set_background_color(row, uiState.colours.popupBackground);
@@ -913,11 +929,11 @@ scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float,
 
 			// handle
 			scrollHandle := box(scrollBarOuter, key);
-			add_flags(scrollHandle, .DRAW_BACKGROUND | .MOUSE_CLICKABLE | .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS);
+			add_flags(scrollHandle, .DRAW_BACKGROUND | .CLICKABLE | .DRAW_HOVER_EFFECTS | .DRAW_ACTIVE_EFFECTS);
 			set_size(scrollHandle, otherAxis, grow());
 			set_size(scrollHandle, scrollAxis, percent(handleSizePct));
 			set_background_color(scrollHandle, uiState.colours.scrollBarHandle);
-			set_hot_color(scrollHandle, uiState.colours.scrollBarHandleHot);
+			set_hover_color(scrollHandle, uiState.colours.scrollBarHandleHover);
 			set_active_color(scrollHandle, uiState.colours.scrollBarHandleActive);
 			set_corner_radius(scrollHandle, em(uiState.style.scrollBarCornerRadius));
 
@@ -948,7 +964,7 @@ scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float,
 }
 
 // Returns the list container, add list elements in the given range as children of it, then call scroll_list_end
-scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: int, selectedElementChanged: bool) -> container: *UIBox, rangeStart: int, rangeEnd: int {
+scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: *s32) -> container: *UIBox, rangeStart: int, rangeEnd: int {
 	outerContainer := box(parent);
 	set_size(outerContainer, grow(), fit());
 
@@ -977,17 +993,20 @@ scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxC
 	container.viewBounds.y = min(cast(float, -(maxElements * elementHeight - maxContainerHeightInner)), 0.0);
 	signal_from_box(container);
 
-	// keyboard scrolling behaviour
-	// @todo: don't really like the fact that we need to do this, need a better way to deal with it
-	// I guess the best solution is that the signal above is what actually changes the element and we manage it inside UI
-	if selectedElementChanged {
-		elementsBeforeTarget := cast(int, floor(abs(container.viewOffsetTarget.y) / elementHeight));
-		if selectedElement < elementsBeforeTarget+1 {
-			distance := elementsBeforeTarget - selectedElement;
-			container.viewOffsetTarget.y = -selectedElement*elementHeight;
-		}
-		if selectedElement > (elementsBeforeTarget+elementsOnScreen-2) {
-			container.viewOffsetTarget.y = -(selectedElement+1)*elementHeight+(maxContainerHeight-em(0.4));
+	// Do keyboard list navigation
+	for uiState.events {
+		if it.type == {
+		case .NAVIGATE;
+			selectedElement.* += it.delta[1];
+			selectedElement.* = clamp(selectedElement.*, 0, xx (maxElements - 1));
+			elementsBeforeTarget := cast(s32, floor(abs(container.viewOffsetTarget.y) / elementHeight));
+			if selectedElement.* < elementsBeforeTarget+1 {
+				distance := elementsBeforeTarget - selectedElement.*;
+				container.viewOffsetTarget.y = -selectedElement.**elementHeight;
+			}
+			if selectedElement.* > (elementsBeforeTarget+elementsOnScreen-2) {
+				container.viewOffsetTarget.y = -(selectedElement.*+1)*elementHeight+(maxContainerHeight-em(0.4));
+			}
 		}
 	}
 
@@ -1029,10 +1048,13 @@ render_ui_recursive :: (box: *UIBox) {
 	if box.flags & .DRAW_BACKGROUND {
 		color := box.colours.background;
 
-		if (box.flags & .DRAW_HOT_EFFECTS && 
-			(uiState.hotBoxKey != ui_key_nil && box.key == uiState.hotBoxKey))
-			|| box.flags & .FOCUS_HOT {
+		// keyboard focus first so mouse hover and active draw over it
+		if box.flags & .FOCUS_HOT {
 			color = box.colours.hot;
+		}
+		if box.flags & .DRAW_HOVER_EFFECTS &&
+			(uiState.hoverBoxKey != ui_key_nil && box.key == uiState.hoverBoxKey) {
+			color = box.colours.hover;
 		}
 		if (box.flags & .DRAW_ACTIVE_EFFECTS &&
 			(uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey))

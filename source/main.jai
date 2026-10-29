@@ -252,8 +252,6 @@ update :: (deltaTime: float64) {
 	
 	if Input.events_this_frame.count > 0 then requestRedraw = true;
 	
-	array_reset_keeping_memory(*uiState.events);
-
 	// edits this frame (possibly from many cursors) only marked the syntax tree dirty, queue one reparse for all of them
 	document_flush_ts_tree(focusedPanel.document);
 
@@ -576,7 +574,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			
 			codeBox := box(codeContainerInner, ui_key("code"));
 			{
-				add_flags(codeBox, .CLIP_CONTENTS | .MOUSE_CLICKABLE);
+				add_flags(codeBox, .CLIP_CONTENTS | .CLICKABLE);
 				set_size(codeBox, grow(), grow());
 				set_font(codeBox, fontCode);
 				set_custom_draw(codeBox, custom_draw_code, cast(*void) panel);
@@ -806,11 +804,8 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 															panel.layoutRect.h/2,
 															elementHeight,
 															panel.commandPalette.numToDisplay,
-															panel.commandPalette.selection,
-															panel.commandPalette.selectionChange);
-
-				if panel.commandPalette.selectionChange then panel.commandPalette.selectionChange = false;
-
+															*panel.commandPalette.selection);
+				
 				for rangeStart..rangeEnd {
 					suggestion := panel.commandPalette.suggestionList[it];
 					selected := it == panel.commandPalette.selection;
@@ -819,10 +814,11 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 
 					entryBox := box(listBox, ui_key("suggestion##%", it));
 					{
-						add_flags(entryBox, .DRAW_HOT_EFFECTS | .DRAW_ACTIVE_EFFECTS | .MOUSE_CLICKABLE | .DRAW_BACKGROUND);
+						add_flags(entryBox, .DRAW_HOVER_EFFECTS | .DRAW_ACTIVE_EFFECTS | .CLICKABLE | .DRAW_BACKGROUND);
+						if selected add_flags(entryBox, .FOCUS_HOT);
 						set_size(entryBox, grow(), fixed(elementHeight));
 						set_padding(entryBox, em(argHandler.suggestionPadding));
-						set_background_color(entryBox, ifx selected editorColours.selectedBackground else editorColours.popupBackground);
+						set_background_color(entryBox, editorColours.popupBackground);
 						signal := signal_from_box(entryBox);
 						if signal.pressed {
 							panel.commandPalette.selection = xx it;

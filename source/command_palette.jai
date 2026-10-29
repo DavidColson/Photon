@@ -32,7 +32,6 @@ CommandPalette :: struct {
 	numToDisplay:s64; // number of items with positive sortkeys
 	suggestionList: [..]Suggestion;
 	selection: s32;
-	selectionChange: bool;
 	editorModeFilter: EditorMode;
 }
 
@@ -151,7 +150,7 @@ command_palette_cancel :: (panel: *Panel) {
 }
 
 command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Execute command", keybinding = .["<enter>"] };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Execute command" };
 	state := *commandPalette;
 
 	if state.pendingCommandMode {
@@ -226,24 +225,6 @@ command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
 	}
 	input.cursor = xx input.text.count;
 }
-
-command_palette_select_next :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Select next", keybinding = .["<down>"] };
-	state := *commandPalette;
-
-	maxItems := state.numToDisplay - 1;
-	state.selection = clamp(state.selection+1, 0, xx maxItems);
-	state.selectionChange = true;
-} @command
-
-command_palette_select_previous :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Select previous", keybinding = .["<up>"] };
-	state := *commandPalette;
-
-	maxItems := state.numToDisplay - 1;
-	state.selection = clamp(state.selection-1, 0, xx maxItems);
-	state.selectionChange = true;
-} @command
 
 command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete", keybinding = .["<backspace>"] };
@@ -1019,21 +1000,15 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 	set_size(lineNumLabel, fixed(em(2.0)), grow());
 	set_font(lineNumLabel, fontCode);
 	set_text_alignment(lineNumLabel, .RIGHT);
-	set_background_color(lineNumLabel, ifx selected then editorColours.selectedBackground else editorColours.boxBackground);
 
-	color := editorColours.boxBackground;
-	if selected {
-		color = editorColours.selectedBackground;
-	}
-	if signal.hovering {
-		color = editorColours.boxHot;
-	}
 	// text is drawn by the custom draw function so it can be syntax highlighted
+	// this box covers the entry box, so it mirrors the entry's hover and focus highlights itself
 	searchResultLabel := box(parent);
 	add_flags(searchResultLabel, .DRAW_BACKGROUND);
 	set_size(searchResultLabel, grow(), grow());
 	set_font(searchResultLabel, fontCode);
-	set_background_color(searchResultLabel, color);
+	set_background_color(searchResultLabel, ifx signal.hovering then editorColours.boxHover else editorColours.boxBackground);
+	if selected && !signal.hovering add_flags(searchResultLabel, .FOCUS_HOT);
 	set_custom_draw(searchResultLabel, custom_draw_search_result, cast(*void, suggestion.payload));
 }
 
