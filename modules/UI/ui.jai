@@ -55,6 +55,7 @@ UIBox :: struct {
 	rect: Rect; // final rect for rendering
 
 	// persistent data
+	userData: *UIBoxUserdata;
 	firstTouchedFrame: u64;
 	lastTouchedFrame: u64;
 	viewOffset: Vector2;
@@ -233,6 +234,11 @@ UIAlignment :: enum {
 	RIGHT;
 }
 
+UIBoxUserdata :: struct {
+	destroy: (*UIBox, *void);
+	pointer: *void;
+}
+
 UIKey :: struct {
 	keyVal:u64;
 	keyStr: string; // debug, @todo remove in release?
@@ -248,7 +254,8 @@ UIState :: struct {
 	root: *UIBox;
 	popupRoot: *UIBox;
 	nextFocusHot: UIFocus;
-	nextFocusActive: UIFocus;
+	nextFocusActive: UIFocus; 
+	transientBoxesWithUserdata: [..]*UIBox;
 
 	// Styling information, pointers so the user can extend the style data
 	style: *UIStyle;
@@ -288,6 +295,8 @@ init_ui :: (style: *UIStyle, colours: *UIColours) {
 
 	uiState.frameIndex = 0;
 
+	uiState.transientBoxesWithUserdata.allocator = uiState.frameAlloc;
+	
 	uiState.style = style;
 	uiState.colours = colours;
 	uiState.fontSize = style.fontSize * uiState.dpiScale;
@@ -387,6 +396,36 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 
 popup :: (key: UIKey = ui_key_nil) -> *UIBox {
 	return box(uiState.popupRoot, key);
+}
+
+set_user_data :: (box: *UIBox, $T: Type, destroy: type_of(UIBoxUserdata.destroy) = null) -> *T, is_new: bool {
+	if box.userData {
+		return cast(*T, box.userData.pointer), false;
+	}
+	
+	ptr : *void;
+	if box.key == ui_key_nil {
+		ptr = alloc(size_of(T) + size_of(UIBoxUserdata),,uiState.frameAlloc);
+		array_add(*uiState.transientBoxesWithUserdata, box);
+	}
+	else {
+		ptr = alloc(size_of(T) + size_of(UIBoxUserdata),,Context_Base.default_allocator);
+	}
+	udata := cast(*UIBoxUserdata, ptr);
+	udata.destroy = destroy;
+	udata.pointer = ptr + size_of(UIBoxUserdata);
+	Initialize(cast(*T, udata.pointer));
+	box.userData = udata;
+	
+	return get_user_data(box, T), true;
+}
+
+get_user_data :: (box: *UIBox, $T: Type) -> *T {
+	// only returns existing userdata, never makes it new
+	if box.userData {
+		return cast(*T, box.userData.pointer);
+	}
+	return null;
 }
 
 // box property setters
@@ -643,6 +682,7 @@ begin_ui :: () -> *UIBox {
 
 	uiState.hoverBoxKeyLastFrame = uiState.hoverBoxKey;
 	uiState.hoverBoxKey = ui_key_nil;
+	
 	return uiState.root;
 }
 
@@ -652,13 +692,17 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 
 	// yeet any unused boxes
 	for uiState.boxTable {
-		if it.lastTouchedFrame < uiState.frameIndex || it.key == ui_key_nil {
+		if it.lastTouchedFrame < uiState.frameIndex {
 			if it.key == uiState.activeBoxKey then uiState.activeBoxKey = ui_key_nil;
+			if it.userData {
+				if it.userData.destroy then it.userData.destroy(it, it.userData.pointer);
+				free(it.userData,,Context_Base.default_allocator);
+			}
 			table_remove(*uiState.boxTable, it.key);
 			linked_list_insert(*uiState.freeListHead, *uiState.freeListTail, uiState.freeListTail, it);
 		}
 	}
-
+	
 	// layout all the boxes
 	compute_layout(uiState.root, .X);
 	compute_layout(uiState.root, .Y);
@@ -706,6 +750,11 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 
 	// Clear any unused input events
 	array_reset_keeping_memory(*uiState.events);
+	
+	for uiState.transientBoxesWithUserdata {
+		if it.userData.destroy then it.userData.destroy(it, it.userData.pointer);
+	}
+	array_reset(*uiState.transientBoxesWithUserdata);
 	
 	reset(*uiState.frameArena, overwrite_memory=true);
 	uiState.frameIndex += 1;
@@ -941,6 +990,15 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	}
 }
 
+TestUData :: struct {
+	myString: string;
+}
+
+destroy_test_udata :: (box: *UIBox, ptr: *void) {
+	udata := cast(*TestUData, ptr);
+	free(udata.myString);
+}
+
 text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool {
 	wasEdited := false;
 	// can't interact with text input that is not focus active
@@ -974,6 +1032,10 @@ text_line_input :: (parent: *UIBox, key: UIKey, /*temp*/ inputField: *InputField
 	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 	inputBox := box(parent, key);
 	{
+		udata, isNew := set_user_data(inputBox, TestUData, destroy_test_udata);
+		if isNew {
+			udata.myString = copy_string("hello world");
+		}
 		add_flags(inputBox, .DRAW_BACKGROUND);
 		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
 		set_corner_radius(inputBox, em(0.2));
