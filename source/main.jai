@@ -731,7 +731,8 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 					on_edit_helper(panel, *panel.searchInput);
 				}
 				
-				edited, textInput := text_line_input(searchContainer, ui_key("search_input"), .FOCUS_ACTIVE, *panel.searchInput);
+				set_next_focus_active(.FOCUSED);
+				edited, textInput := text_line_input(searchContainer, ui_key("search_input"), *panel.searchInput);
 				set_font(textInput, fontCode);
 				if  edited{
 					text := string.{panel.searchInput.text.count, panel.searchInput.text.data}; // TODO: wrap in helper
@@ -818,9 +819,9 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 				// Custom input field, as we have some requirements such as the special handling for backspace
 				// and drawing suggestions in the box
 				
+				set_next_focus_active(.FOCUSED);
 				inputArea := box(inputBox, ui_key("commandPaletteInput"));
 				{
-					add_flags(inputArea, .FOCUS_ACTIVE);
 					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
 					set_custom_draw(inputArea, custom_draw_input_field, cast(*void, *panel.commandPalette.input));
 					
@@ -870,10 +871,10 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 
 					if suggestion.sortKey == 0 continue;
 
+					if selected set_next_focus_hot(.FOCUSED);
 					entryBox := box(listBox, ui_key("suggestion##%", it));
 					{
 						add_flags(entryBox, .DRAW_HOVER_EFFECTS | .CLICKABLE | .DRAW_BACKGROUND);
-						if selected add_flags(entryBox, .FOCUS_HOT);
 						set_size(entryBox, grow(), fixed(elementHeight));
 						set_padding(entryBox, em(argHandler.suggestionPadding));
 						set_background_color(entryBox, editorColours.popupBackground);

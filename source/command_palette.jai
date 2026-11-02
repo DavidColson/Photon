@@ -1005,12 +1005,12 @@ find_in_files_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, sugg
 
 	// text is drawn by the custom draw function so it can be syntax highlighted
 	// this box covers the entry box, so it mirrors the entry's hover and focus highlights itself
+	if selected && !signal.hovering set_next_focus_hot(.FOCUSED);
 	searchResultLabel := box(parent);
 	add_flags(searchResultLabel, .DRAW_BACKGROUND);
 	set_size(searchResultLabel, grow(), grow());
 	set_font(searchResultLabel, fontCode);
 	set_background_color(searchResultLabel, ifx signal.hovering then editorColours.boxHover else editorColours.boxBackground);
-	if selected && !signal.hovering add_flags(searchResultLabel, .FOCUS_HOT);
 	set_custom_draw(searchResultLabel, custom_draw_search_result, cast(*void, suggestion.payload));
 }
 

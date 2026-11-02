@@ -46,6 +46,8 @@ UIBox :: struct {
 	}
 	
 	// per frame working data (must be cleared in box())
+	focusHot: UIFocus;
+	focusActive: UIFocus;
 	textRun: TextRun;
 	fixedPosition: [UIAxis.COUNT]float; // parent relative
 	fixedSize: [UIAxis.COUNT]float;
@@ -194,8 +196,13 @@ UIBoxFlags :: enum_flags {
 	FIXED_WIDTH;
 	FIXED_HEIGHT;
 	CLIP_CONTENTS;
-	FOCUS_HOT;
-	FOCUS_ACTIVE;
+}
+
+UIFocus :: enum {
+	ALLOW_FOCUS;
+	BLOCK_FOCUS;
+	FOCUSED;
+	ROOT; // ignore blocks in the parent chain
 }
 
 UIAxis :: enum {
@@ -240,6 +247,8 @@ UIState :: struct {
 	// Per frame UI data
 	root: *UIBox;
 	popupRoot: *UIBox;
+	nextFocusHot: UIFocus;
+	nextFocusActive: UIFocus;
 
 	// Styling information, pointers so the user can extend the style data
 	style: *UIStyle;
@@ -360,6 +369,12 @@ box :: (parent: *UIBox, key: UIKey = ui_key_nil) -> *UIBox {
 	box.textPadding = em(uiState.style.boxTextPadding);
 	box.layout.childGap = em(uiState.style.boxChildGap);
 	box.layout.padding = .{em(uiState.style.boxPadding.x), em(uiState.style.boxPadding.y), em(uiState.style.boxPadding.z), em(uiState.style.boxPadding.z) };
+	
+	// set focus
+	box.focusHot = uiState.nextFocusHot;
+	box.focusActive = uiState.nextFocusActive;
+	uiState.nextFocusHot = .ALLOW_FOCUS;
+	uiState.nextFocusActive = .ALLOW_FOCUS;
 
 	// insert into parent's list of children
 	if box.parent {
@@ -389,6 +404,11 @@ set_fixed_y :: (box: *UIBox, fixedY: float) {
 	box.fixedPosition[UIAxis.Y] = fixedY;
 	box.flags |= .FLOATING_Y;
 }
+
+// focus
+set_next_focus :: (f: UIFocus) { uiState.nextFocusHot = f; uiState.nextFocusActive = f; }
+set_next_focus_hot :: (f: UIFocus) { uiState.nextFocusHot = f; }
+set_next_focus_active :: (f: UIFocus) { uiState.nextFocusActive = f; }
 
 // text
 set_text :: (box: *UIBox, text: string) { box.text = text; }
@@ -440,6 +460,45 @@ push_event :: (uiState: *UIState, type: UIEvent.Type, delta: [2]s32 = .[0,0], ac
 consume_event :: () #expand {
 	array_ordered_remove_by_index(*uiState.events, `it_index);
 	`it_index -= 1;
+}
+
+is_focus_hot :: (box: *UIBox) -> bool {
+	return claims_hot(box) && !focus_is_vetoed(box, b => b.focusHot);
+}
+
+is_focus_hot_dimmed :: (box: *UIBox) -> bool {   // raddbg's FocusHotDisabled
+	return claims_hot(box) && focus_is_vetoed(box, b => b.focusHot);
+}
+
+is_focus_active :: (box: *UIBox) -> bool {
+	return claims_active(box) && !focus_is_vetoed(box, b => b.focusActive);
+}
+
+is_focus_active_dimmed :: (box: *UIBox) -> bool { 
+	return claims_active(box) && focus_is_vetoed(box, b => b.focusActive);
+}
+
+focus_is_vetoed :: (box: *UIBox, get: (*UIBox) -> UIFocus) -> bool {
+	p := box.parent;
+	while p {
+		f := get(p);
+		if f == .ROOT return false;
+		if f == .BLOCK_FOCUS  return true;
+		p = p.parent;
+	}
+	return false;
+}
+
+claims_hot :: (box: *UIBox) -> bool {
+	if box.focusHot == .FOCUSED return true;
+	return false;
+	// TODO: for default nav, you would climb up the tree here to find the nav root and see if this box is the hot one
+}
+
+claims_active :: (box: *UIBox) -> bool {
+	if box.focusActive == .FOCUSED return true;
+	return false;
+	// TODO: for default nav, you would climb up the tree here to find the nav root and see if this box is the active one
 }
 
 signal_from_box :: (box: *UIBox) -> UISignal {
@@ -495,7 +554,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 				}
 			
 				// Keyboard accept on this box if it's focused
-				if box.flags & .CLICKABLE && box.flags & .FOCUS_HOT && it.action == .ACCEPT {
+				if box.flags & .CLICKABLE && is_focus_hot(box) && it.action == .ACCEPT {
 					uiState.activeBoxKey = box.key;
 					signal.pressed = true;
 					consume_event();
@@ -867,7 +926,7 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	cursorOffsetX := generate_text_run(string.{inputField.cursor, inputField.text.data}, xx box.fontSize, box.font,,temp).width;
 	
 	// draw cursor
-	if box.flags & .FOCUS_ACTIVE {
+	if is_focus_active(box) {
 		cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
 		submit_instance(.{
 			dstRect = .{
@@ -885,7 +944,7 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool {
 	wasEdited := false;
 	// can't interact with text input that is not focus active
-	if !(box.flags & .FOCUS_ACTIVE) {
+	if !is_focus_active(box) {
 		return false;
 	}
 	
@@ -911,12 +970,11 @@ text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool 
 	return wasEdited;
 }
 
-text_line_input :: (parent: *UIBox, key: UIKey, flagsToAdd: UIBoxFlags, /*temp*/ inputField: *InputField) -> bool, *UIBox {
+text_line_input :: (parent: *UIBox, key: UIKey, /*temp*/ inputField: *InputField) -> bool, *UIBox {
 	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 	inputBox := box(parent, key);
 	{
 		add_flags(inputBox, .DRAW_BACKGROUND);
-		add_flags(inputBox, flagsToAdd);
 		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
 		set_corner_radius(inputBox, em(0.2));
 		
@@ -926,7 +984,7 @@ text_line_input :: (parent: *UIBox, key: UIKey, flagsToAdd: UIBoxFlags, /*temp*/
 		
 		// I haven't added the draw border flag on, so this doesn't do anything, really
 		// photon needs it's own custom text input field widget tbh
-		if inputBox.flags & .FOCUS_ACTIVE {
+		if is_focus_active(inputBox) {
 			set_border_color(inputBox, uiState.colours.boxActive);
 			set_border_thickness(inputBox, em(0.1));
 		}
@@ -1187,16 +1245,18 @@ render_ui_recursive :: (box: *UIBox) {
 		color := box.colours.background;
 
 		// keyboard focus first so mouse hover and active draw over it
-		if box.flags & .FOCUS_HOT {
+		if is_focus_hot(box) {
 			color = box.colours.hot;
+		}
+		if is_focus_active(box) {
+			color = box.colours.active;
 		}
 		if box.flags & .DRAW_HOVER_EFFECTS &&
 			(uiState.hoverBoxKey != ui_key_nil && box.key == uiState.hoverBoxKey) {
 			color = box.colours.hover;
 		}
-		if (box.flags & .DRAW_ACTIVE_EFFECTS &&
-			(uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey))
-			|| box.flags & .FOCUS_ACTIVE {
+		if box.flags & .DRAW_ACTIVE_EFFECTS &&
+			(uiState.activeBoxKey != ui_key_nil && box.key == uiState.activeBoxKey) {
 			color = box.colours.active;
 		}
 
