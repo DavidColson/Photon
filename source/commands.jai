@@ -906,7 +906,7 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
-	SELECT :: CommandConfig.{ prettyName = "Confirm select all in selection", keybinding = .["<enter>"] };
+	SELECT :: CommandConfig.{ prettyName = "Confirm select all in selection" };
 	if panel.hasMatches && panel.results.count > 0 {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
@@ -952,35 +952,36 @@ start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 	editorMode = .SPLIT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
-	panel.searchInput.onEditCallback = (userData: *void, input: string) {
-		panel := cast(*Panel) userData;
-		
-		array_reset_keeping_memory(*panel.results);
-		panel.hasMatches = false;
-		for cursor: panel.cursors {
-			selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
-			selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
-			hasMatches, results := search(panel.document, panel_search_type(panel), selectionRange, input, stopAtFirstResult=false);
-			
-			panel.hasMatches |= hasMatches;
-			
-			start := selectionRange.start;
-			for result: results {
-				end := shift_offset_line_endings(panel.document, result.start, .REVERSE);
-				if end > start then array_add(*panel.results, {start, end});
-				start = shift_offset_line_endings(panel.document, result.end, .FORWARD);
-			}
-			if selectionEnd > start then array_add(*panel.results, {start, selectionEnd});
-			
-			
-			array_free(results);
-		}
-	} ;
 	panel.searchInput.userData = cast(*void) panel;
 } @command
 
+split_selection_on_edit :: (userData: *void, input: string) {
+	panel := cast(*Panel) userData;
+	
+	array_reset_keeping_memory(*panel.results);
+	panel.hasMatches = false;
+	for cursor: panel.cursors {
+		selectionEnd := shift_offset_line_endings(panel.document, max(cursor.head, cursor.anchor) + 1, .FORWARD);
+		selectionRange := Document.Range.{min(cursor.head, cursor.anchor), selectionEnd};
+		hasMatches, results := search(panel.document, panel_search_type(panel), selectionRange, input, stopAtFirstResult=false);
+		
+		panel.hasMatches |= hasMatches;
+		
+		start := selectionRange.start;
+		for result: results {
+			end := shift_offset_line_endings(panel.document, result.start, .REVERSE);
+			if end > start then array_add(*panel.results, {start, end});
+			start = shift_offset_line_endings(panel.document, result.end, .FORWARD);
+		}
+		if selectionEnd > start then array_add(*panel.results, {start, selectionEnd});
+		
+		
+		array_free(results);
+	}
+} 
+
 confirm_split_selection :: (using panel: *Panel, cursor: *Cursor) {
-	SPLIT :: CommandConfig.{ prettyName = "Confirm split selection", keybinding = .["<enter>"] };
+	SPLIT :: CommandConfig.{ prettyName = "Confirm split selection" };
 	if panel.hasMatches && panel.results.count > 0 {
 		array_reset_keeping_memory(*panel.cursors);
 		for panel.results {
@@ -1678,7 +1679,7 @@ start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
-	SEARCH :: CommandConfig.{ prettyName = "Confirm document search", keybinding = .["<enter>"] };
+	SEARCH :: CommandConfig.{ prettyName = "Confirm document search" };
 	// set real cursor to the match that was found, setup stepping
 	if panel.hasMatches {
 		cursor.anchor = panel.results[0].start;
@@ -2054,34 +2055,6 @@ half_page_down :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 
-// Dialog Commands
-// -----------------------------
-
-search_input_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
-	SEARCH :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
-	SELECT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
-	SPLIT :: CommandConfig.{ prettyName = "Search backward delete", keybinding = .["<backspace>"] };
-	input_field_backward_delete(*searchInput);
-} @command
-
-// text input in any of the dialog modes goes to that dialog's input field
-dialog_handle_text_input :: (panel: *Panel, char: Utf8_Char) {
-	inputField := panel_get_dialog_input_field(panel);
-	if inputField == null then return;
-
-	// control characters (ctrl+backspace sends 0x7f for instance) are not text
-	if char.count == 1 && (char.bytes[0] < 0x20 || char.bytes[0] == 0x7f) then return;
-
-	for 0..char.count-1 {
-		array_add(*inputField.text, char.bytes[it]);
-		inputField.cursor += 1;
-	}
-	if inputField.onEditCallback {
-		inputField.onEditCallback(inputField.userData, string.{inputField.text.count, inputField.text.data});
-	}
-}
-
-
 // Misc Commands
 // ------------------------------
 
@@ -2297,6 +2270,9 @@ ui_navigate_down :: (using panel: *Panel, cursor: *Cursor) {
 
 ui_accept :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
 	push_event(*uiState, .PRESS, action = .ACCEPT);
 } @command
 
@@ -2306,4 +2282,17 @@ ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
 	SPLIT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
 	push_event(*uiState, .PRESS, action = .CANCEL);
+} @command
+
+ui_backspace_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI backspace word", keybinding = .["ctrl+<backspace>"] };
+	push_event(*uiState, .EDIT, unit = .WORD, delta = .[-1, 0], flags = .DELETE);
+} @command
+
+ui_backspace :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
+	push_event(*uiState, .EDIT, unit = .CHAR, delta = .[-1, 0], flags = .DELETE);
 } @command

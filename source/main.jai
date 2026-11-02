@@ -377,7 +377,7 @@ build_ui_empty_panel :: (parent: *UIBox, panel: *Panel) {
 			set_size(dummy, text_content(), text_content());
 		}
 		
-		build_ui_panel_dialogs(panelBox, panel);
+		build_ui_command_palette(panelBox, panel);
 		
 		spacer(panelBox, .Y, fixed(em(5.0)));
 		
@@ -557,7 +557,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 			}
 		}
 		
-		build_ui_panel_dialogs(panelBox, panel);
+		build_ui_command_palette(panelBox, panel);
 		
 		// Draw the main code screen
 		codeContainerOuter := box(panelBox);
@@ -693,7 +693,7 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 						case .SELECT; queue_command(find_command_by_name("cancel_select_all_in_selection"), panel);
 						case .SPLIT; queue_command(find_command_by_name("cancel_split_selection"), panel);
 					}
-					remove it;
+					consume_event();
 					break;
 				}
 			}
@@ -707,41 +707,54 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				set_border_thickness(searchContainer, 1.0);
 				set_child_gap(searchContainer, em(0.4));
 				
+				on_edit_helper :: (panel: *Panel, inputField: *InputField) {
+					text := string.{inputField.text.count, inputField.text.data}; // TODO: wrap in helper
+					if editorMode == {
+					case .SEARCH; document_search_on_edit(panel, text);
+					case .SELECT; select_all_in_selection_on_edit(panel, text);
+					case .SPLIT; split_selection_on_edit(panel, text);
+					}
+				}
+				
 				// regex toggle, highlighted while enabled
 				clicked, regexToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchRegexEnabled, ".*");
 				set_font(regexToggle, fontCode);
 				if clicked {
-					// rerun the search so the results reflect the new mode
-					if panel.searchInput.onEditCallback {
-						panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
-					}
+					on_edit_helper(panel, *panel.searchInput);
 				}
 				
 				// case sensitive toggle, highlighted while enabled
 				caseClicked, caseToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchCaseSensitive, "Aa");
 				set_font(caseToggle, fontCode);
 				if caseClicked {
-					if panel.searchInput.onEditCallback {
-						panel.searchInput.onEditCallback(panel.searchInput.userData, input_field_get_text(*panel.searchInput));
-					}
+					text := string.{panel.searchInput.text.count, panel.searchInput.text.data}; // TODO: wrap in helper
+					on_edit_helper(panel, *panel.searchInput);
 				}
 				
-				// TODO(ui): input field widget here
-				fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
-				inputBox := box(searchContainer, ui_key("search_input"));
-				add_flags(inputBox, .DRAW_BACKGROUND);
-				set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
-				set_corner_radius(inputBox, em(0.2));
-				set_background_color(inputBox, editorColours.textInputBackground);
-				set_font(inputBox, fontCode);
-				set_text_padding(inputBox, em(0.5));
-				set_custom_draw(inputBox, custom_draw_input_field, cast(*void, *panel.searchInput));
+				edited, textInput := text_line_input(searchContainer, ui_key("search_input"), .FOCUS_ACTIVE, *panel.searchInput);
+				set_font(textInput, fontCode);
+				if  edited{
+					text := string.{panel.searchInput.text.count, panel.searchInput.text.data}; // TODO: wrap in helper
+					on_edit_helper(panel, *panel.searchInput);
+				}
+
+				for uiState.events {
+					if it.type == .PRESS && it.action == .ACCEPT {
+						if editorMode == {
+							case .SEARCH; queue_command(find_command_by_name("confirm_document_search"), panel);
+							case .SELECT; queue_command(find_command_by_name("confirm_select_all_in_selection"), panel);
+							case .SPLIT; queue_command(find_command_by_name("confirm_split_selection"), panel);
+						}
+						consume_event();
+						break;
+					}
+				}
 			}
 		}
 	}
 }
 
-build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
+build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 	if editorMode == .COMMAND_PALETTE {
 		paletteWidth := panel.layoutRect.w * 0.5;
 		if panel.commandPalette.currentHandler {
@@ -751,7 +764,7 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 		for uiState.events {
 			if it.type == .PRESS && it.action == .CANCEL {
 				queue_command(find_command_by_name("command_palette_cancel"), panel);
-				remove it;
+				consume_event();
 				break;
 			}
 		}
@@ -802,17 +815,42 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 					}
 				}
 
-				if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
-					currentArg := panel.commandPalette.currentArgIndex;
-					// TODO: capitalize and undo camelcase on this name
-					text(inputBox, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
-				}
-				else {
-					// TODO(ui): refactor into input field widget
-					inputArea := box(inputBox, ui_key("commandPaletteInput"));
+				// Custom input field, as we have some requirements such as the special handling for backspace
+				// and drawing suggestions in the box
+				
+				inputArea := box(inputBox, ui_key("commandPaletteInput"));
+				{
+					add_flags(inputArea, .FOCUS_ACTIVE);
 					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
 					set_custom_draw(inputArea, custom_draw_input_field, cast(*void, *panel.commandPalette.input));
+					
+					if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
+						currentArg := panel.commandPalette.currentArgIndex;
+						// TODO: capitalize and undo camelcase on this name
+						set_text(inputArea, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
+					}
+					
+					// TODO: only if focused handle events
+					for uiState.events {
+						if it.type == .EDIT && it.flags & .DELETE {
+							if it.unit == .WORD {
+								queue_command(find_command_by_name("command_palette_backward_delete_segment"), panel);
+								consume_event();
+							}
+							else if panel.commandPalette.input.text.count == 0 {
+								queue_command(find_command_by_name("command_palette_backward_delete"), panel);
+								consume_event();
+							}
+							break;
+						}
+					}
+					
+					if text_input_behaviour(inputArea, *panel.commandPalette.input) {
+						text := string.{panel.commandPalette.input.text.count, panel.commandPalette.input.text.data}; // TODO: wrap in helper
+						command_palette_filter_and_sort_suggestions(*panel.commandPalette, text);
+					}
 				}
+
 			}
 
 			// Draw the list of suggestions, that are currently relevant
@@ -834,7 +872,7 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 
 					entryBox := box(listBox, ui_key("suggestion##%", it));
 					{
-						add_flags(entryBox, .DRAW_HOVER_EFFECTS | .DRAW_ACTIVE_EFFECTS | .CLICKABLE | .DRAW_BACKGROUND);
+						add_flags(entryBox, .DRAW_HOVER_EFFECTS | .CLICKABLE | .DRAW_BACKGROUND);
 						if selected add_flags(entryBox, .FOCUS_HOT);
 						set_size(entryBox, grow(), fixed(elementHeight));
 						set_padding(entryBox, em(argHandler.suggestionPadding));
@@ -903,55 +941,6 @@ custom_draw_spinner :: (box: *UIBox, udata: *void) {
 	instance.angle = cast(float, time) / 1000.0 * 10;
 	submit_instance(instance);
 
-}
-
-custom_draw_input_field :: (box: *UIBox, udata: *void) {
-	inputField:*InputField = cast(*InputField)udata;
-	text := string.{inputField.text.count, inputField.text.data};
-
-	// draw the input field text
-	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
-	metrics := get_font_metrics(box.font, xx box.fontSize);
-	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
-	xPos := box.rect.x;
-
-	xPos += box.textPadding;
-	xPos = floor(xPos);
-
-	if inputField.isPath {
-		// the path is drawn as plain text, but the segment being edited is brighter than the rest
-		// so it's clear where the suggestions are coming from
-		directory := path_strip_filename(text);
-		leaf := path_filename(text);
-
-		dimmed := box.colours.text;
-		dimmed.w *= 0.6;
-
-		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
-		draw_text_run(directoryRun, xPos, yPos, dimmed);
-
-		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
-		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.colours.text);
-	}
-	else {
-		draw_text_run(box.textRun, xPos, yPos, box.colours.text);
-	}
-
-	// calculate cursor position
-	cursorOffsetX := generate_text_run(string.{inputField.cursor, inputField.text.data}, xx box.fontSize, box.font,,temp).width;
-
-	// draw cursor
-	cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
-	submit_instance(.{
-		dstRect = .{
-			xPos + cursorOffsetX,
-			yPos-metrics.typicalDescender-cursorHeight,
-			2,
-			cursorHeight
-		},
-		color = ifx editorMode == .INSERT then .{1.0, 1.0, 1.0, 1.0} else editorColours.text,
-		shader = .RECTS
-	});
 }
 
 highlight_color_at :: (highlights: [] Highlight, byteOffset: s64, currentIndex: *s64) -> Vector4 {
@@ -1520,17 +1509,7 @@ to_string :: (utf8_char: *Utf8_Char) -> string {
 }
 
 // simple input field
-
-InputField :: struct {
-	text: [..]u8;
-	cursor: s32;
-	onEditCallback: (*void, string);
-	userData: *void;
-
-	// when set the text is a path, so everything but the segment being edited is dimmed
-	// and ctrl+backspace deletes a whole segment
-	isPath: bool;
-}
+// TODO: refactor and move to ui system
 
 input_field_reset :: (inputField: *InputField) {
 	array_reset(*inputField.text);

@@ -79,6 +79,7 @@ UIColours :: struct {
 
 	// Widget colours
 	popupBackground := #run hex_to_color_vec4("3B414C"); // tooltips, context menus and dialogs
+	
 	textInputBackground := #run hex_to_color_vec4("4e5665");
 	
 	buttonBackground := #run hex_to_color_vec4("282C34");
@@ -151,9 +152,13 @@ UIEvent :: struct {
 		WORD;
 		LINE;
 	}
+	Flag :: enum_flags {
+		DELETE;
+	}
 	type: Type;
 	action: Action;
 	unit: Unit;
+	flags: Flag;
 	text: string;
 	delta: [2]s32;
 }
@@ -426,8 +431,15 @@ set_custom_draw :: (box: *UIBox, function: (*UIBox, *void), udata: *void) {
 // Events and input handling
 // ---------------------------
 
-push_event :: (uiState: *UIState, type: UIEvent.Type, delta: [2]s32 = .[0,0], action: UIEvent.Action = .NONE, unit: UIEvent.Unit = .NONE, text: string = "") {
-	array_add(*uiState.events, .{ type, action, unit, text, delta });
+push_event :: (uiState: *UIState, type: UIEvent.Type, delta: [2]s32 = .[0,0], action: UIEvent.Action = .NONE, unit: UIEvent.Unit = .NONE, flags: UIEvent.Flag = 0, text: string = "") {
+	array_add(*uiState.events, .{ type, action, unit, flags, text, delta });
+}
+
+// Use inside a for loop over uiState.events. Unlike remove, this keeps the remaining events in order, which
+// matters for things like text input where they must be applied in the order they happened
+consume_event :: () #expand {
+	array_ordered_remove_by_index(*uiState.events, `it_index);
+	`it_index -= 1;
 }
 
 signal_from_box :: (box: *UIBox) -> UISignal {
@@ -479,14 +491,14 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					}
 					box.leftClickStateLastFrame = true;
 					box.dragPrevPos = .{xx x,xx y};
-					remove it;
+					consume_event();
 				}
 			
 				// Keyboard accept on this box if it's focused
 				if box.flags & .CLICKABLE && box.flags & .FOCUS_HOT && it.action == .ACCEPT {
 					uiState.activeBoxKey = box.key;
 					signal.pressed = true;
-					remove it;
+					consume_event();
 				}
 				
 				// clicking somewhere outside of context menu
@@ -515,7 +527,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					else {
 						box.lastClickTime = now;
 					}
-					remove it;
+					consume_event();
 				}
 
 				// left click release outside box
@@ -527,7 +539,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					box.leftClickStateLastFrame = false;
 					uiState.hoverBoxKey = ui_key_nil;
 					uiState.activeBoxKey = ui_key_nil;
-					remove it;
+					consume_event();
 				}
 
 			case .SCROLL;
@@ -537,7 +549,7 @@ signal_from_box :: (box: *UIBox) -> UISignal {
 					box.viewOffsetTarget.y += it.delta[1]*metrics.lineSpacing*3;
 					box.viewOffsetTarget.y = clamp(box.viewOffsetTarget.y, box.viewBounds.y, 0);
 					box.viewOffsetTarget.x = clamp(box.viewOffsetTarget.x, 0, box.viewBounds.x);
-					remove it;
+					consume_event();
 				}
 		}
 	}
@@ -802,6 +814,131 @@ toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
 	return clicked, toggle;
 }
 
+// TODO: may decide to move text edit widget to it's own file??
+InputField :: struct {
+	text: [..]u8;
+	cursor: s32;
+	onEditCallback: (*void, string);
+	userData: *void;
+	
+	// when set the text is a path, so everything but the segment being edited is dimmed
+	// and ctrl+backspace deletes a whole segment
+	isPath: bool;
+}
+
+custom_draw_input_field :: (box: *UIBox, udata: *void) {
+	inputField:*InputField = cast(*InputField)udata;
+	
+	text := string.{inputField.text.count, inputField.text.data};
+	if inputField.text.count == 0 {
+		// If the text field is empty, we draw the box text as a sort of hint for the user
+		text = box.text;
+	}
+	
+	// draw the input field text
+	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
+	metrics := get_font_metrics(box.font, xx box.fontSize);
+	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
+	xPos := box.rect.x;
+	
+	xPos += box.textPadding;
+	xPos = floor(xPos);
+	
+	if inputField.isPath {
+		// the path is drawn as plain text, but the segment being edited is brighter than the rest
+		// so it's clear where the suggestions are coming from
+		directory := path_strip_filename(text);
+		leaf := path_filename(text);
+		
+		dimmed := box.colours.text;
+		dimmed.w *= 0.6;
+		
+		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
+		draw_text_run(directoryRun, xPos, yPos, dimmed);
+		
+		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
+		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.colours.text);
+	}
+	else {
+		draw_text_run(box.textRun, xPos, yPos, box.colours.text);
+	}
+	
+	// calculate cursor position
+	cursorOffsetX := generate_text_run(string.{inputField.cursor, inputField.text.data}, xx box.fontSize, box.font,,temp).width;
+	
+	// draw cursor
+	if box.flags & .FOCUS_ACTIVE {
+		cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
+		submit_instance(.{
+			dstRect = .{
+				xPos + cursorOffsetX,
+				yPos-metrics.typicalDescender-cursorHeight,
+				2,
+				cursorHeight
+			},
+			color = box.colours.text,
+			shader = .RECTS
+		});
+	}
+}
+
+text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool {
+	wasEdited := false;
+	// can't interact with text input that is not focus active
+	if !(box.flags & .FOCUS_ACTIVE) {
+		return false;
+	}
+	
+	for uiState.events {
+		if it.type == {
+		case .TEXT;
+			for char: it.text {
+				if char < 0x20 || char == 0x7f then continue;
+				array_add(*inputField.text, char);
+				inputField.cursor += 1;
+				wasEdited = true;
+			}
+			consume_event();
+		case .EDIT;
+			if it.flags & .DELETE && it.unit == .CHAR && inputField.text.count > 0 {
+				inputField.text.count -= 1;
+				inputField.cursor = max(inputField.cursor - 1, 0);
+				wasEdited = true;
+				consume_event();
+			}
+		}
+	}
+	return wasEdited;
+}
+
+text_line_input :: (parent: *UIBox, key: UIKey, flagsToAdd: UIBoxFlags, /*temp*/ inputField: *InputField) -> bool, *UIBox {
+	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
+	inputBox := box(parent, key);
+	{
+		add_flags(inputBox, .DRAW_BACKGROUND);
+		add_flags(inputBox, flagsToAdd);
+		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
+		set_corner_radius(inputBox, em(0.2));
+		
+		set_background_color(inputBox, uiState.colours.textInputBackground);
+		set_active_color(inputBox, uiState.colours.textInputBackground);
+		set_hot_color(inputBox, uiState.colours.textInputBackground);
+		
+		// I haven't added the draw border flag on, so this doesn't do anything, really
+		// photon needs it's own custom text input field widget tbh
+		if inputBox.flags & .FOCUS_ACTIVE {
+			set_border_color(inputBox, uiState.colours.boxActive);
+			set_border_thickness(inputBox, em(0.1));
+		}
+		
+		set_font(inputBox, uiState.font);
+		set_text_padding(inputBox, em(0.5));
+		set_custom_draw(inputBox, custom_draw_input_field, cast(*void, inputField));
+	}
+	
+	return text_input_behaviour(inputBox, inputField), inputBox;
+}
+
 tooltip :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {
 	success, anchor := find_box(anchorBoxKey);
 	fixedX, fixedY := 0.0;
@@ -1007,7 +1144,7 @@ scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxC
 			if selectedElement.* > (elementsBeforeTarget+elementsOnScreen-2) {
 				container.viewOffsetTarget.y = -(selectedElement.*+1)*elementHeight+(maxContainerHeight-em(0.4));
 			}
-			remove it;
+			consume_event();
 		}
 	}
 

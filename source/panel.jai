@@ -142,17 +142,6 @@ panel_has_document :: (panel: *Panel) -> bool {
 	return document_get(panel.document) != *nilDocument;
 }
 
-// The input field text input goes to in the current mode, null if the mode has none
-panel_get_dialog_input_field :: (panel: *Panel) -> *InputField {
-	if editorMode == {
-		case .COMMAND_PALETTE; return *panel.commandPalette.input;
-		case .SEARCH; #through;
-		case .SPLIT; #through;
-		case .SELECT; return *panel.searchInput;
-	}
-	return null;
-}
-
 panel_search_type :: (panel: *Panel) -> Document.SearchType {
 	if panel.searchRegexEnabled {
 		return ifx panel.searchCaseSensitive then .REGEX else .REGEX_NOCASE;

@@ -229,7 +229,7 @@ command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
 }
 
 command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete", keybinding = .["<backspace>"] };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete" };
 
 	// deleting with an empty input steps back through the arguments of the pending command
 	if commandPalette.input.text.count == 0 {
@@ -251,7 +251,7 @@ command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 command_palette_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete path segment", keybinding = .["ctrl+<backspace>"] };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete path segment" };
 
 	// this only means something while editing a path, anything else deletes a character as usual
 	if !commandPalette.input.isPath || commandPalette.input.text.count == 0 {

@@ -413,16 +413,21 @@ input_handler :: (event: Input.Event) {
 	if event.type == .TEXT_INPUT {
 		char: Utf8_Char = convert_utf32_to_utf8(event.utf32);
 
-		// if there are no pending key sequences give the text input to a currently focused dialog
-		// otherwise normal insert mode can have it
+		// We give text input to the insert mode handler, or UI otherwise
 		if keyMap.pendingKeyNode == *keyMap.root[editorMode] {
-			if panel_get_dialog_input_field(*focusedPanel) {
-				dialog_handle_text_input(*focusedPanel, char);
-				return;
-			}
-			else if editorMode == .INSERT {
+			if editorMode == {
+			case .INSERT;
 				insert_mode_handle_text_input(char);
 				return;
+			case .COMMAND_PALETTE; #through;
+			case .SEARCH; #through;
+			case .SELECT; #through;
+			case .SPLIT;
+				// Push ui event
+				push_event(*uiState, .TEXT, text = copy_string(to_string(*char),,temp));
+				return;
+			case .NORMAL;
+				// do nothing, allow it to continue below
 			}
 		}
 
