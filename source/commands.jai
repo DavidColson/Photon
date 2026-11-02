@@ -897,6 +897,7 @@ split_selection_on_newlines :: (using panel: *Panel, cursor: *Cursor) {
 
 start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Select All In Selection", keybinding = .["s"] };
+	if !panel_has_document(panel) then return;
 	editorMode = .SELECT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
@@ -916,16 +917,18 @@ confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 		panel.primaryCursor = 0;
 	}
 
-	panel_reset_dialogs(panel);
+	cancel_select_all_in_selection(panel, cursor);
 } @command
 
-cancel_select_all_in_selection :: (using panel: *Panel) {
+cancel_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
+	SELECT :: CommandConfig.{ prettyName = "Cancel select all in selection" };
 	input_field_reset_keeping_memory(*panel.searchInput);
 	panel.searchInput.onEditCallback = null;
 	panel.searchInput.userData = null;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
-}
+	editorMode = .NORMAL;
+} @command
 
 select_all_in_selection_on_edit :: (userData: *void, input: string) {
 	panel := cast(*Panel) userData;
@@ -945,6 +948,7 @@ select_all_in_selection_on_edit :: (userData: *void, input: string) {
 
 start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Split Selection", keybinding = .["S"] };
+	if !panel_has_document(panel) then return;
 	editorMode = .SPLIT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
@@ -987,16 +991,18 @@ confirm_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 		panel.primaryCursor = 0;
 	}
 	
-	panel_reset_dialogs(panel);
+	cancel_split_selection(panel, cursor);
 } @command
 
-cancel_split_selection :: (using panel: *Panel) {
+cancel_split_selection :: (using panel: *Panel, cursor: *Cursor) {
+	SPLIT :: CommandConfig.{ prettyName = "Cancel split selection" };
 	input_field_reset_keeping_memory(*panel.searchInput);
 	panel.searchInput.onEditCallback = null;
 	panel.searchInput.userData = null;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
-}
+	editorMode = .NORMAL;
+} @command
 
 // Normal Mode Changes
 // ------------------------------
@@ -1004,11 +1010,6 @@ cancel_split_selection :: (using panel: *Panel) {
 enter_normal_mode :: (panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
 	INSERT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	SEARCH :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	SELECT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	SPLIT :: CommandConfig.{ prettyName = "Enter normal mode", keybinding = .["<escape>"] };
-	panel_reset_dialogs(panel);
 
 	// if we were in insert mode we must now end the edit
 	if editorMode == .INSERT {
@@ -1033,7 +1034,6 @@ enter_insert_mode_start :: (using panel: *Panel, _cursor: *Cursor) {
 			cursor.anchor = temp;
 		}
 	}
-	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document, panel);
 } @command
@@ -1050,7 +1050,6 @@ enter_insert_mode_end :: (using panel: *Panel, _cursor: *Cursor) {
 		cursor.head = min(cursor.head + 1, get_size(document)-1);
 		cursor.head = shift_offset_line_endings(document, cursor.head, .REVERSE);
 	}
-	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document, panel);
 } @command
@@ -1072,7 +1071,6 @@ enter_insert_mode_line_start :: (using panel: *Panel, _cursor: *Cursor) {
 		cursor.anchor = cursor.head;
 	}
 
-	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document, panel);
 } @command
@@ -1084,7 +1082,6 @@ enter_insert_mode_line_end :: (using panel: *Panel, _cursor: *Cursor) {
 		goto_line_end(panel, cursor);
 	}
 
-	panel_reset_dialogs(panel);
 	editorMode = .INSERT;
 	begin_edit(document, panel);
 } @command
@@ -1668,6 +1665,7 @@ redo :: (using panel: *Panel, cursor: *Cursor) {
 
 start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Search Document", keybinding = .["/"] };
+	if !panel_has_document(panel) then return;
 	// show search bar
 	editorMode = .SEARCH;
 	// results may be left over from n/N, don't let them be confirmed or drawn
@@ -1689,10 +1687,11 @@ confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	}
 	write_register("/", .{panel.searchInput.text.count, panel.searchInput.text.data});
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
-	panel_reset_dialogs(panel);
+	end_document_search(panel, cursor);
 } @command
 
-end_document_search :: (using panel: *Panel) { 
+end_document_search :: (using panel: *Panel, cursor: *Cursor) {
+	SEARCH :: CommandConfig.{ prettyName = "End document search" };
 	panel_scroll_to_line(panel, panel.previousScrollLine);
 	input_field_reset_keeping_memory(*panel.searchInput);
 	panel.searchInput.onEditCallback = null;
@@ -1701,7 +1700,8 @@ end_document_search :: (using panel: *Panel) {
 		array_reset(*panel.results);
 		panel.hasMatches = false;
 	}
-}
+	editorMode = .NORMAL;
+} @command
 
 next_search_result :: (using panel: *Panel, cursor: *Cursor) {
 	NORMAL :: CommandConfig.{ prettyName = "Next search result", keybinding = .["n"] };
@@ -2300,7 +2300,10 @@ ui_accept :: (using panel: *Panel, cursor: *Cursor) {
 	push_event(*uiState, .PRESS, action = .ACCEPT);
 } @command
 
-// ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
-	// COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
-	// push_event(*uiState, .PRESS, action = .CANCEL);
-// }
+ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
+	push_event(*uiState, .PRESS, action = .CANCEL);
+} @command

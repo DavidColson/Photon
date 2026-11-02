@@ -686,6 +686,18 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 		
 		// Draw the search/select dialog
 		if editorMode == .SEARCH || editorMode == .SELECT || editorMode == .SPLIT {
+			for uiState.events {
+				if it.type == .PRESS && it.action == .CANCEL {
+					if editorMode == {
+						case .SEARCH; queue_command(find_command_by_name("end_document_search"), panel);
+						case .SELECT; queue_command(find_command_by_name("cancel_select_all_in_selection"), panel);
+						case .SPLIT; queue_command(find_command_by_name("cancel_split_selection"), panel);
+					}
+					remove it;
+					break;
+				}
+			}
+
 			searchContainer := box(panelBox);
 			{
 				add_flags(searchContainer, .DRAW_BACKGROUND | .DRAW_SIDE_TOP);
@@ -734,6 +746,14 @@ build_ui_panel_dialogs :: (parent: *UIBox, panel: *Panel) {
 		paletteWidth := panel.layoutRect.w * 0.5;
 		if panel.commandPalette.currentHandler {
 			paletteWidth = panel.layoutRect.w * panel.commandPalette.currentHandler.rowWidthPercent;
+		}
+
+		for uiState.events {
+			if it.type == .PRESS && it.action == .CANCEL {
+				queue_command(find_command_by_name("command_palette_cancel"), panel);
+				remove it;
+				break;
+			}
 		}
 
 		commandPaletteContainer := box(parent);

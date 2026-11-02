@@ -138,16 +138,8 @@ panel_clear_syntax_history :: (panel: *Panel) {
 	array_reset(*panel.syntaxSelectionsHistory);
 }
 
-// Closes whatever dialog is open, returning to normal mode. Does nothing in normal or insert mode
-panel_reset_dialogs :: (panel: *Panel) {
-	if editorMode == {
-		case .COMMAND_PALETTE; command_palette_cancel(panel);
-		case .SEARCH; end_document_search(panel);
-		case .SELECT; cancel_select_all_in_selection(panel);
-		case .SPLIT; cancel_split_selection(panel);
-		case; return;
-	}
-	editorMode = .NORMAL;
+panel_has_document :: (panel: *Panel) -> bool {
+	return document_get(panel.document) != *nilDocument;
 }
 
 // The input field text input goes to in the current mode, null if the mode has none

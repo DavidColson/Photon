@@ -141,13 +141,15 @@ command_palette_has_valid_selection :: (state: *CommandPalette) -> bool {
 }
 
 // Used when the dialog is dismissed without a command having run to completion
-command_palette_cancel :: (panel: *Panel) {
+command_palette_cancel :: (panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Cancel command palette" };
 	using panel.commandPalette;
 	cancel_deferred_command(*pendingCommand);
 	pendingCommandMode = false;
 	currentArgIndex = 0;
 	command_palette_reset(panel);
-}
+	editorMode = .NORMAL;
+} @command
 
 command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Execute command" };
