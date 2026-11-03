@@ -901,8 +901,6 @@ start_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	editorMode = .SELECT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
-	panel.searchInput.onEditCallback = select_all_in_selection_on_edit;
-	panel.searchInput.userData = cast(*void) panel;
 } @command
 
 confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
@@ -922,16 +920,12 @@ confirm_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 cancel_select_all_in_selection :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "Cancel select all in selection" };
-	input_field_reset_keeping_memory(*panel.searchInput);
-	panel.searchInput.onEditCallback = null;
-	panel.searchInput.userData = null;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 	editorMode = .NORMAL;
 } @command
 
-select_all_in_selection_on_edit :: (userData: *void, input: string) {
-	panel := cast(*Panel) userData;
+select_all_in_selection_on_edit :: (panel: *Panel, input: string) {
 	
 	// Search fully in the current range of all selections
 	array_reset_keeping_memory(*panel.results);
@@ -952,12 +946,9 @@ start_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 	editorMode = .SPLIT;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
-	panel.searchInput.userData = cast(*void) panel;
 } @command
 
-split_selection_on_edit :: (userData: *void, input: string) {
-	panel := cast(*Panel) userData;
-	
+split_selection_on_edit :: (panel: *Panel, input: string) {
 	array_reset_keeping_memory(*panel.results);
 	panel.hasMatches = false;
 	for cursor: panel.cursors {
@@ -997,9 +988,6 @@ confirm_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 
 cancel_split_selection :: (using panel: *Panel, cursor: *Cursor) {
 	SPLIT :: CommandConfig.{ prettyName = "Cancel split selection" };
-	input_field_reset_keeping_memory(*panel.searchInput);
-	panel.searchInput.onEditCallback = null;
-	panel.searchInput.userData = null;
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 	editorMode = .NORMAL;
@@ -1673,8 +1661,6 @@ start_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 	write_register("/", "");
-	panel.searchInput.onEditCallback = document_search_on_edit;
-	panel.searchInput.userData = cast(*void) panel;
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
 } @command
 
@@ -1686,7 +1672,7 @@ confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
 		cursor.head = panel.results[0].end-1;
 		keep_primary_selection(panel, cursor);
 	}
-	write_register("/", .{panel.searchInput.text.count, panel.searchInput.text.data});
+	write_register("/", panel_get_search_text(panel));
 	panel.previousScrollLine = panel_get_current_scrolled_line(panel);
 	end_document_search(panel, cursor);
 } @command
@@ -1694,9 +1680,6 @@ confirm_document_search :: (using panel: *Panel, cursor: *Cursor) {
 end_document_search :: (using panel: *Panel, cursor: *Cursor) {
 	SEARCH :: CommandConfig.{ prettyName = "End document search" };
 	panel_scroll_to_line(panel, panel.previousScrollLine);
-	input_field_reset_keeping_memory(*panel.searchInput);
-	panel.searchInput.onEditCallback = null;
-	panel.searchInput.userData = null;
 	if panel.results.count {
 		array_reset(*panel.results);
 		panel.hasMatches = false;
@@ -1830,8 +1813,7 @@ search_selection :: (using panel: *Panel, cursor: *Cursor) {
 	push_notification("Selection copied to search register");
 } @command
 
-document_search_on_edit :: (userData: *void, input: string) {
-	panel := cast(*Panel) userData;
+document_search_on_edit :: (panel: *Panel, input: string) {
 	array_reset(*panel.results);
 	panel.hasMatches = false;
 

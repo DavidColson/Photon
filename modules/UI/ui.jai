@@ -42,7 +42,7 @@ UIBox :: struct {
 		fontSize: float;
 		font: *Font;
 		customDrawFunction: (*UIBox, *void);
-		customDrawUdata: *void;
+		customDrawUdata: *void; // TODO: replace with generic userdata 
 	}
 	
 	// per frame working data (must be cleared in box())
@@ -237,6 +237,8 @@ UIAlignment :: enum {
 UIBoxUserdata :: struct {
 	destroy: (*UIBox, *void);
 	pointer: *void;
+	type: *Type_Info;
+	next: *UIBoxUserdata;
 }
 
 UIKey :: struct {
@@ -255,7 +257,6 @@ UIState :: struct {
 	popupRoot: *UIBox;
 	nextFocusHot: UIFocus;
 	nextFocusActive: UIFocus; 
-	transientBoxesWithUserdata: [..]*UIBox;
 
 	// Styling information, pointers so the user can extend the style data
 	style: *UIStyle;
@@ -295,8 +296,6 @@ init_ui :: (style: *UIStyle, colours: *UIColours) {
 
 	uiState.frameIndex = 0;
 
-	uiState.transientBoxesWithUserdata.allocator = uiState.frameAlloc;
-	
 	uiState.style = style;
 	uiState.colours = colours;
 	uiState.fontSize = style.fontSize * uiState.dpiScale;
@@ -398,32 +397,35 @@ popup :: (key: UIKey = ui_key_nil) -> *UIBox {
 	return box(uiState.popupRoot, key);
 }
 
-set_user_data :: (box: *UIBox, $T: Type, destroy: type_of(UIBoxUserdata.destroy) = null) -> *T, is_new: bool {
-	if box.userData {
-		return cast(*T, box.userData.pointer), false;
-	}
+add_user_data :: (box: *UIBox, $T: Type, destroy: type_of(UIBoxUserdata.destroy) = null) -> *T, is_new: bool {
+	existing := get_user_data(box, T);	
+	if existing then return existing, false;
 	
-	ptr : *void;
-	if box.key == ui_key_nil {
-		ptr = alloc(size_of(T) + size_of(UIBoxUserdata),,uiState.frameAlloc);
-		array_add(*uiState.transientBoxesWithUserdata, box);
-	}
-	else {
-		ptr = alloc(size_of(T) + size_of(UIBoxUserdata),,Context_Base.default_allocator);
-	}
+	assert(box.key != ui_key_nil, "Trasient boxes can't host userdata");
+	
+	// add it new
+	ptr := alloc(size_of(T) + size_of(UIBoxUserdata),,Context_Base.default_allocator);
 	udata := cast(*UIBoxUserdata, ptr);
 	udata.destroy = destroy;
 	udata.pointer = ptr + size_of(UIBoxUserdata);
+	udata.type = type_info(T);
 	Initialize(cast(*T, udata.pointer));
+
+	// place at the front of the list, order doesn't matter as lookups are by type
+	udata.next = box.userData;
 	box.userData = udata;
-	
-	return get_user_data(box, T), true;
+
+	return cast(*T, udata.pointer), true;
 }
 
 get_user_data :: (box: *UIBox, $T: Type) -> *T {
 	// only returns existing userdata, never makes it new
-	if box.userData {
-		return cast(*T, box.userData.pointer);
+	userData: *UIBoxUserdata = box.userData;
+	while userData {
+		if userData.type == type_info(T) {
+			return cast(*T, userData.pointer);
+		}
+		userData = userData.next;
 	}
 	return null;
 }
@@ -694,10 +696,14 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 	for uiState.boxTable {
 		if it.lastTouchedFrame < uiState.frameIndex {
 			if it.key == uiState.activeBoxKey then uiState.activeBoxKey = ui_key_nil;
-			if it.userData {
-				if it.userData.destroy then it.userData.destroy(it, it.userData.pointer);
-				free(it.userData,,Context_Base.default_allocator);
+			userData := it.userData;
+			while userData {
+				next := userData.next;
+				if userData.destroy then userData.destroy(it, userData.pointer);
+				free(userData,,Context_Base.default_allocator);
+				userData = next;
 			}
+			it.userData = null;
 			table_remove(*uiState.boxTable, it.key);
 			linked_list_insert(*uiState.freeListHead, *uiState.freeListTail, uiState.freeListTail, it);
 		}
@@ -750,11 +756,6 @@ end_ui :: (deltaTime: float64) -> needsRedraw: bool {
 
 	// Clear any unused input events
 	array_reset_keeping_memory(*uiState.events);
-	
-	for uiState.transientBoxesWithUserdata {
-		if it.userData.destroy then it.userData.destroy(it, it.userData.pointer);
-	}
-	array_reset(*uiState.transientBoxesWithUserdata);
 	
 	reset(*uiState.frameArena, overwrite_memory=true);
 	uiState.frameIndex += 1;
@@ -923,83 +924,87 @@ toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
 }
 
 // TODO: may decide to move text edit widget to it's own file??
-InputField :: struct {
+
+// Internal state of a text input, stored as userdata on the input's box
+// Outside of UI building code you can get at it with find_user_data(key, TextInputData)
+TextInputData :: struct {
 	text: [..]u8;
 	cursor: s32;
-	onEditCallback: (*void, string);
-	userData: *void;
+}
+
+destroy_text_input_data :: (box: *UIBox, ptr: *void) {
+	udata := cast(*TextInputData, ptr);
+	array_reset(*udata.text);
+}
+
+text_input_get_text :: (box: *UIBox) -> string {
+	textInputData := get_user_data(box, TextInputData);
 	
-	// when set the text is a path, so everything but the segment being edited is dimmed
-	// and ctrl+backspace deletes a whole segment
-	isPath: bool;
+	if !textInputData then return "";
+	return string.{textInputData.text.count, textInputData.text.data};
+}
+
+text_input_set_text :: (box: *UIBox, text: string) {
+	textInputData := get_user_data(box, TextInputData);
+	
+	textInputData.text.count = 0;
+	for 0..text.count-1 {
+		array_add(*textInputData.text, text[it]);
+	}
+	textInputData.cursor = xx textInputData.text.count;
+}
+
+text_input_clear :: (box: *UIBox) {
+	textInputData := get_user_data(box, TextInputData);
+	
+	if !textInputData then return;
+	textInputData.text.count = 0;
+	textInputData.cursor = 0;
+}
+
+// draws the cursor if the input is focused, xPos/yPos are the start of the text and it's baseline
+text_input_draw_cursor :: (box: *UIBox, textInputData: *TextInputData, xPos: float, yPos: float) {
+	if !is_focus_active(box) then return;
+	
+	metrics := get_font_metrics(box.font, xx box.fontSize);
+	cursorOffsetX := generate_text_run(string.{textInputData.cursor, textInputData.text.data}, xx box.fontSize, box.font,,temp).width;
+	cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
+	submit_instance(.{
+		dstRect = .{
+			xPos + cursorOffsetX,
+			yPos-metrics.typicalDescender-cursorHeight,
+			2,
+			cursorHeight
+		},
+		color = box.colours.text,
+		shader = .RECTS
+	});
 }
 
 custom_draw_input_field :: (box: *UIBox, udata: *void) {
-	inputField:*InputField = cast(*InputField)udata;
+	textInputData := get_user_data(box, TextInputData);
 	
-	text := string.{inputField.text.count, inputField.text.data};
-	if inputField.text.count == 0 {
+	text := text_input_get_text(box);
+	if text.count == 0 && !is_focus_active(box) {
 		// If the text field is empty, we draw the box text as a sort of hint for the user
 		text = box.text;
 	}
 	
 	// draw the input field text
 	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
-	metrics := get_font_metrics(box.font, xx box.fontSize);
 	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
-	xPos := box.rect.x;
+	xPos := floor(box.rect.x + box.textPadding);
+	draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 	
-	xPos += box.textPadding;
-	xPos = floor(xPos);
-	
-	if inputField.isPath {
-		// the path is drawn as plain text, but the segment being edited is brighter than the rest
-		// so it's clear where the suggestions are coming from
-		directory := path_strip_filename(text);
-		leaf := path_filename(text);
-		
-		dimmed := box.colours.text;
-		dimmed.w *= 0.6;
-		
-		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
-		draw_text_run(directoryRun, xPos, yPos, dimmed);
-		
-		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
-		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.colours.text);
-	}
-	else {
-		draw_text_run(box.textRun, xPos, yPos, box.colours.text);
-	}
-	
-	// calculate cursor position
-	cursorOffsetX := generate_text_run(string.{inputField.cursor, inputField.text.data}, xx box.fontSize, box.font,,temp).width;
-	
-	// draw cursor
-	if is_focus_active(box) {
-		cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
-		submit_instance(.{
-			dstRect = .{
-				xPos + cursorOffsetX,
-				yPos-metrics.typicalDescender-cursorHeight,
-				2,
-				cursorHeight
-			},
-			color = box.colours.text,
-			shader = .RECTS
-		});
-	}
+	text_input_draw_cursor(box, textInputData, xPos, yPos);
 }
 
-TestUData :: struct {
-	myString: string;
-}
-
-destroy_test_udata :: (box: *UIBox, ptr: *void) {
-	udata := cast(*TestUData, ptr);
-	free(udata.myString);
-}
-
-text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool {
+// Handles the keyboard events for a text input, the box must have TextInputData userdata
+// Separate from any visuals, so custom text inputs can share the behaviour
+text_input_behaviour :: (box: *UIBox) -> bool {
+	textInputData := get_user_data(box, TextInputData);
+	assert(textInputData != null, "text_input_behaviour requires TextInputData userdata on the box");
+	
 	wasEdited := false;
 	// can't interact with text input that is not focus active
 	if !is_focus_active(box) {
@@ -1011,31 +1016,31 @@ text_input_behaviour :: (box: *UIBox, /*temp*/ inputField: *InputField) -> bool 
 		case .TEXT;
 			for char: it.text {
 				if char < 0x20 || char == 0x7f then continue;
-				array_add(*inputField.text, char);
-				inputField.cursor += 1;
+				array_add(*textInputData.text, char);
+				textInputData.cursor += 1;
 				wasEdited = true;
 			}
 			consume_event();
 		case .EDIT;
-			if it.flags & .DELETE && it.unit == .CHAR && inputField.text.count > 0 {
-				inputField.text.count -= 1;
-				inputField.cursor = max(inputField.cursor - 1, 0);
-				wasEdited = true;
-				consume_event();
+			if it.flags & .DELETE && it.unit == .CHAR {
+				if textInputData.text.count > 0 {
+					textInputData.text.count -= 1;
+					textInputData.cursor = max(textInputData.cursor - 1, 0);
+					wasEdited = true;
+					consume_event();
+				}
 			}
 		}
 	}
 	return wasEdited;
 }
 
-text_line_input :: (parent: *UIBox, key: UIKey, /*temp*/ inputField: *InputField) -> bool, *UIBox {
+text_input_line :: (parent: *UIBox, key: UIKey) -> bool, *UIBox {
 	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 	inputBox := box(parent, key);
 	{
-		udata, isNew := set_user_data(inputBox, TestUData, destroy_test_udata);
-		if isNew {
-			udata.myString = copy_string("hello world");
-		}
+		add_user_data(inputBox, TextInputData, destroy_text_input_data);
+		
 		add_flags(inputBox, .DRAW_BACKGROUND);
 		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
 		set_corner_radius(inputBox, em(0.2));
@@ -1053,10 +1058,10 @@ text_line_input :: (parent: *UIBox, key: UIKey, /*temp*/ inputField: *InputField
 		
 		set_font(inputBox, uiState.font);
 		set_text_padding(inputBox, em(0.5));
-		set_custom_draw(inputBox, custom_draw_input_field, cast(*void, inputField));
+		set_custom_draw(inputBox, custom_draw_input_field, null);
 	}
 	
-	return text_input_behaviour(inputBox, inputField), inputBox;
+	return text_input_behaviour(inputBox), inputBox;
 }
 
 tooltip :: (anchorBoxKey:UIKey = ui_key_nil, anchorOffset: Vector2 = .{0.0,0.0}) -> *UIBox {

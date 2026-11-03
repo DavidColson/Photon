@@ -707,36 +707,34 @@ build_ui_panel :: (parent: *UIBox, panel: *Panel) {
 				set_border_thickness(searchContainer, 1.0);
 				set_child_gap(searchContainer, em(0.4));
 				
-				on_edit_helper :: (panel: *Panel, inputField: *InputField) {
-					text := string.{inputField.text.count, inputField.text.data}; // TODO: wrap in helper
+				on_edit_helper :: (panel: *Panel) {
+					text := panel_get_search_text(panel);
 					if editorMode == {
 					case .SEARCH; document_search_on_edit(panel, text);
 					case .SELECT; select_all_in_selection_on_edit(panel, text);
 					case .SPLIT; split_selection_on_edit(panel, text);
 					}
 				}
-				
+
 				// regex toggle, highlighted while enabled
 				clicked, regexToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchRegexEnabled, ".*");
 				set_font(regexToggle, fontCode);
 				if clicked {
-					on_edit_helper(panel, *panel.searchInput);
+					on_edit_helper(panel);
 				}
-				
+
 				// case sensitive toggle, highlighted while enabled
 				caseClicked, caseToggle := toggle(searchContainer, fixed(em(2.0)), grow(), *panel.searchCaseSensitive, "Aa");
 				set_font(caseToggle, fontCode);
 				if caseClicked {
-					text := string.{panel.searchInput.text.count, panel.searchInput.text.data}; // TODO: wrap in helper
-					on_edit_helper(panel, *panel.searchInput);
+					on_edit_helper(panel);
 				}
-				
+
 				set_next_focus_active(.FOCUSED);
-				edited, textInput := text_line_input(searchContainer, ui_key("search_input"), *panel.searchInput);
+				edited, textInput := text_input_line(searchContainer, ui_key("search_input"));
 				set_font(textInput, fontCode);
-				if  edited{
-					text := string.{panel.searchInput.text.count, panel.searchInput.text.data}; // TODO: wrap in helper
-					on_edit_helper(panel, *panel.searchInput);
+				if edited {
+					on_edit_helper(panel);
 				}
 
 				for uiState.events {
@@ -822,15 +820,27 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 				set_next_focus_active(.FOCUSED);
 				inputArea := box(inputBox, ui_key("commandPaletteInput"));
 				{
-					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
-					set_custom_draw(inputArea, custom_draw_input_field, cast(*void, *panel.commandPalette.input));
+					textInputData := add_user_data(inputArea, TextInputData, destroy_text_input_data);
 					
-					if panel.commandPalette.input.text.count == 0 && panel.commandPalette.pendingCommandMode {
+					if panel.commandPalette.hasPendingInputText {
+						text_input_set_text(inputArea, string.{panel.commandPalette.pendingInputText.count, panel.commandPalette.pendingInputText.data});
+						panel.commandPalette.pendingInputText.count = 0;
+						panel.commandPalette.hasPendingInputText = false;
+					}
+
+					paletteInputData := add_user_data(inputArea, CommandPaletteInputData);
+					paletteInputData.isPath = panel.commandPalette.currentHandler && panel.commandPalette.currentHandler.pathInput;
+
+					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
+					set_custom_draw(inputArea, custom_draw_command_palette_input, null);
+
+					// the custom draw shows this as a hint while the input is empty
+					if panel.commandPalette.pendingCommandMode {
 						currentArg := panel.commandPalette.currentArgIndex;
 						// TODO: capitalize and undo camelcase on this name
 						set_text(inputArea, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
 					}
-					
+
 					// TODO: only if focused handle events
 					for uiState.events {
 						if it.type == .EDIT && it.flags & .DELETE {
@@ -838,17 +848,16 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 								queue_command(find_command_by_name("command_palette_backward_delete_segment"), panel);
 								consume_event();
 							}
-							else if panel.commandPalette.input.text.count == 0 {
+							else if textInputData.text.count == 0 {
 								queue_command(find_command_by_name("command_palette_backward_delete"), panel);
 								consume_event();
 							}
 							break;
 						}
 					}
-					
-					if text_input_behaviour(inputArea, *panel.commandPalette.input) {
-						text := string.{panel.commandPalette.input.text.count, panel.commandPalette.input.text.data}; // TODO: wrap in helper
-						command_palette_filter_and_sort_suggestions(*panel.commandPalette, text);
+
+					if text_input_behaviour(inputArea) {
+						command_palette_filter_and_sort_suggestions(*panel.commandPalette, text_input_get_text(inputArea));
 					}
 				}
 
@@ -1507,32 +1516,6 @@ to_string :: (utf8_char: *Utf8_Char) -> string {
 	str.data  = *utf8_char.bytes[0];
 	str.count = utf8_char.count;
 	return str;
-}
-
-// simple input field
-// TODO: refactor and move to ui system
-
-input_field_reset :: (inputField: *InputField) {
-	array_reset(*inputField.text);
-	inputField.cursor = 0;
-}
-
-input_field_reset_keeping_memory :: (inputField: *InputField) {
-	inputField.text.count = 0;
-	inputField.cursor = 0;
-}
-
-input_field_get_text :: (inputField: *InputField) -> string {
-	return string.{inputField.text.count, inputField.text.data};
-}
-
-input_field_backward_delete :: (inputField: *InputField) {
-	before := inputField.text.count;
-	inputField.text.count = max(inputField.text.count - 1, 0);
-	inputField.cursor = max(inputField.cursor - 1, 0);
-	if inputField.onEditCallback && before != inputField.text.count {
-		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
-	}
 }
 
 Utf8_Char :: struct {

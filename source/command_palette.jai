@@ -5,7 +5,12 @@ CommandPalette :: struct {
 	// one for every single run of a search (more or less each keypress)
 	perInvocationMem : Flat_Pool;
 	perSearchMem : Flat_Pool;
-	input: InputField;
+
+	// The input text itself lives on the input box as TextInputData, but commands can run when that box
+	// doesn't exist yet (i.e. the palette was opened this frame), so writes are queued here and
+	// applied when the box is next built. Use command_palette_get/set_input_text rather than this directly
+	pendingInputText: [..]u8;
+	hasPendingInputText: bool;
 
 	// stuff for pending command mode
 	pendingCommandMode := false;
@@ -43,10 +48,6 @@ command_palette_open :: (using panel: *Panel, cursor: *Cursor) {
 	commandPalette.suggestionList.allocator = get_per_invocation_allocator(*commandPalette);
 
 	command_palette_populate_suggestions(*commandPalette);
-
-	input_field_reset_keeping_memory(*commandPalette.input);
-	commandPalette.input.onEditCallback = command_palette_input_field_on_edit;
-	commandPalette.input.userData = *commandPalette;
 } @command
 
 command_palette_populate_suggestions :: (using palette: *CommandPalette) {
@@ -56,14 +57,12 @@ command_palette_populate_suggestions :: (using palette: *CommandPalette) {
 	if pendingCommandMode == false {
 		// default mode, suggestions will be a list of commands
 		currentHandler = *commandArgHandler;
-		input.isPath = currentHandler.pathInput;
 		command_populate(palette, null);
 	}
 	else {
 		// show suggestions based on the current commands pending argument
 		pendingArgument := pendingCommand.cmd.args[currentArgIndex];
 		currentHandler = get_arg_handler(pendingArgument.type);
-		input.isPath = currentHandler.pathInput;
 		if currentHandler.populate {
 			currentHandler.populate(palette, pendingArgument.type);
 		}
@@ -111,18 +110,12 @@ command_palette_count_and_sort :: (using palette: *CommandPalette) {
 	quick_sort(suggestionList, compare_entries);
 }
 
-command_palette_input_field_on_edit :: (userData: *void, input: string) {
-	state: *CommandPalette = cast(*CommandPalette) userData;
-	command_palette_filter_and_sort_suggestions(state, input);
-}
-
 command_palette_reset :: (panel: *Panel) {
 	using panel.commandPalette;
 	selection = 0;
 	numToDisplay = 0;
 	currentHandler = null;
 	handlerData = null;
-	input.isPath = false;
 
 	// reset memory
 	// note we don't reset the arg list, this must be done after a command is executed
@@ -131,8 +124,8 @@ command_palette_reset :: (panel: *Panel) {
 	reset(*perInvocationMem);
 	reset(*perSearchMem);
 
-	// input field manages it's own memory
-	input_field_reset_keeping_memory(*input);
+	// the input box may still be around (i.e. the palette is reopened in the same frame for arguments)
+	command_palette_set_input_text(*panel.commandPalette, "");
 	editorMode = .NORMAL;
 }
 
@@ -197,7 +190,7 @@ command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 			deferred_command_invoke(*command);
 		}
 		else {
-			input_field_reset_keeping_memory(*state.input);
+			command_palette_set_input_text(state, "");
 			command_palette_populate_suggestions(*commandPalette);
 		}
 	}
@@ -217,27 +210,83 @@ command_palette_execute_command :: (using panel: *Panel, cursor: *Cursor) {
 
 } @command
 
-// replaces the contents of the palette input field, putting the cursor at the end
-// note this does not run the edit callback, callers are expected to repopulate themselves
-command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
-	input := *palette.input;
-	input.text.count = 0;
-	for 0..text.count-1 {
-		array_add(*input.text, text[it]);
+// Extra userdata on the palette's input box (alongside its TextInputData), read by the custom draw
+CommandPaletteInputData :: struct {
+	// when set the text is a path, so everything but the segment being edited is dimmed
+	isPath: bool;
+}
+
+command_palette_get_input_text :: (palette: *CommandPalette) -> string {
+	if palette.hasPendingInputText {
+		return string.{palette.pendingInputText.count, palette.pendingInputText.data};
 	}
-	input.cursor = xx input.text.count;
+	success, textInput := find_box(ui_key("commandPaletteInput"));
+	if success then return text_input_get_text(textInput);
+	return "";
+}
+
+command_palette_set_input_text :: (palette: *CommandPalette, text: string) {
+	// text may point into pendingInputText itself (i.e. a prefix of it), which is fine as we only ever shrink in place
+	palette.pendingInputText.count = 0;
+	for 0..text.count-1 {
+		array_add(*palette.pendingInputText, text[it]);
+	}
+	palette.hasPendingInputText = true;
+}
+
+custom_draw_command_palette_input :: (box: *UIBox, udata: *void) {
+	textInputData := get_user_data(box, TextInputData);
+	paletteInputData := get_user_data(box, CommandPaletteInputData);
+	
+	text := text_input_get_text(box);
+	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
+	xPos := floor(box.rect.x + box.textPadding);
+	
+	if text.count == 0 {
+		// the palette is always focused, so unlike the default input field we show the hint (box text) while focused
+		hintRun := generate_text_run(box.text, xx box.fontSize, box.font,,temp);
+		
+		dimmed := box.colours.text;
+		dimmed.w *= 0.6;
+		
+		draw_text_run(hintRun, xPos, yPos, dimmed);
+	}
+	else if paletteInputData && paletteInputData.isPath {
+		// the path is drawn as plain text, but the segment being edited is brighter than the rest
+		// so it's clear where the suggestions are coming from
+		directory := path_strip_filename(text);
+		leaf := path_filename(text);
+		
+		dimmed := box.colours.text;
+		dimmed.w *= 0.6;
+		
+		directoryRun := generate_text_run(directory, xx box.fontSize, box.font,,temp);
+		draw_text_run(directoryRun, xPos, yPos, dimmed);
+		
+		leafRun := generate_text_run(leaf, xx box.fontSize, box.font,,temp);
+		draw_text_run(leafRun, xPos + directoryRun.width, yPos, box.colours.text);
+	}
+	else {
+		textRun := generate_text_run(text, xx box.fontSize, box.font,,temp);
+		draw_text_run(textRun, xPos, yPos, box.colours.text);
+	}
+	
+	if text.count > 0 {
+		text_input_draw_cursor(box, textInputData, xPos, yPos);
+	}
 }
 
 command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete" };
 
+	text := command_palette_get_input_text(*commandPalette);
+
 	// deleting with an empty input steps back through the arguments of the pending command
-	if commandPalette.input.text.count == 0 {
+	if text.count == 0 {
 		if commandPalette.currentArgIndex > 0 {
 			commandPalette.currentArgIndex -= 1;
 			commandPalette.handlerData = null;
 			command_palette_populate_suggestions(*commandPalette);
-			return;
 		}
 		else if commandPalette.pendingCommandMode {
 			commandPalette.pendingCommandMode = false;
@@ -245,22 +294,25 @@ command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
 			cancel_deferred_command(*commandPalette.pendingCommand);
 			command_palette_populate_suggestions(*commandPalette);
 		}
+		return;
 	}
 
-	input_field_backward_delete(*commandPalette.input);
+	text.count -= 1;
+	command_palette_set_input_text(*commandPalette, text);
+	command_palette_filter_and_sort_suggestions(*commandPalette, text);
 } @command
 
 command_palette_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete path segment" };
 
+	text := command_palette_get_input_text(*commandPalette);
+	isPath := commandPalette.currentHandler && commandPalette.currentHandler.pathInput;
+
 	// this only means something while editing a path, anything else deletes a character as usual
-	if !commandPalette.input.isPath || commandPalette.input.text.count == 0 {
+	if !isPath || text.count == 0 {
 		command_palette_backward_delete(panel, cursor);
 		return;
 	}
-
-	inputField := *commandPalette.input;
-	text := input_field_get_text(inputField);
 
 	// a trailing separator belongs to the segment we're deleting, so drop it before looking for the previous one
 	if text[text.count-1] == #char "/" || text[text.count-1] == #char "\\" {
@@ -268,11 +320,8 @@ command_palette_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor
 	}
 	text.count = path_strip_filename(text).count;
 
-	inputField.text.count = text.count;
-	inputField.cursor = xx text.count;
-	if inputField.onEditCallback {
-		inputField.onEditCallback(inputField.userData, input_field_get_text(inputField));
-	}
+	command_palette_set_input_text(*commandPalette, text);
+	command_palette_filter_and_sort_suggestions(*commandPalette, text);
 } @command
 
 get_enum_pretty_names ::(enumType: *Type_Info_Enum) -> []string {
@@ -463,7 +512,7 @@ string_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResu
 	// string doesn't need validation
 	// TODO: it probably does tbh
 	value := New(string,,get_per_invocation_allocator(palette));
-	value.* = string.{palette.input.text.count, palette.input.text.data};
+	value.* = command_palette_get_input_text(palette);
 	return .COMMIT, Any.{argType, value};
 }
 
@@ -474,7 +523,7 @@ floatArgHandler := ArgHandler.{
 };
 
 float_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult, Any {
-	argStr := string.{palette.input.text.count, palette.input.text.data};
+	argStr := command_palette_get_input_text(palette);
 	if argType.runtime_size == 4 {
 		val, success := string_to_float(argStr);
 		if !success return .REJECT, Any.{};
@@ -509,7 +558,7 @@ integer_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveRes
 		return .COMMIT, Any.{type_info(T), value};
 	}
 
-	argStr := string.{palette.input.text.count, palette.input.text.data};
+	argStr := command_palette_get_input_text(palette);
 	if argType == {
 	case type_info(s8);  result, value := parse(palette, argStr, s8); return result, value;
 	case type_info(u16); result, value := parse(palette, argStr, u16); return result, value;
@@ -531,9 +580,10 @@ charArgHandler := ArgHandler.{
 };
 
 char_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult, Any {
-	if palette.input.text.count != 1 return .REJECT, Any.{};
+	text := command_palette_get_input_text(palette);
+	if text.count != 1 return .REJECT, Any.{};
 	value := New(u8,,get_per_invocation_allocator(palette));
-	value.* = palette.input.text.data.*;
+	value.* = text[0];
 	return .COMMIT, Any.{argType, value};
 }
 
@@ -1071,7 +1121,7 @@ PathArgState :: struct {
 path_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	
 	path_seed_input :: (palette: *CommandPalette, config: PathArgConfig) {
-		if palette.input.text.count > 0 then return;
+		if command_palette_get_input_text(palette).count > 0 then return;
 		
 		start: string;
 		if config.start == {
@@ -1099,7 +1149,7 @@ path_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		path_seed_input(palette, state.config);
 	}
 
-	text := input_field_get_text(*input);
+	text := command_palette_get_input_text(palette);
 	dir := path_strip_filename(text);
 	
 	path_add_suggestion :: (using palette: *CommandPalette, name: string, kind: PathArgEntry.Kind, fullPath: string) {
@@ -1132,7 +1182,7 @@ path_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 	else {
 		visitor :: (info: *File_Visit_Info, palette: *CommandPalette) {
 			name := copy_string(info.short_name,,get_per_invocation_allocator(palette));
-			directory := path_strip_filename(input_field_get_text(*palette.input));
+			directory := path_strip_filename(command_palette_get_input_text(palette));
 			if info.is_directory {
 				path_add_suggestion(palette, name, .DIRECTORY, tprint("%1%2/", directory, name));
 			}
@@ -1198,7 +1248,7 @@ path_filter :: (using palette: *CommandPalette, filter: string) {
 }
 
 path_resolve :: (palette: *CommandPalette, argType: *Type_Info) -> ResolveResult, Any {
-	text := input_field_get_text(*palette.input);
+	text := command_palette_get_input_text(palette);
 
 	path_commit :: (palette: *CommandPalette, argType: *Type_Info, path: string, exists: bool) -> ResolveResult, Any {
 		value := alloc(argType.runtime_size,,get_per_invocation_allocator(palette));
@@ -1241,7 +1291,7 @@ path_draw_suggestion :: (parent: *UIBox, palette: *CommandPalette, suggestion: *
 
 	if entry.kind == .CREATE {
 		state := cast(*PathArgState, palette.handlerData);
-		text(parent, "% %", state.config.createLabel, input_field_get_text(*palette.input));
+		text(parent, "% %", state.config.createLabel, command_palette_get_input_text(palette));
 		return;
 	}
 

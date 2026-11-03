@@ -46,12 +46,17 @@ Panel :: struct {
 	commandPalette: CommandPalette;
 	
 	// search state (this is too a dialog, may want to group it up)
-	searchInput: InputField;
 	searchRegexEnabled := false;
 	searchCaseSensitive := false;
 	hasMatches := false;
 	previousScrollLine := 0;
 	results: [..]Document.Range;
+}
+
+panel_get_search_text :: (panel: *Panel) -> string {
+	success, textInput := find_box(ui_key("search_input"));
+	if success then return text_input_get_text(textInput);
+	return "";
 }
 
 fileOpenRecency : Table(DocumentHandle, Apollo_Time, given_compare_function=document_handle_compare, given_hash_function=document_handle_hash);
