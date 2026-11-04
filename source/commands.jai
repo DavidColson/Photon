@@ -2250,6 +2250,22 @@ ui_navigate_down :: (using panel: *Panel, cursor: *Cursor) {
 	push_event(*uiState, .NAVIGATE, delta = .[0, 1]);
 } @command
 
+ui_navigate_right :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate right", keybinding = .["<right>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate right", keybinding = .["<right>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate right", keybinding = .["<right>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate right", keybinding = .["<right>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[1, 0]);
+} @command
+
+ui_navigate_left :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate left", keybinding = .["<left>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate left", keybinding = .["<left>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate left", keybinding = .["<left>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate left", keybinding = .["<left>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[-1, 0]);
+} @command
+
 ui_accept :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
 	SEARCH :: CommandConfig.{ prettyName = "UI accept", keybinding = .["<enter>"] };
@@ -2264,6 +2280,38 @@ ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
 	SPLIT :: CommandConfig.{ prettyName = "UI cancel", keybinding = .["<escape>"] };
 	push_event(*uiState, .PRESS, action = .CANCEL);
+} @command
+
+ui_navigate_right_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };
+	push_event(*uiState, .NAVIGATE, unit = .WORD, delta = .[1, 0]);
+} @command
+
+ui_navigate_left_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate left by word", keybinding = .["ctrl+<left>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate left by word", keybinding = .["ctrl+<left>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate left by word", keybinding = .["ctrl+<left>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate left by word", keybinding = .["ctrl+<left>"] };
+	push_event(*uiState, .NAVIGATE, unit = .WORD, delta = .[-1, 0]);
+} @command
+
+ui_navigate_line_start :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
+	push_event(*uiState, .NAVIGATE, unit = .LINE, delta = .[-1, 0]);
+} @command
+
+ui_navigate_line_end :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
+	push_event(*uiState, .NAVIGATE, unit = .LINE, delta = .[1, 0]);
 } @command
 
 ui_backspace_word :: (using panel: *Panel, cursor: *Cursor) {

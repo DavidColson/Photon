@@ -1013,18 +1013,58 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 	
 	for uiState.events {
 		if it.type == {
+		case .NAVIGATE;
+			if it.delta[1] != 0 {
+				continue; // we don't want to eat vertical movements here
+			}
+			if it.unit == {
+			case .NONE; #through;
+			case .CHAR;
+				textInputData.cursor += it.delta[0];
+			case .WORD;
+				if it.delta[0] > 0 {
+					// TODO: we should skip all spaces before continuing
+					first := true;
+					for textInputData.cursor..textInputData.text.count-1 {
+						textInputData.cursor = xx (it+1);
+						if !first && is_space(textInputData.text[it]) {
+							break;
+						}
+						first = false;
+					}
+				}
+				else if it.delta[0] < 0 {
+					first := true;
+					for < 0..textInputData.cursor-1 {
+						if !first && is_space(textInputData.text[it]) {
+							break;
+						}
+						textInputData.cursor = xx it;
+						first = false;
+					}
+				}
+			case .LINE;
+				if it.delta[0] > 0 {
+					textInputData.cursor = xx textInputData.text.count;
+				}
+				else if it.delta[0] < 0 {
+					textInputData.cursor = 0;
+				}
+			}
+			textInputData.cursor = clamp(textInputData.cursor, 0, xx textInputData.text.count);
+			consume_event();
 		case .TEXT;
 			for char: it.text {
 				if char < 0x20 || char == 0x7f then continue;
-				array_add(*textInputData.text, char);
+				array_insert_at(*textInputData.text, char, textInputData.cursor);
 				textInputData.cursor += 1;
 				wasEdited = true;
 			}
 			consume_event();
 		case .EDIT;
 			if it.flags & .DELETE && it.unit == .CHAR {
-				if textInputData.text.count > 0 {
-					textInputData.text.count -= 1;
+				if textInputData.cursor > 0 {
+					array_ordered_remove_by_index(*textInputData.text, textInputData.cursor - 1);
 					textInputData.cursor = max(textInputData.cursor - 1, 0);
 					wasEdited = true;
 					consume_event();

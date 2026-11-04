@@ -134,10 +134,16 @@ initialize_commands_and_keymap :: ()  {
 						advance(*keys, 7); 
 					}
 					else if begins_with(keys, "<pageup>") {
-						advance(*keys, 7); 
+						advance(*keys, 8); 
 					}
 					else if begins_with(keys, "<pagedown>") {
-						advance(*keys, 7); 
+						advance(*keys, 10); 
+					}
+					else if begins_with(keys, "<home>") {
+						advance(*keys, 6); 
+					}
+					else if begins_with(keys, "<end>") {
+						advance(*keys, 5); 
 					}
 					else {
 						advance(*keys, 1); // take just the one letter key
@@ -490,6 +496,12 @@ input_handler :: (event: Input.Event) {
 			}
 			else if event.key_code == .PAGE_DOWN {
 				append(*builder, "<pagedown>");
+			}
+			else if event.key_code == .HOME {
+				append(*builder, "<home>");
+			}
+			else if event.key_code == .END {
+				append(*builder, "<end>");
 			}
 			else if event.key_code == .DELETE {
 				append(*builder, "<delete>");
