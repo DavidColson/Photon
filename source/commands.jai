@@ -2314,6 +2314,22 @@ ui_navigate_left_word :: (using panel: *Panel, cursor: *Cursor) {
 	push_event(*uiState, .NAVIGATE, unit = .WORD, delta = .[-1, 0]);
 } @command
 
+ui_select_to_right_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select to right by word", keybinding = .["ctrl+shift+<right>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select to right by word", keybinding = .["ctrl+shift+<right>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select to right by word", keybinding = .["ctrl+shift+<right>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select to right by word", keybinding = .["ctrl+shift+<right>"] };
+	push_event(*uiState, .NAVIGATE, unit = .WORD, delta = .[1, 0], flags = .SELECT);
+} @command
+
+ui_select_to_left_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select to left by word", keybinding = .["ctrl+shift+<left>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select to left by word", keybinding = .["ctrl+shift+<left>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select to left by word", keybinding = .["ctrl+shift+<left>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select to left by word", keybinding = .["ctrl+shift+<left>"] };
+	push_event(*uiState, .NAVIGATE, unit = .WORD, delta = .[-1, 0], flags = .SELECT);
+} @command
+
 ui_navigate_line_start :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
 	SEARCH :: CommandConfig.{ prettyName = "UI navigate line start", keybinding = .["<home>"] };
@@ -2328,6 +2344,22 @@ ui_navigate_line_end :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
 	SPLIT :: CommandConfig.{ prettyName = "UI navigate line end", keybinding = .["<end>"] };
 	push_event(*uiState, .NAVIGATE, unit = .LINE, delta = .[1, 0]);
+} @command
+
+ui_select_to_line_start :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select to line start", keybinding = .["shift+<home>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select to line start", keybinding = .["shift+<home>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select to line start", keybinding = .["shift+<home>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select to line start", keybinding = .["shift+<home>"] };
+	push_event(*uiState, .NAVIGATE, unit = .LINE, delta = .[-1, 0], flags = .SELECT);
+} @command
+
+ui_select_to_line_end :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select to line end", keybinding = .["shift+<end>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select to line end", keybinding = .["shift+<end>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select to line end", keybinding = .["shift+<end>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select to line end", keybinding = .["shift+<end>"] };
+	push_event(*uiState, .NAVIGATE, unit = .LINE, delta = .[1, 0], flags = .SELECT);
 } @command
 
 ui_backspace_word :: (using panel: *Panel, cursor: *Cursor) {
