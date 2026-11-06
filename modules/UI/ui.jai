@@ -1022,27 +1022,19 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			case .CHAR;
 				textInputData.cursor += it.delta[0];
 			case .WORD;
+				text := textInputData.text;
+				cursor := cast(s64) textInputData.cursor;
 				if it.delta[0] > 0 {
-					// TODO: we should skip all spaces before continuing
-					first := true;
-					for textInputData.cursor..textInputData.text.count-1 {
-						textInputData.cursor = xx (it+1);
-						if !first && is_space(textInputData.text[it]) {
-							break;
-						}
-						first = false;
-					}
+					// skip any whitespace, then move over the word, stopping at the next space
+					while cursor < text.count && is_space(text[cursor])  cursor += 1;
+					while cursor < text.count && !is_space(text[cursor]) cursor += 1;
 				}
 				else if it.delta[0] < 0 {
-					first := true;
-					for < 0..textInputData.cursor-1 {
-						if !first && is_space(textInputData.text[it]) {
-							break;
-						}
-						textInputData.cursor = xx it;
-						first = false;
-					}
+					// skip any whitespace behind us, then move back to the start of the word
+					while cursor > 0 && is_space(text[cursor-1])  cursor -= 1;
+					while cursor > 0 && !is_space(text[cursor-1]) cursor -= 1;
 				}
+				textInputData.cursor = xx cursor;
 			case .LINE;
 				if it.delta[0] > 0 {
 					textInputData.cursor = xx textInputData.text.count;
