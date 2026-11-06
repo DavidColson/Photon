@@ -2282,6 +2282,22 @@ ui_cancel :: (using panel: *Panel, cursor: *Cursor) {
 	push_event(*uiState, .PRESS, action = .CANCEL);
 } @command
 
+ui_select_to_right :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select-to right", keybinding = .["shift+<right>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select-to right", keybinding = .["shift+<right>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select-to right", keybinding = .["shift+<right>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select-to right", keybinding = .["shift+<right>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[1, 0], flags = .SELECT);
+} @command
+
+ui_select_to_left :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select-to left", keybinding = .["shift+<left>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select-to left", keybinding = .["shift+<left>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select-to left", keybinding = .["shift+<left>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select-to left", keybinding = .["shift+<left>"] };
+	push_event(*uiState, .NAVIGATE, delta = .[-1, 0], flags = .SELECT);
+} @command
+
 ui_navigate_right_word :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };
 	SEARCH :: CommandConfig.{ prettyName = "UI navigate right by word", keybinding = .["ctrl+<right>"] };

@@ -84,6 +84,8 @@ UIColours :: struct {
 	popupBackground := #run hex_to_color_vec4("3B414C"); // tooltips, context menus and dialogs
 	
 	textInputBackground := #run hex_to_color_vec4("4e5665");
+	textInputSelection := #run hex_to_color_vec4("8491A9");
+	// textInputSelection := #run hex_to_color_vec4("000000");
 	
 	buttonBackground := #run hex_to_color_vec4("282C34");
 	buttonHover := #run hex_to_color_vec4("636f85");
@@ -157,6 +159,7 @@ UIEvent :: struct {
 	}
 	Flag :: enum_flags {
 		DELETE;
+		SELECT;
 	}
 	type: Type;
 	action: Action;
@@ -930,6 +933,7 @@ toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
 TextInputData :: struct {
 	text: [..]u8;
 	cursor: s32;
+	anchor: s32;
 }
 
 destroy_text_input_data :: (box: *UIBox, ptr: *void) {
@@ -952,6 +956,7 @@ text_input_set_text :: (box: *UIBox, text: string) {
 		array_add(*textInputData.text, text[it]);
 	}
 	textInputData.cursor = xx textInputData.text.count;
+	textInputData.anchor = textInputData.cursor;
 }
 
 text_input_clear :: (box: *UIBox) {
@@ -960,6 +965,7 @@ text_input_clear :: (box: *UIBox) {
 	if !textInputData then return;
 	textInputData.text.count = 0;
 	textInputData.cursor = 0;
+	textInputData.anchor = 0;
 }
 
 // draws the cursor if the input is focused, xPos/yPos are the start of the text and it's baseline
@@ -967,8 +973,31 @@ text_input_draw_cursor :: (box: *UIBox, textInputData: *TextInputData, xPos: flo
 	if !is_focus_active(box) then return;
 	
 	metrics := get_font_metrics(box.font, xx box.fontSize);
-	cursorOffsetX := generate_text_run(string.{textInputData.cursor, textInputData.text.data}, xx box.fontSize, box.font,,temp).width;
+	
 	cursorHeight:float = metrics.typicalAscender-metrics.typicalDescender + metrics.characterHeight*0.2;
+	
+	// draw selection
+	if textInputData.cursor != textInputData.anchor {
+		text := text_input_get_text(box);
+		start := min(textInputData.cursor, textInputData.anchor);
+		end := max(textInputData.cursor, textInputData.anchor);
+		selectionX := generate_text_run(string.{min(start, xx text.count), text.data}, xx box.fontSize, box.font,,temp).width;
+		selectionW := generate_text_run(string.{min(end, xx text.count), text.data}, xx box.fontSize, box.font,,temp).width - selectionX;
+		
+		submit_instance(.{
+			dstRect = .{
+				cast(float)(xPos + selectionX),
+				cast(float)(yPos - metrics.typicalDescender - cursorHeight),
+				cast(float)selectionW,
+				cast(float)metrics.lineSpacing
+			},
+			color = uiState.colours.textInputSelection,
+			shader = .RECTS
+		});
+	}
+	
+	// Draw the actual cursor
+	cursorOffsetX := generate_text_run(string.{textInputData.cursor, textInputData.text.data}, xx box.fontSize, box.font,,temp).width;
 	submit_instance(.{
 		dstRect = .{
 			xPos + cursorOffsetX,
@@ -990,13 +1019,35 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 		text = box.text;
 	}
 	
-	// draw the input field text
-	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
 	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
 	xPos := floor(box.rect.x + box.textPadding);
-	draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 	
 	text_input_draw_cursor(box, textInputData, xPos, yPos);
+	
+	// draw the input field text
+	box.textRun = generate_text_run(text, xx box.fontSize, box.font,,temp);
+	draw_text_run(box.textRun, xPos, yPos, box.colours.text);
+}
+
+// Removes the text between the cursor and anchor, leaving the cursor where the selection started
+// Returns false if there was nothing selected
+text_input_delete_selection :: (textInputData: *TextInputData) -> bool {
+	if textInputData.cursor == textInputData.anchor then return false;
+
+	count := textInputData.text.count;
+	start := clamp(min(textInputData.cursor, textInputData.anchor), 0, xx count);
+	end   := clamp(max(textInputData.cursor, textInputData.anchor), 0, xx count);
+	removed := end - start;
+
+	// shift everything after the selection down over it
+	for start..count-removed-1 {
+		textInputData.text[it] = textInputData.text[it + removed];
+	}
+	textInputData.text.count -= removed;
+
+	textInputData.cursor = start;
+	textInputData.anchor = start;
+	return removed > 0;
 }
 
 // Handles the keyboard events for a text input, the box must have TextInputData userdata
@@ -1044,20 +1095,34 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 				}
 			}
 			textInputData.cursor = clamp(textInputData.cursor, 0, xx textInputData.text.count);
+			if !(it.flags & .SELECT) {
+				textInputData.anchor = textInputData.cursor;
+			}
 			consume_event();
 		case .TEXT;
 			for char: it.text {
 				if char < 0x20 || char == 0x7f then continue;
+				// typing replaces the selection
+				if text_input_delete_selection(textInputData) then wasEdited = true;
 				array_insert_at(*textInputData.text, char, textInputData.cursor);
 				textInputData.cursor += 1;
+				textInputData.anchor = textInputData.cursor;
 				wasEdited = true;
 			}
 			consume_event();
 		case .EDIT;
-			if it.flags & .DELETE && it.unit == .CHAR {
+			if !(it.flags & .DELETE) then continue;
+
+			// with a selection, any delete just removes the selected range
+			if text_input_delete_selection(textInputData) {
+				wasEdited = true;
+				consume_event();
+			}
+			else if it.unit == .CHAR {
 				if textInputData.cursor > 0 {
 					array_ordered_remove_by_index(*textInputData.text, textInputData.cursor - 1);
 					textInputData.cursor = max(textInputData.cursor - 1, 0);
+					textInputData.anchor = textInputData.cursor;
 					wasEdited = true;
 					consume_event();
 				}

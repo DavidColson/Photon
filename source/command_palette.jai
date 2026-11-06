@@ -242,6 +242,10 @@ custom_draw_command_palette_input :: (box: *UIBox, udata: *void) {
 	yPos := floor(box.rect.y + box.rect.h/2.0) + floor(box.fontSize/2.0) - 1.0;
 	xPos := floor(box.rect.x + box.textPadding);
 	
+	if text.count > 0 {
+		text_input_draw_cursor(box, textInputData, xPos, yPos);
+	}
+	
 	if text.count == 0 {
 		// the palette is always focused, so unlike the default input field we show the hint (box text) while focused
 		hintRun := generate_text_run(box.text, xx box.fontSize, box.font,,temp);
@@ -269,10 +273,6 @@ custom_draw_command_palette_input :: (box: *UIBox, udata: *void) {
 	else {
 		textRun := generate_text_run(text, xx box.fontSize, box.font,,temp);
 		draw_text_run(textRun, xPos, yPos, box.colours.text);
-	}
-	
-	if text.count > 0 {
-		text_input_draw_cursor(box, textInputData, xPos, yPos);
 	}
 }
 
