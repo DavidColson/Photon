@@ -2364,7 +2364,18 @@ ui_select_to_line_end :: (using panel: *Panel, cursor: *Cursor) {
 
 ui_backspace_word :: (using panel: *Panel, cursor: *Cursor) {
 	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI backspace word", keybinding = .["ctrl+<backspace>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI backspace word", keybinding = .["ctrl+<backspace>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI backspace word", keybinding = .["ctrl+<backspace>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI backspace word", keybinding = .["ctrl+<backspace>"] };
 	push_event(*uiState, .EDIT, unit = .WORD, delta = .[-1, 0], flags = .DELETE);
+} @command
+
+ui_delete_word :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI delete word", keybinding = .["ctrl+<delete>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI delete word", keybinding = .["ctrl+<delete>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI delete word", keybinding = .["ctrl+<delete>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI delete word", keybinding = .["ctrl+<delete>"] };
+	push_event(*uiState, .EDIT, unit = .WORD, delta = .[1, 0], flags = .DELETE);
 } @command
 
 ui_backspace :: (using panel: *Panel, cursor: *Cursor) {
@@ -2373,4 +2384,12 @@ ui_backspace :: (using panel: *Panel, cursor: *Cursor) {
 	SELECT :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
 	SPLIT :: CommandConfig.{ prettyName = "UI backspace", keybinding = .["<backspace>"] };
 	push_event(*uiState, .EDIT, unit = .CHAR, delta = .[-1, 0], flags = .DELETE);
+} @command
+
+ui_delete :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI delete", keybinding = .["<delete>"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI delete", keybinding = .["<delete>"] };
+	SELECT :: CommandConfig.{ prettyName = "UI delete", keybinding = .["<delete>"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI delete", keybinding = .["<delete>"] };
+	push_event(*uiState, .EDIT, unit = .CHAR, delta = .[1, 0], flags = .DELETE);
 } @command

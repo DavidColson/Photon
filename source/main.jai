@@ -841,18 +841,14 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 						set_text(inputArea, panel.commandPalette.pendingCommand.cmd.args[currentArg].name);
 					}
 
-					// TODO: only if focused handle events
-					for uiState.events {
-						if it.type == .EDIT && it.flags & .DELETE {
-							if it.unit == .WORD {
-								queue_command(find_command_by_name("command_palette_backward_delete_segment"), panel);
+					// Extra handling so backspace deletes pending arguments
+					if textInputData.text.count == 0 {
+						for uiState.events {
+							if it.type == .EDIT && it.flags & .DELETE && it.delta[0] < 0 {
+								queue_command(find_command_by_name("command_palette_previous_argument"), panel);
 								consume_event();
+								break;
 							}
-							else if textInputData.text.count == 0 {
-								queue_command(find_command_by_name("command_palette_backward_delete"), panel);
-								consume_event();
-							}
-							break;
 						}
 					}
 

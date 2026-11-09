@@ -1029,8 +1029,6 @@ custom_draw_input_field :: (box: *UIBox, udata: *void) {
 	draw_text_run(box.textRun, xPos, yPos, box.colours.text);
 }
 
-// Removes the text between the cursor and anchor, leaving the cursor where the selection started
-// Returns false if there was nothing selected
 text_input_delete_selection :: (textInputData: *TextInputData) -> bool {
 	if textInputData.cursor == textInputData.anchor then return false;
 
@@ -1048,6 +1046,43 @@ text_input_delete_selection :: (textInputData: *TextInputData) -> bool {
 	textInputData.cursor = start;
 	textInputData.anchor = start;
 	return removed > 0;
+}
+
+is_text_input_word_separator :: (c: u8) -> bool {
+	return c == #char "/" || c == #char "\\";
+}
+
+text_input_find_word_boundary :: (text: []u8, cursor: s64, direction: s64) -> s64 {
+	is_word_char :: (c: u8) -> bool { return !is_space(c) && !is_text_input_word_separator(c); }
+
+	if direction > 0 {
+		while cursor < text.count && is_space(text[cursor])                    cursor += 1;
+		while cursor < text.count && is_text_input_word_separator(text[cursor]) cursor += 1;
+		while cursor < text.count && is_word_char(text[cursor])                cursor += 1;
+	}
+	else if direction < 0 {
+		while cursor > 0 && is_space(text[cursor-1])                    cursor -= 1;
+		while cursor > 0 && is_text_input_word_separator(text[cursor-1]) cursor -= 1;
+		while cursor > 0 && is_word_char(text[cursor-1])                cursor -= 1;
+	}
+	return cursor;
+}
+
+// Where a NAVIGATE or EDIT event of the given unit/direction would put the cursor, clamped to the text
+text_input_find_target :: (textInputData: *TextInputData, unit: UIEvent.Unit, direction: s64) -> s32 {
+	text := textInputData.text;
+	cursor := cast(s64) textInputData.cursor;
+	if unit == {
+	case .NONE; #through;
+	case .CHAR;
+		cursor += direction;
+	case .WORD;
+		cursor = text_input_find_word_boundary(text, cursor, direction);
+	case .LINE;
+		if direction > 0      cursor = text.count;
+		else if direction < 0 cursor = 0;
+	}
+	return xx clamp(cursor, 0, text.count);
 }
 
 // Handles the keyboard events for a text input, the box must have TextInputData userdata
@@ -1068,33 +1103,7 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			if it.delta[1] != 0 {
 				continue; // we don't want to eat vertical movements here
 			}
-			if it.unit == {
-			case .NONE; #through;
-			case .CHAR;
-				textInputData.cursor += it.delta[0];
-			case .WORD;
-				text := textInputData.text;
-				cursor := cast(s64) textInputData.cursor;
-				if it.delta[0] > 0 {
-					// skip any whitespace, then move over the word, stopping at the next space
-					while cursor < text.count && is_space(text[cursor])  cursor += 1;
-					while cursor < text.count && !is_space(text[cursor]) cursor += 1;
-				}
-				else if it.delta[0] < 0 {
-					// skip any whitespace behind us, then move back to the start of the word
-					while cursor > 0 && is_space(text[cursor-1])  cursor -= 1;
-					while cursor > 0 && !is_space(text[cursor-1]) cursor -= 1;
-				}
-				textInputData.cursor = xx cursor;
-			case .LINE;
-				if it.delta[0] > 0 {
-					textInputData.cursor = xx textInputData.text.count;
-				}
-				else if it.delta[0] < 0 {
-					textInputData.cursor = 0;
-				}
-			}
-			textInputData.cursor = clamp(textInputData.cursor, 0, xx textInputData.text.count);
+			textInputData.cursor = text_input_find_target(textInputData, it.unit, it.delta[0]);
 			if !(it.flags & .SELECT) {
 				textInputData.anchor = textInputData.cursor;
 			}
@@ -1114,19 +1123,13 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			if !(it.flags & .DELETE) then continue;
 
 			// with a selection, any delete just removes the selected range
-			if text_input_delete_selection(textInputData) {
-				wasEdited = true;
-				consume_event();
+			// otherwise select from the cursor to where the equivalent navigation would land, and delete that
+			// delta < 0 deletes backwards (backspace), delta > 0 deletes forwards (delete)
+			if textInputData.cursor == textInputData.anchor {
+				textInputData.anchor = text_input_find_target(textInputData, it.unit, it.delta[0]);
 			}
-			else if it.unit == .CHAR {
-				if textInputData.cursor > 0 {
-					array_ordered_remove_by_index(*textInputData.text, textInputData.cursor - 1);
-					textInputData.cursor = max(textInputData.cursor - 1, 0);
-					textInputData.anchor = textInputData.cursor;
-					wasEdited = true;
-					consume_event();
-				}
-			}
+			if text_input_delete_selection(textInputData) then wasEdited = true;
+			consume_event();
 		}
 	}
 	return wasEdited;

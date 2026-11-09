@@ -276,52 +276,20 @@ custom_draw_command_palette_input :: (box: *UIBox, udata: *void) {
 	}
 }
 
-command_palette_backward_delete :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete" };
+command_palette_previous_argument :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Previous argument" };
 
-	text := command_palette_get_input_text(*commandPalette);
-
-	// deleting with an empty input steps back through the arguments of the pending command
-	if text.count == 0 {
-		if commandPalette.currentArgIndex > 0 {
-			commandPalette.currentArgIndex -= 1;
-			commandPalette.handlerData = null;
-			command_palette_populate_suggestions(*commandPalette);
-		}
-		else if commandPalette.pendingCommandMode {
-			commandPalette.pendingCommandMode = false;
-			commandPalette.handlerData = null;
-			cancel_deferred_command(*commandPalette.pendingCommand);
-			command_palette_populate_suggestions(*commandPalette);
-		}
-		return;
+	if commandPalette.currentArgIndex > 0 {
+		commandPalette.currentArgIndex -= 1;
+		commandPalette.handlerData = null;
+		command_palette_populate_suggestions(*commandPalette);
 	}
-
-	text.count -= 1;
-	command_palette_set_input_text(*commandPalette, text);
-	command_palette_filter_and_sort_suggestions(*commandPalette, text);
-} @command
-
-command_palette_backward_delete_segment :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "Backward delete path segment" };
-
-	text := command_palette_get_input_text(*commandPalette);
-	isPath := commandPalette.currentHandler && commandPalette.currentHandler.pathInput;
-
-	// this only means something while editing a path, anything else deletes a character as usual
-	if !isPath || text.count == 0 {
-		command_palette_backward_delete(panel, cursor);
-		return;
+	else if commandPalette.pendingCommandMode {
+		commandPalette.pendingCommandMode = false;
+		commandPalette.handlerData = null;
+		cancel_deferred_command(*commandPalette.pendingCommand);
+		command_palette_populate_suggestions(*commandPalette);
 	}
-
-	// a trailing separator belongs to the segment we're deleting, so drop it before looking for the previous one
-	if text[text.count-1] == #char "/" || text[text.count-1] == #char "\\" {
-		text.count -= 1;
-	}
-	text.count = path_strip_filename(text).count;
-
-	command_palette_set_input_text(*commandPalette, text);
-	command_palette_filter_and_sort_suggestions(*commandPalette, text);
 } @command
 
 get_enum_pretty_names ::(enumType: *Type_Info_Enum) -> []string {
@@ -369,7 +337,6 @@ ArgHandler :: struct {
 	suggestionPadding: float = 0.2;
 
 	// if set, the input field is treated as a path, dimming everything but the segment being edited
-	// and enabling ctrl+backspace to delete a whole path segment
 	pathInput: bool;
 	
 	// If true, sorting suggestions will be deferred until after async jobs are done
