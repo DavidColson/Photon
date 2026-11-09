@@ -2393,3 +2393,11 @@ ui_delete :: (using panel: *Panel, cursor: *Cursor) {
 	SPLIT :: CommandConfig.{ prettyName = "UI delete", keybinding = .["<delete>"] };
 	push_event(*uiState, .EDIT, unit = .CHAR, delta = .[1, 0], flags = .DELETE);
 } @command
+
+ui_select_all :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI select all", keybinding = .["ctrl+a"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI select all", keybinding = .["ctrl+a"] };
+	SELECT :: CommandConfig.{ prettyName = "UI select all", keybinding = .["ctrl+a"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI select all", keybinding = .["ctrl+a"] };
+	push_event(*uiState, .NAVIGATE, unit = .WHOLE, flags = .SELECT);
+} @command

@@ -156,6 +156,7 @@ UIEvent :: struct {
 		CHAR;
 		WORD;
 		LINE;
+		WHOLE;
 	}
 	Flag :: enum_flags {
 		DELETE;
@@ -934,6 +935,20 @@ TextInputData :: struct {
 	text: [..]u8;
 	cursor: s32;
 	anchor: s32;
+	
+	// Undo
+	// we are not storing so much data here as to require some fancy diff
+	// we can essentially do what rxi suggests, and just store whole copies of the text
+	// the whole thing will be lost anyway when the textbox goes off screen
+	
+	// so before each edit, you simply push a copy of text to an undo stack
+	// and then when you undo, we push the current state onto a redo stack, and
+	// copy the top of the undo stack into the real value
+	// job done
+	
+	// copy paste is quite simple as we don't have registers to worry about
+	// on copy, simply put the selected text into the clipboard
+	// and on paste, we just insert the text
 }
 
 destroy_text_input_data :: (box: *UIBox, ptr: *void) {
@@ -1102,6 +1117,10 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 		case .NAVIGATE;
 			if it.delta[1] != 0 {
 				continue; // we don't want to eat vertical movements here
+			}
+			if it.flags & .SELECT && it.unit == .WHOLE { // select the whole buffer
+				textInputData.anchor = 0;
+				textInputData.cursor = xx textInputData.text.count;
 			}
 			textInputData.cursor = text_input_find_target(textInputData, it.unit, it.delta[0]);
 			if !(it.flags & .SELECT) {
