@@ -14,6 +14,7 @@ Input :: #import "Input";
 #import "Window_Creation";
 #import "File";
 #import "File_Utilities";
+#import "Clipboard";
 #import "Hash";
 #import "Unicode";
 #import "System";

@@ -2401,3 +2401,19 @@ ui_select_all :: (using panel: *Panel, cursor: *Cursor) {
 	SPLIT :: CommandConfig.{ prettyName = "UI select all", keybinding = .["ctrl+a"] };
 	push_event(*uiState, .NAVIGATE, unit = .WHOLE, flags = .SELECT);
 } @command
+
+ui_copy :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+c"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+c"] };
+	SELECT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+c"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+c"] };
+	push_event(*uiState, .EDIT, flags = .COPY);
+} @command
+
+ui_paste :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
+	SELECT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
+	push_event(*uiState, .TEXT, text = copy_string(os_clipboard_get_text(),,temp));
+} @command

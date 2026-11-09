@@ -160,6 +160,7 @@ UIEvent :: struct {
 	}
 	Flag :: enum_flags {
 		DELETE;
+		COPY;
 		SELECT;
 	}
 	type: Type;
@@ -1139,6 +1140,13 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			}
 			consume_event();
 		case .EDIT;
+			if it.flags & .COPY {
+				count := textInputData.text.count;
+				start := clamp(min(textInputData.cursor, textInputData.anchor), 0, xx count);
+				end   := clamp(max(textInputData.cursor, textInputData.anchor), 0, xx count);
+				os_clipboard_set_text(.{end - start, textInputData.text.data + start});
+			}
+			
 			if !(it.flags & .DELETE) then continue;
 
 			// with a selection, any delete just removes the selected range
