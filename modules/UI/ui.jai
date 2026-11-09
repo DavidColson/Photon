@@ -162,6 +162,8 @@ UIEvent :: struct {
 		DELETE;
 		COPY;
 		SELECT;
+		UNDO;
+		REDO;
 	}
 	type: Type;
 	action: Action;
@@ -933,28 +935,36 @@ toggle :: (parent: *UIBox, value: *bool, text: string) -> bool, *UIBox {
 // Internal state of a text input, stored as userdata on the input's box
 // Outside of UI building code you can get at it with find_user_data(key, TextInputData)
 TextInputData :: struct {
+	pool: Flat_Pool;
+	
 	text: [..]u8;
 	cursor: s32;
 	anchor: s32;
 	
-	// Undo
-	// we are not storing so much data here as to require some fancy diff
-	// we can essentially do what rxi suggests, and just store whole copies of the text
-	// the whole thing will be lost anyway when the textbox goes off screen
-	
-	// so before each edit, you simply push a copy of text to an undo stack
-	// and then when you undo, we push the current state onto a redo stack, and
-	// copy the top of the undo stack into the real value
-	// job done
-	
-	// copy paste is quite simple as we don't have registers to worry about
-	// on copy, simply put the selected text into the clipboard
-	// and on paste, we just insert the text
+	UndoItem :: struct {
+		buffer: []u8;
+		cursor: s32;
+		anchor: s32;
+	}
+	undoStack: [..]UndoItem;
+	redoStack: [..]UndoItem;
+
+	// Consecutive small edits of the same kind are grouped into one undo step.
+	// An edit only joins the group if the cursor is still where the last edit left it,
+	// so any cursor movement (keyboard, mouse, etc) starts a new group
+	EditKind :: enum u8 {
+		NONE;
+		TYPE;
+		DELETE_BACKWARD;
+		DELETE_FORWARD;
+	}
+	lastEdit: EditKind;
+	lastEditCursor: s32;
 }
 
 destroy_text_input_data :: (box: *UIBox, ptr: *void) {
 	udata := cast(*TextInputData, ptr);
-	array_reset(*udata.text);
+	fini(*udata.pool);
 }
 
 text_input_get_text :: (box: *UIBox) -> string {
@@ -973,6 +983,7 @@ text_input_set_text :: (box: *UIBox, text: string) {
 	}
 	textInputData.cursor = xx textInputData.text.count;
 	textInputData.anchor = textInputData.cursor;
+	textInputData.lastEdit = .NONE;
 }
 
 text_input_clear :: (box: *UIBox) {
@@ -982,6 +993,7 @@ text_input_clear :: (box: *UIBox) {
 	textInputData.text.count = 0;
 	textInputData.cursor = 0;
 	textInputData.anchor = 0;
+	textInputData.lastEdit = .NONE;
 }
 
 // draws the cursor if the input is focused, xPos/yPos are the start of the text and it's baseline
@@ -1101,6 +1113,50 @@ text_input_find_target :: (textInputData: *TextInputData, unit: UIEvent.Unit, di
 	return xx clamp(cursor, 0, text.count);
 }
 
+text_input_push_undo :: (using textInputData: *TextInputData) {
+	allocator := Allocator.{ proc = flat_pool_allocator_proc, data = *pool };
+	
+	undoItem: UndoItem;
+	undoItem.buffer = array_copy(text,,allocator);
+	undoItem.cursor = cursor;
+	undoItem.anchor = anchor;
+	
+	array_add(*undoStack, undoItem);
+	redoStack.count = 0;
+}
+
+text_input_continues_group :: (using textInputData: *TextInputData, kind: TextInputData.EditKind) -> bool {
+	return lastEdit == kind && cursor == anchor && cursor == lastEditCursor && undoStack.count > 0;
+}
+
+text_input_pop_undo :: (using textInputData: *TextInputData, pop: *[..]TextInputData.UndoItem, store: *[..]TextInputData.UndoItem) -> bool {
+	if pop.count == 0 then return false;
+
+	// whatever comes next must start a fresh undo step
+	lastEdit = .NONE;
+
+	allocator := Allocator.{ proc = flat_pool_allocator_proc, data = *pool };
+	
+	// push the current state as a redo item
+	redoItem: UndoItem;
+	redoItem.buffer = array_copy(text,,allocator);
+	redoItem.cursor = cursor;
+	redoItem.anchor = anchor;
+	
+	array_add(store, redoItem);
+	
+	// pop an item from the undo stack and apply it
+	undoItem := pop.*[pop.count - 1];
+	pop.count -= 1;
+	
+	array_resize(*text, undoItem.buffer.count);
+	memcpy(text.data, undoItem.buffer.data, undoItem.buffer.count);
+	cursor = undoItem.cursor;
+	anchor = undoItem.anchor;
+	
+	return true;
+}
+
 // Handles the keyboard events for a text input, the box must have TextInputData userdata
 // Separate from any visuals, so custom text inputs can share the behaviour
 text_input_behaviour :: (box: *UIBox) -> bool {
@@ -1129,33 +1185,71 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			}
 			consume_event();
 		case .TEXT;
+			// only record an undo step if at least one character will actually be inserted
+			insertsText := false;
+			for char: it.text {
+				if char >= 0x20 && char != 0x7f { insertsText = true; break; }
+			}
+			if !insertsText {
+				consume_event();
+				continue;
+			}
+
+			isTyping := it.text.count == 1;
+			joinsGroup := isTyping && it.text[0] != #char " " && text_input_continues_group(textInputData, .TYPE);
+			if !joinsGroup then text_input_push_undo(textInputData);
+
 			for char: it.text {
 				if char < 0x20 || char == 0x7f then continue;
-				// typing replaces the selection
+				// inserting text deletes the selection
 				if text_input_delete_selection(textInputData) then wasEdited = true;
 				array_insert_at(*textInputData.text, char, textInputData.cursor);
 				textInputData.cursor += 1;
 				textInputData.anchor = textInputData.cursor;
 				wasEdited = true;
 			}
+			textInputData.lastEdit = ifx isTyping then TextInputData.EditKind.TYPE else .NONE;
+			textInputData.lastEditCursor = textInputData.cursor;
 			consume_event();
 		case .EDIT;
+			if it.flags & .UNDO {
+				if text_input_pop_undo(textInputData, *textInputData.undoStack, *textInputData.redoStack) then wasEdited = true;
+				consume_event();
+			}
+			
+			if it.flags & .REDO {
+				if text_input_pop_undo(textInputData, *textInputData.redoStack, *textInputData.undoStack) then wasEdited = true;
+				consume_event();
+			}
+			
 			if it.flags & .COPY {
 				count := textInputData.text.count;
 				start := clamp(min(textInputData.cursor, textInputData.anchor), 0, xx count);
 				end   := clamp(max(textInputData.cursor, textInputData.anchor), 0, xx count);
 				os_clipboard_set_text(.{end - start, textInputData.text.data + start});
+				consume_event();
 			}
 			
 			if !(it.flags & .DELETE) then continue;
 
-			// with a selection, any delete just removes the selected range
-			// otherwise select from the cursor to where the equivalent navigation would land, and delete that
-			// delta < 0 deletes backwards (backspace), delta > 0 deletes forwards (delete)
-			if textInputData.cursor == textInputData.anchor {
-				textInputData.anchor = text_input_find_target(textInputData, it.unit, it.delta[0]);
+			kind: TextInputData.EditKind = ifx it.delta[0] < 0 then TextInputData.EditKind.DELETE_BACKWARD else .DELETE_FORWARD;
+			hadSelection := textInputData.cursor != textInputData.anchor;
+
+			isSmallDelete := !hadSelection && (it.unit == .CHAR || it.unit == .NONE);
+			joinsGroup := isSmallDelete && text_input_continues_group(textInputData, kind);
+
+			deleteTo := textInputData.anchor;
+			if !hadSelection {
+				deleteTo = text_input_find_target(textInputData, it.unit, it.delta[0]);
 			}
-			if text_input_delete_selection(textInputData) then wasEdited = true;
+
+			if textInputData.cursor != deleteTo {
+				if !joinsGroup then text_input_push_undo(textInputData);
+				textInputData.anchor = deleteTo;
+				if text_input_delete_selection(textInputData) then wasEdited = true;
+				textInputData.lastEdit = ifx isSmallDelete then kind else TextInputData.EditKind.NONE;
+				textInputData.lastEditCursor = textInputData.cursor;
+			}
 			consume_event();
 		}
 	}
@@ -1166,7 +1260,12 @@ text_input_line :: (parent: *UIBox, key: UIKey) -> bool, *UIBox {
 	fontMetrics := get_font_metrics(uiState.font, xx uiState.fontSize);
 	inputBox := box(parent, key);
 	{
-		add_user_data(inputBox, TextInputData, destroy_text_input_data);
+		textInputData, isNew := add_user_data(inputBox, TextInputData, destroy_text_input_data);
+		if isNew {
+			textInputData.text.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+			textInputData.undoStack.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+			textInputData.redoStack.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+		}
 		
 		add_flags(inputBox, .DRAW_BACKGROUND);
 		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));

@@ -848,7 +848,7 @@ keep_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 remove_primary_selection :: (using panel: *Panel, cursor: *Cursor) {
-	NORMAL :: CommandConfig.{ prettyName = "Keep primary selection", keybinding = .["alt+,"] };
+	NORMAL :: CommandConfig.{ prettyName = "Remove primary selection", keybinding = .["alt+,"] };
 	if panel.cursors.count > 1 {
 		array_ordered_remove_by_index(*panel.cursors, panel.primaryCursor);
 		panel.primaryCursor = panel.primaryCursor % panel.cursors.count;
@@ -2411,9 +2411,25 @@ ui_copy :: (using panel: *Panel, cursor: *Cursor) {
 } @command
 
 ui_paste :: (using panel: *Panel, cursor: *Cursor) {
-	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
-	SEARCH :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
-	SELECT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
-	SPLIT :: CommandConfig.{ prettyName = "UI copy", keybinding = .["ctrl+v"] };
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI paste", keybinding = .["ctrl+v"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI paste", keybinding = .["ctrl+v"] };
+	SELECT :: CommandConfig.{ prettyName = "UI paste", keybinding = .["ctrl+v"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI paste", keybinding = .["ctrl+v"] };
 	push_event(*uiState, .TEXT, text = copy_string(os_clipboard_get_text(),,temp));
+} @command
+
+ui_undo :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI undo", keybinding = .["ctrl+z"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI undo", keybinding = .["ctrl+z"] };
+	SELECT :: CommandConfig.{ prettyName = "UI undo", keybinding = .["ctrl+z"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI undo", keybinding = .["ctrl+z"] };
+	push_event(*uiState, .EDIT, flags = .UNDO);
+} @command
+
+ui_redo :: (using panel: *Panel, cursor: *Cursor) {
+	COMMAND_PALETTE :: CommandConfig.{ prettyName = "UI redo", keybinding = .["ctrl+y"] };
+	SEARCH :: CommandConfig.{ prettyName = "UI redo", keybinding = .["ctrl+y"] };
+	SELECT :: CommandConfig.{ prettyName = "UI redo", keybinding = .["ctrl+y"] };
+	SPLIT :: CommandConfig.{ prettyName = "UI redo", keybinding = .["ctrl+y"] };
+	push_event(*uiState, .EDIT, flags = .REDO);
 } @command

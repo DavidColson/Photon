@@ -820,7 +820,12 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 				set_next_focus_active(.FOCUSED);
 				inputArea := box(inputBox, ui_key("commandPaletteInput"));
 				{
-					textInputData := add_user_data(inputArea, TextInputData, destroy_text_input_data);
+					textInputData, isNew := add_user_data(inputArea, TextInputData, destroy_text_input_data);
+					if isNew {
+						textInputData.text.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+						textInputData.undoStack.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+						textInputData.redoStack.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
+					}
 					
 					if panel.commandPalette.hasPendingInputText {
 						text_input_set_text(inputArea, string.{panel.commandPalette.pendingInputText.count, panel.commandPalette.pendingInputText.data});
