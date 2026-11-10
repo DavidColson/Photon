@@ -836,6 +836,7 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 					paletteInputData := add_user_data(inputArea, CommandPaletteInputData);
 					paletteInputData.isPath = panel.commandPalette.currentHandler && panel.commandPalette.currentHandler.pathInput;
 
+					add_flags(inputArea, .CLICKABLE);
 					set_size(inputArea, grow(), fixed(xx fontMetrics.lineSpacing));
 					set_custom_draw(inputArea, custom_draw_command_palette_input, null);
 

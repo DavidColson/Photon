@@ -1017,7 +1017,7 @@ text_input_draw_cursor :: (box: *UIBox, textInputData: *TextInputData, xPos: flo
 				cast(float)(xPos + selectionX),
 				cast(float)(yPos - metrics.typicalDescender - cursorHeight),
 				cast(float)selectionW,
-				cast(float)metrics.lineSpacing
+				cast(float)cursorHeight
 			},
 			color = uiState.colours.textInputSelection,
 			shader = .RECTS
@@ -1125,10 +1125,6 @@ text_input_push_undo :: (using textInputData: *TextInputData) {
 	redoStack.count = 0;
 }
 
-text_input_continues_group :: (using textInputData: *TextInputData, kind: TextInputData.EditKind) -> bool {
-	return lastEdit == kind && cursor == anchor && cursor == lastEditCursor && undoStack.count > 0;
-}
-
 text_input_pop_undo :: (using textInputData: *TextInputData, pop: *[..]TextInputData.UndoItem, store: *[..]TextInputData.UndoItem) -> bool {
 	if pop.count == 0 then return false;
 
@@ -1157,7 +1153,7 @@ text_input_pop_undo :: (using textInputData: *TextInputData, pop: *[..]TextInput
 	return true;
 }
 
-// Handles the keyboard events for a text input, the box must have TextInputData userdata
+// Handles the input events for a text input, the box must have TextInputData userdata
 // Separate from any visuals, so custom text inputs can share the behaviour
 text_input_behaviour :: (box: *UIBox) -> bool {
 	textInputData := get_user_data(box, TextInputData);
@@ -1167,6 +1163,10 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 	// can't interact with text input that is not focus active
 	if !is_focus_active(box) {
 		return false;
+	}
+	
+	text_input_continues_group :: (using textInputData: *TextInputData, kind: TextInputData.EditKind) -> bool {
+		return lastEdit == kind && cursor == anchor && cursor == lastEditCursor && undoStack.count > 0;
 	}
 	
 	for uiState.events {
@@ -1253,6 +1253,30 @@ text_input_behaviour :: (box: *UIBox) -> bool {
 			consume_event();
 		}
 	}
+
+	set_cursor_to_mouse_location :: (textInputData: *TextInputData, box: *UIBox) {
+		x, y, success := get_mouse_pointer_position(renderState.window, false);
+		mouseX := abs(box.viewOffset.x) + (cast(float, x) - box.rect.x);
+		mouseY := abs(box.viewOffset.y) + (cast(float, y) - box.rect.y);
+		
+		text := string.{textInputData.text.count, textInputData.text.data};
+		run := generate_text_run(text, xx box.fontSize, box.font, stopAtWidth=mouseX,,temp);
+		column := ifx run.byteOffsets.count > 0 then run.byteOffsets[run.byteOffsets.count-1] else 0;
+		textInputData.cursor = xx min(text.count-1, column);
+	}
+	
+	// Do mouse behaviour stuff
+	signal := signal_from_box(box);
+	if signal.pressed {
+		set_cursor_to_mouse_location(textInputData, box);
+		textInputData.anchor = textInputData.cursor;
+	}
+	
+	if signal.holding {
+		set_cursor_to_mouse_location(textInputData, box);
+	}
+	
+	// Mouse cursor movement??
 	return wasEdited;
 }
 
@@ -1267,7 +1291,7 @@ text_input_line :: (parent: *UIBox, key: UIKey) -> bool, *UIBox {
 			textInputData.redoStack.allocator = Allocator.{ proc = flat_pool_allocator_proc, data = *textInputData.pool };
 		}
 		
-		add_flags(inputBox, .DRAW_BACKGROUND);
+		add_flags(inputBox, .DRAW_BACKGROUND | .CLICKABLE);
 		set_size(inputBox, grow(), fixed(fontMetrics.lineSpacing+em(0.8)));
 		set_corner_radius(inputBox, em(0.2));
 		
