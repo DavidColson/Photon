@@ -815,6 +815,15 @@ ui_key :: (formatStr: string, args: ..Any) -> UIKey {
 	return ui_key(keyString);
 }
 
+// Derives a key from another key, for widgets that need to key internal boxes off the key they were given
+ui_key_child :: (parent: UIKey, str: string) -> UIKey {
+	return .{fnv1a_hash(str.data, str.count, parent.keyVal), tprint("%/%", parent.keyStr, str)};
+}
+
+ui_key_child :: (parent: UIKey, index: int) -> UIKey {
+	return .{fnv1a_hash(cast(u64, index), parent.keyVal), tprint("%/%", parent.keyStr, index)};
+}
+
 operator== :: (key1: UIKey, key2: UIKey) -> bool {
 	return key1.keyVal == key2.keyVal;
 }
@@ -1475,67 +1484,94 @@ scroll_bar :: (parent: *UIBox, key: UIKey, axis: UIAxis, scrollOffsetPct: float,
 	}
 }
 
-// Returns the list container, add list elements in the given range as children of it, then call scroll_list_end
-scroll_list_begin :: (parent: *UIBox, listKey: UIKey, scrollBarKey: UIKey,  maxContainerHeight: float, elementHeight: float, maxElements: int, selectedElement: *s32) -> container: *UIBox, rangeStart: int, rangeEnd: int {
+clipped_scrollable_container :: (parent: *UIBox, key: UIKey, height: float, elementHeight: float, numElements: int, selectedElement: *int = null) -> container: *UIBox, rangeStart: int, rangeEnd: int {
+	verticalPadding := em(0.4);
+
 	outerContainer := box(parent);
-	set_size(outerContainer, grow(), fit());
+	set_size(outerContainer, grow(), fixed(height + verticalPadding*2));
 
-	maxContainerHeightInner := maxContainerHeight - em(0.4)*2; // without the padding
-
-	container := box(outerContainer, listKey);
+	container := box(outerContainer, key);
 	add_flags(container, .CLIP_CONTENTS);
 	set_child_layout_axis(container, .Y);
-	set_size(container, grow(), fit(0.0, maxContainerHeight));
-	set_padding(container, .{0,0, em(0.4), em(0.4)});
+	set_size(container, grow(), grow());
+	set_padding(container, .{0,0, verticalPadding, verticalPadding});
+
+	// remembered so clipped_list_element can size and focus the elements
+	state := add_user_data(container, ClippedListState);
+	state.elementHeight = elementHeight;
+	state.selectedElement = -1;
+
+	// We know the full content size up front, so bounds are set before input handling (which clamps against them)
+	container.viewBounds.y = min(-(numElements * elementHeight - height), 0.0);
+	signal_from_box(container);
+
+	// +1 as when scrolled part way there's a partially visible element at both ends
+	elementsOnScreen := min(cast(int, ceil(height / elementHeight)) + 1, numElements);
+
+	// Do keyboard list navigation
+	if selectedElement {
+		for uiState.events {
+			if it.type == {
+			case .NAVIGATE;
+				selectedElement.* += it.delta[1];
+				selectedElement.* = clamp(selectedElement.*, 0, max(numElements - 1, 0));
+
+				// keep the selection in view, aligning it to the top or bottom edge if it has left the view
+				selectionTop := selectedElement.* * elementHeight;
+				selectionBottom := selectionTop + elementHeight;
+				viewTop := -container.viewOffsetTarget.y;
+				if selectionTop < viewTop {
+					container.viewOffsetTarget.y = -selectionTop;
+				}
+				else if selectionBottom > viewTop + height {
+					container.viewOffsetTarget.y = -(selectionBottom - height);
+				}
+				consume_event();
+			}
+		}
+		state.selectedElement = selectedElement.*;
+	}
+
+	// bounds may have shrunk since last frame, or navigation may have pushed us out of them
+	container.viewOffset.y = clamp(container.viewOffset.y, container.viewBounds.y, 0);
+	container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
 
 	// scroll bar if there are too many elements to display
 	if container.viewBounds.y != 0.0 {
 		scroll_bar(outerContainer,
-					scrollBarKey,
+					ui_key_child(key, "scrollBar"),
 					.Y,
 					container.viewOffset.y/container.viewBounds.y,
 					container.viewBounds.y,
-					container.layout.height.max - em(0.4)*2,
+					height,
 					container.key);
 	}
 
 	elementsBefore := cast(int, floor(abs(container.viewOffset.y) / elementHeight));
-	elementsOnScreen := min(cast(int, round(maxContainerHeightInner / elementHeight) + 1), maxElements);
-
-	container.viewBounds.y = min(cast(float, -(maxElements * elementHeight - maxContainerHeightInner)), 0.0);
-	signal_from_box(container);
-
-	// Do keyboard list navigation
-	for uiState.events {
-		if it.type == {
-		case .NAVIGATE;
-			selectedElement.* += it.delta[1];
-			selectedElement.* = clamp(selectedElement.*, 0, xx (maxElements - 1));
-			elementsBeforeTarget := cast(s32, floor(abs(container.viewOffsetTarget.y) / elementHeight));
-			if selectedElement.* < elementsBeforeTarget+1 {
-				distance := elementsBeforeTarget - selectedElement.*;
-				container.viewOffsetTarget.y = -selectedElement.**elementHeight;
-			}
-			if selectedElement.* > (elementsBeforeTarget+elementsOnScreen-2) {
-				container.viewOffsetTarget.y = -(selectedElement.*+1)*elementHeight+(maxContainerHeight-em(0.4));
-			}
-			consume_event();
-		}
-	}
 
 	// spacer to fill gap of elements that are offscreen
 	spacer(container, .Y, fixed(elementsBefore*elementHeight));
 
-	rangeEnd := min(elementsBefore+elementsOnScreen-1, maxElements-1);
 	rangeStart := elementsBefore;
+	rangeEnd := min(elementsBefore+elementsOnScreen-1, numElements-1);
 	return container, rangeStart, rangeEnd;
 }
 
-scroll_list_end :: (container: *UIBox) {
-	container.viewOffset.y = clamp(container.viewOffset.y, container.viewBounds.y, 0);
-	container.viewOffset.x = clamp(container.viewOffset.x, container.viewBounds.x, 0);
-	container.viewOffsetTarget.y = clamp(container.viewOffsetTarget.y, container.viewBounds.y, 0);
-	container.viewOffsetTarget.x = clamp(container.viewOffsetTarget.x, container.viewBounds.x, 0);
+// Creates the element at index in a clipped_scrollable_container, sized to the list's element height and keyed off
+// the container. The selected element gets keyboard focus.
+clipped_list_element :: (container: *UIBox, index: int) -> *UIBox {
+	state := get_user_data(container, ClippedListState);
+	assert(state != null, "clipped_list_element must be given a container returned from clipped_scrollable_container");
+
+	if index == state.selectedElement set_next_focus_hot(.FOCUSED);
+	element := box(container, ui_key_child(container.key, index));
+	set_size(element, grow(), fixed(state.elementHeight));
+	return element;
+}
+
+ClippedListState :: struct {
+	elementHeight: float;
+	selectedElement: int;
 }
 
 // helpers

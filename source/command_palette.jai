@@ -36,7 +36,7 @@ CommandPalette :: struct {
 
 	numToDisplay:s64; // number of items with positive sortkeys
 	suggestionList: [..]Suggestion;
-	selection: s32;
+	selection: int;
 	editorModeFilter: EditorMode;
 }
 
@@ -98,7 +98,7 @@ command_palette_filter_and_sort_suggestions :: (using palette: *CommandPalette, 
 		command_palette_count_and_sort(palette);
 		
 		maxItems := numToDisplay - 1;
-		selection = clamp(selection-1, 0, xx maxItems);
+		selection = clamp(selection-1, 0, maxItems);
 	}
 }
 

@@ -869,29 +869,27 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 			argHandler := panel.commandPalette.currentHandler;
 			if argHandler && argHandler.populate {
 				elementHeight := fontMetrics.characterHeight*argHandler.rowHeightLines;
-				listBox, rangeStart, rangeEnd := scroll_list_begin(commandPaletteContainer,
-															ui_key("suggestionList"), ui_key("suggestionListScroller"),
-															panel.layoutRect.h/2,
-															elementHeight,
-															panel.commandPalette.numToDisplay,
-															*panel.commandPalette.selection);
+				numSuggestions := panel.commandPalette.numToDisplay;
+				listHeight := min(panel.layoutRect.h/2, numSuggestions*elementHeight);
+				listBox, rangeStart, rangeEnd := clipped_scrollable_container(commandPaletteContainer, ui_key("suggestionList"),
+																			listHeight, elementHeight, numSuggestions,
+																			*panel.commandPalette.selection);
 				
 				for rangeStart..rangeEnd {
 					suggestion := panel.commandPalette.suggestionList[it];
 					selected := it == panel.commandPalette.selection;
 
-					if suggestion.sortKey == 0 continue;
+					// count_and_sort puts every shown suggestion (positive sortKey) first, so there are no gaps here
+					assert(suggestion.sortKey > 0, "Suggestion % is within numToDisplay but has a non positive sortKey, was command_palette_count_and_sort skipped?", it);
 
-					if selected set_next_focus_hot(.FOCUSED);
-					entryBox := box(listBox, ui_key("suggestion##%", it));
+					entryBox := clipped_list_element(listBox, it);
 					{
 						add_flags(entryBox, .DRAW_HOVER_EFFECTS | .CLICKABLE | .DRAW_BACKGROUND);
-						set_size(entryBox, grow(), fixed(elementHeight));
 						set_padding(entryBox, em(argHandler.suggestionPadding));
 						set_background_color(entryBox, editorColours.popupBackground);
 						signal := signal_from_box(entryBox);
 						if signal.pressed {
-							panel.commandPalette.selection = xx it;
+							panel.commandPalette.selection = it;
 							queue_command(find_command_by_name("command_palette_execute_command"), panel);
 						}
 						if argHandler.drawSuggestion {
@@ -902,8 +900,6 @@ build_ui_command_palette :: (parent: *UIBox, panel: *Panel) {
 						}
 					}
 				}
-
-				scroll_list_end(listBox);
 			}
 
 			// Draw the control hints box at the bottom
