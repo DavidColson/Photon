@@ -1646,7 +1646,65 @@ redo :: (using panel: *Panel, cursor: *Cursor) {
 	panel_restore_selection(panel, redo(document));
 } @command
 
+CaseMode :: enum {
+	TO_UPPER;
+	TO_LOWER;
+	SWAP;
+}
 
+set_case :: (using panel: *Panel, cursor: *Cursor, mode: CaseMode) {
+	NORMAL :: CommandConfig.{ prettyName = "Set case of selection" };
+	
+	begin_edit(document, panel);
+	defer end_edit(document, panel);
+	
+	for * cursor: cursors {
+		head := cursor.head;
+		anchor := cursor.anchor;
+		start := min(cursor.anchor, cursor.head);
+		end := max(cursor.anchor, cursor.head);
+		
+		iterator := make_iterator(document, start);
+		newText := alloc_string(end-start+1,,temp);
+		for :raw_bytes iterator {
+			if it_index >= newText.count break;
+			
+			if mode == {
+			case .TO_UPPER; newText[it_index] = to_upper(it);
+			case .TO_LOWER; newText[it_index] = to_lower(it);
+			case .SWAP;
+				if is_upper(it) { newText[it_index] = to_lower(it); }
+				else if is_lower(it) { newText[it_index] = to_upper(it); }
+				else { newText[it_index] = it; }
+			}
+		}
+		
+		deletedCount: s64;
+		cursor.head, deletedCount = delete_cursor_range(document, cursor.head, cursor.anchor);
+		
+		update_other_cursors_after_edit(panel, cursor, cursor.head, -deletedCount);
+		
+		insert(document, start, newText);
+		update_other_cursors_after_edit(panel, cursor, start, newText.count);
+		cursor.head = head;
+		cursor.anchor = anchor;
+	}
+} @command
+
+switch_case :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Switch case of selection", keybinding = .["~"] };
+	set_case(panel, cursor, .SWAP);
+} @command
+
+to_lower :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Set selected text to lowercase", keybinding = .["`"] };
+	set_case(panel, cursor, .TO_LOWER);
+} @command
+
+to_upper :: (using panel: *Panel, cursor: *Cursor) {
+	NORMAL :: CommandConfig.{ prettyName = "Set selected text to uppercase", keybinding = .["alt+`"] };
+	set_case(panel, cursor, .TO_UPPER);
+} @command
 
 
 // File Search Commands
