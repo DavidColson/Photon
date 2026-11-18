@@ -1129,16 +1129,14 @@ change_selection :: (using panel: *Panel, cursor: *Cursor) {
 	enter_insert_mode_start(panel, cursor);
 	yank_cursors_to_register(panel);
 
+	// Delete every selection first, leaving a blank line for each linewise change, then indent all those blank lines
+	// in one batch. That way each line is indented as though the other changed lines are already gone (as they are),
+	// and the whole thing costs a single reparse
+	linewise := NewArray(cursors.count, bool,,temp);
 	for * cursor: cursors {
-		rangeEnd := max(cursor.head, cursor.anchor);
-		endChar := get_char_at(document, rangeEnd);
+		endChar := get_char_at(document, max(cursor.head, cursor.anchor));
 		linewiseChange := endChar == #char "\n" || endChar == #char "\r";
-		
-		indentation: string;
-		if linewiseChange {
-			lineNumber := get_coordinate_from_offset(document, min(cursor.head, cursor.anchor)).line;
-			indentation = calculate_indentation_for_line(document, lineNumber);
-		}
+		linewise[it_index] = linewiseChange;
 		
 		deletedRange: s64;
 		cursor.head, deletedRange = delete_cursor_range(document, cursor.head, cursor.anchor);
@@ -1147,8 +1145,6 @@ change_selection :: (using panel: *Panel, cursor: *Cursor) {
 		update_other_cursors_after_edit(panel, cursor, cursor.head, -deletedRange);
 		
 		if linewiseChange {
-			insert_mode_insert_string(indentation, cursor);
-			
 			// reinsert a line ending
 			textToInsert := "\r\n";
 			if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
@@ -1159,6 +1155,13 @@ change_selection :: (using panel: *Panel, cursor: *Cursor) {
 			cursor.anchor -= textToInsert.count;
 		}
 	}
+	
+	blankLines: [..]s64;
+	blankLines.allocator = temp;
+	for cursors {
+		if linewise[it_index] then array_add(*blankLines, get_coordinate_from_offset(document, it.head).line);
+	}
+	reindent_lines_for_panel(panel, blankLines);
 } @command
 
 yank_selection :: (using panel: *Panel, cursor: *Cursor) {
@@ -1317,16 +1320,20 @@ new_line_below :: (using panel: *Panel, _cursor: *Cursor) {
 	
 	enter_insert_mode_start(panel, _cursor);
 	
+	// open every new line first, then indent them all in one batch, so it costs a single reparse rather than one per cursor
 	for * cursor: cursors {
 		textToInsert := "\r\n";
 		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 			textToInsert = "\n";
 		}
 		insert_mode_insert_string(textToInsert, cursor);
-		
-		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-		insert_mode_insert_string(indentation, cursor);
 	}
+	
+	newLines := NewArray(cursors.count, s64,,temp);
+	for cursors {
+		newLines[it_index] = get_coordinate_from_offset(document, it.head).line;
+	}
+	reindent_lines_for_panel(panel, newLines);
 } @command
 
 new_line_above :: (using panel: *Panel, _cursor: *Cursor) {
@@ -1340,6 +1347,7 @@ new_line_above :: (using panel: *Panel, _cursor: *Cursor) {
 	
 	enter_insert_mode_start(panel, _cursor);
 	
+	// open every new line first, then indent them all in one batch, so it costs a single reparse rather than one per cursor
 	for * cursor: cursors {
 		textToInsert := "\r\n";
 		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
@@ -1347,16 +1355,22 @@ new_line_above :: (using panel: *Panel, _cursor: *Cursor) {
 		}
 		insert_mode_insert_string(textToInsert, cursor);
 		
+		// step back onto the new line we just opened
 		if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 			cursor.head -= 1;
 		}
 		else {
 			cursor.head -= 2;
 		}
-		
-		indentation := calculate_indentation_for_line(document, get_coordinate_from_offset(document, cursor.head).line);
-		insert_mode_insert_string(indentation, cursor);
-		
+	}
+	
+	newLines := NewArray(cursors.count, s64,,temp);
+	for cursors {
+		newLines[it_index] = get_coordinate_from_offset(document, it.head).line;
+	}
+	reindent_lines_for_panel(panel, newLines);
+	
+	for * cursor: cursors {
 		cursor.anchor = cursor.head;
 	}
 } @command
@@ -1906,26 +1920,6 @@ insert_mode_insert_string :: (input: string, cursor: *Cursor) {
 	}
 
 	update_other_cursors_after_edit(*focusedPanel, cursor, insertLocation, input.count);
-	
-	// If the last thing you typed likely closed an indentation region, reindent the line
-	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
-	// keypress, so for now we'll just guess
-	delta := 0;
-	if document_supports_treesitter(focusedPanel.document) && (input == "}" || input == ")" || input == "]") {
-		headCoord := get_coordinate_from_offset(focusedPanel.document, cursor.head);
-		anchorCoord := get_coordinate_from_offset(focusedPanel.document, cursor.anchor);
-		
-		delta = replace_indentation_for_line(focusedPanel.document, headCoord.line);
-
-		cursor.head = cursor_offset_after_line_indent_change(focusedPanel.document, headCoord, delta);
-		cursor.anchor = cursor_offset_after_line_indent_change(focusedPanel.document, anchorCoord, delta);
-		
-		if delta != 0 {
-			lineStart := get_line_start(focusedPanel.document, headCoord.line);
-			update_other_cursors_after_edit(*focusedPanel, cursor, lineStart, delta);
-		}
-	}
-		
 }
 
 update_other_cursors_after_edit :: (using panel: *Panel, cursor: *Cursor, editLocation: s64, change: s64) {
@@ -1962,26 +1956,46 @@ insert_mode_handle_text_input :: (char: Utf8_Char) {
 	for * cursor: focusedPanel.cursors {
 		insert_mode_insert_string(textToInsert, cursor);
 	}
+
+	// If the last thing you typed likely closed an indentation region, reindent the line
+	// We could do this by looking at the indent table of the document, but I don't want to have to regenerate that on every single
+	// keypress, so for now we'll just guess. Every cursor's line is reindented in one batch, so it costs a single reparse
+	if document_supports_treesitter(focusedPanel.document) && (textToInsert == "}" || textToInsert == ")" || textToInsert == "]") {
+		lines := NewArray(focusedPanel.cursors.count, s64,,temp);
+		for focusedPanel.cursors {
+			lines[it_index] = get_coordinate_from_offset(focusedPanel.document, it.head).line;
+		}
+		reindent_lines_for_panel(*focusedPanel, lines);
+	}
 }
 
-insert_mode_line_break :: (using panel: *Panel, cursor: *Cursor) {
-	INSERT :: CommandConfig.{ prettyName = "Insert line break", keybinding = .["<enter>"], flags = .PER_CURSOR };
+insert_mode_line_break :: (using panel: *Panel, _cursor: *Cursor) {
+	INSERT :: CommandConfig.{ prettyName = "Insert line break", keybinding = .["<enter>"] };
 	textToInsert := "\r\n";
 	if document_get_line_endings(panel.document) == .LF || document_get_line_endings(panel.document) == .MIXED_MAJORITY_LF {
 		textToInsert = "\n";
 	}
-	insert_mode_insert_string(textToInsert, cursor);
 	
-	cursorLine := get_coordinate_from_offset(document, cursor.head).line;
-	indentation := calculate_indentation_for_line(document, cursorLine);
+	// Break every cursor's line first, then indent all the new lines in one batch, so the whole thing costs a single
+	// reparse rather than one per cursor. Indentation never changes the syntax tree, so the result is the same
+	for * cursor: cursors {
+		insert_mode_insert_string(textToInsert, cursor);
+		
+		// delete any existing whitespace on the newline, the indentation pass below puts the right amount back
+		line := get_line_content(document, get_coordinate_from_offset(document, cursor.head).line,,temp);
+		trimmed := trim_left(line.text);
+		whitespaceCount := line.text.count - trimmed.count;
+		if whitespaceCount > 0 {
+			delete(document, line.startByteOffset, whitespaceCount);
+			update_other_cursors_after_edit(panel, cursor, line.startByteOffset, -whitespaceCount);
+		}
+	}
 	
-	// delete any existing whitespace on the newline before inserting the indentation
-	line := get_line_content(document, cursorLine,,temp);
-	trimmed := trim_left(line.text);
-	delete(document, line.startByteOffset, line.text.count - trimmed.count);
-	update_other_cursors_after_edit(panel, cursor, line.startByteOffset, -(line.text.count - trimmed.count));
-	
-	insert_mode_insert_string(indentation, cursor);
+	newLines := NewArray(cursors.count, s64,,temp);
+	for cursors {
+		newLines[it_index] = get_coordinate_from_offset(document, it.head).line;
+	}
+	reindent_lines_for_panel(panel, newLines);
 } @command
 
 insert_tab_character :: (using panel: *Panel, cursor: *Cursor) {
