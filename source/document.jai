@@ -131,6 +131,7 @@ Document :: struct {
 	indents: Indents;
 	isParsing: bool;
 	tsTreeDirty: bool; // edits have been applied to tsTree but no reparse has been queued yet, see document_flush_ts_tree
+	pendingTsEdits: [..]TSInputEdit;
 	
 	// search cache
 	currentRegex: Regexp;
@@ -1145,10 +1146,7 @@ insert :: (handle: DocumentHandle, atOffset: s64, text: string) {
 	doc.currentEditNewEndOffset = max(doc.currentEditNewEndOffset, atOffset) + text.count;
 	doc.currentEditTotalBytes = doc.currentEditTotalBytes + text.count;
 
-	if doc.tsTree {
-		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)};
-		ts_tree_edit(doc.tsTree, *inputEdit);
-	}
+	document_ts_tree_edit(doc, .{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset), new_end_byte=cast(u32, atOffset+text.count)});
 	doc.tsTreeDirty = true;
 
 	if get_size(handle) == 0 {
@@ -1262,10 +1260,7 @@ delete :: (handle: DocumentHandle, atOffset: s64, length: s64, suppressHistory :
 		return;
 	}
 
-	if doc.tsTree {
-		inputEdit := TSInputEdit.{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)};
-		ts_tree_edit(doc.tsTree, *inputEdit);
-	}
+	document_ts_tree_edit(doc, .{start_byte=cast(u32, atOffset), old_end_byte=cast(u32, atOffset+length), new_end_byte=cast(u32, atOffset)});
 	
 	firstNode, firstRemainder, firstNodeOffset, beginLine := node_at_offset(doc, doc.tree, atOffset);
 	lastNode, lastRemainder, lastNodeOffset, endLine := node_at_offset(doc, doc.tree, atOffset + length);
@@ -1670,11 +1665,9 @@ undo :: (handle: DocumentHandle) -> SelectionSnapshot {
 	doc.longestLineLength = top.longestLineLength;
 
 	// note we want to edit something that is the inverse of the stored change, so old and new are swapped
-	if doc.tsTree {
-		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)};
-		ts_tree_edit(doc.tsTree, *inputEdit);
-	}
-	document_update_ts_tree(handle);
+	document_ts_tree_edit(doc, .{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeNewEndOffset), new_end_byte=cast(u32, entry.changeOldEndOffset)});
+	doc.tsTreeDirty = true;
+	document_flush_ts_tree(handle);
 	return entry.selectionBefore;
 }
 
@@ -1692,11 +1685,9 @@ redo :: (handle: DocumentHandle) -> SelectionSnapshot {
 	doc.longestLineLength = entry.longestLineLength;
 	array_add(*doc.undoStack, entry);
 
-	if doc.tsTree {
-		inputEdit := TSInputEdit.{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)};
-		ts_tree_edit(doc.tsTree, *inputEdit);
-	}
-	document_update_ts_tree(handle);
+	document_ts_tree_edit(doc, .{start_byte=cast(u32, entry.changeStartOffset), old_end_byte=cast(u32, entry.changeOldEndOffset), new_end_byte=cast(u32, entry.changeNewEndOffset)});
+	doc.tsTreeDirty = true;
+	document_flush_ts_tree(handle);
 	return entry.selectionAfter;
 }
 
@@ -2149,11 +2140,16 @@ document_reparse_ts_tree :: (handle: DocumentHandle, async := true) {
 	doc := document_get(handle);
 	if doc.language == null then return;
 
+	document_wait_for_parse(doc);
+
+	// a full reparse reads the current text, so whatever was dirty is covered by it
+	doc.tsTreeDirty = false;
 	task := New(TSParseTaskData);
 	task.doc = doc;
 	task.docCopy = document_copy(handle).directCopy;
 	task.forceReparse = true;
 	if async {
+		doc.isParsing = true;
 		push_task(*asyncWorker, task, ts_parse_task, ts_parse_task_complete);
 	}
 	else {
@@ -2165,6 +2161,16 @@ document_reparse_ts_tree :: (handle: DocumentHandle, async := true) {
 document_update_ts_tree :: (handle: DocumentHandle, async := true) {
 	doc := document_get(handle);
 	if doc.language == null then return;
+
+	if doc.isParsing {
+		if async {
+			// the in flight parse will replay the edits it missed when it lands and leave the tree dirty,
+			// so the next flush after that picks them up, no need to block here
+			doc.tsTreeDirty = true;
+			return;
+		}
+		document_wait_for_parse(doc);
+	}
 
 	doc.tsTreeDirty = false;
 	task := New(TSParseTaskData);
@@ -2188,6 +2194,27 @@ document_flush_ts_tree :: (handle: DocumentHandle, async := true) {
 	doc := document_get(handle);
 	if !doc.tsTreeDirty then return;
 	document_update_ts_tree(handle, async);
+}
+
+// Applies an edit to the document's syntax tree. An in flight parse is working from a copy of the tree made
+// before this edit, and its result replaces ours when it lands, so we also record the edit to replay onto that result
+document_ts_tree_edit :: (doc: *Document, edit: TSInputEdit) {
+	if doc.tsTree {
+		inputEdit := edit;
+		ts_tree_edit(doc.tsTree, *inputEdit);
+	}
+	if doc.isParsing {
+		// pin to the heap, edits can happen while running under temp
+		if !doc.pendingTsEdits.allocator.proc then doc.pendingTsEdits.allocator = context.default_allocator;
+		array_add(*doc.pendingTsEdits, edit);
+	}
+}
+
+document_wait_for_parse :: (doc: *Document) {
+	while doc.isParsing {
+		process_completed_tasks(*asyncWorker);
+		if doc.isParsing then sleep_milliseconds(1);
+	}
 }
 
 #scope_file
@@ -2234,6 +2261,18 @@ ts_parse_task_complete :: (data: *void) {
 
 	document_copy_free(.{directCopy = taskData.docCopy});
 	doc.isParsing = false;
+
+	// edits made while this parse was in flight were applied to the old tree we just threw away,
+	// replay them so the new tree's offsets match the current text, and leave it dirty so they get parsed
+	if doc.pendingTsEdits.count > 0 {
+		if doc.tsTree {
+			for * doc.pendingTsEdits {
+				ts_tree_edit(doc.tsTree, it);
+			}
+		}
+		doc.pendingTsEdits.count = 0;
+		doc.tsTreeDirty = true;
+	}
 
 	free(taskData);
 }
@@ -2317,6 +2356,7 @@ document_reset :: (using doc: *Document) {
 
 	array_reset(*doc.undoStack);
 	array_reset(*doc.redoStack);
+	array_reset(*doc.pendingTsEdits);
 
 	ts_tree_delete(tsTree);
 
