@@ -1519,34 +1519,24 @@ autoindent_selection_helper :: (using panel: *Panel, cursorsToInclude: []bool) {
 	begin_edit(document, panel);
 	defer end_edit(document, panel);
 	
-	coords:= NewArray(cursors.count, CursorCoordinates,,temp);
-	
+	// gather every line covered by the included cursors, then reindent them all in one batch
+	lines: [..]s64;
+	lines.allocator = temp;
+	seen: Table(s64, bool);
+	seen.allocator = temp;
 	for * cursor: cursors {
-		coords[it_index].head = get_coordinate_from_offset(document, cursor.head);
-		coords[it_index].anchor = get_coordinate_from_offset(document, cursor.anchor);
-	}
-	
-	lineDeltas: Table(s64, s64);
-	lineDeltas.allocator = temp;
-	for c: coords {
 		if cursorsToInclude[it_index] == false continue;
 		
-		startLine := min(c.head.line, c.anchor.line);
-		endLine := max(c.head.line, c.anchor.line);
-		for lineNumber: startLine..endLine {
-			if table_contains(*lineDeltas, lineNumber) then continue;
-			delta := replace_indentation_for_line(document, lineNumber);
-			table_set(*lineDeltas, lineNumber, delta);
+		headLine := get_coordinate_from_offset(document, cursor.head).line;
+		anchorLine := get_coordinate_from_offset(document, cursor.anchor).line;
+		for lineNumber: min(headLine, anchorLine)..max(headLine, anchorLine) {
+			if table_contains(*seen, lineNumber) then continue;
+			table_set(*seen, lineNumber, true);
+			array_add(*lines, lineNumber);
 		}
 	}
 	
-	for * cursor: cursors {
-		c := coords[it_index];
-		_, headDelta := table_find(*lineDeltas, c.head.line);
-		_, anchorDelta := table_find(*lineDeltas, c.anchor.line);
-		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
-		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
-	}
+	reindent_lines_for_panel(panel, lines);
 }
 
 autoindent_selection :: (using panel: *Panel, _cursor: *Cursor) {
