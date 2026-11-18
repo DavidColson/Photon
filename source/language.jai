@@ -6,6 +6,8 @@ Language :: struct {
 	extensions: []string;
 	url: string;
 	revision: string;
+	// indentation is part of the syntax (e.g. python), so reindenting a line can change how the lines after it parse
+	indentationIsStructural: bool;
 	treesitterLang: *TSLanguage;
 
 	Predicate :: struct {
@@ -90,7 +92,7 @@ staticLanguageData :: Language.[
 	.{name="jai", extensions=.["jai"], url="https://github.com/constantitus/tree-sitter-jai.git", revision="714acc6da66526d9111b51ab8eee7e016b9e2268"},
 	.{name="cpp", extensions=.["cpp", "h", "hpp", "cc"], url="https://github.com/tree-sitter/tree-sitter-cpp.git", revision="56455f4245baf4ea4e0881c5169de69d7edd5ae7"},
 	.{name="c", extensions=.["c"], url="https://github.com/tree-sitter/tree-sitter-c.git", revision="7fa1be1b694b6e763686793d97da01f36a0e5c12"},
-	.{name="python", extensions=.["py"], url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64"},
+	.{name="python", extensions=.["py"], url="https://github.com/tree-sitter/tree-sitter-python.git", revision="26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64", indentationIsStructural=true},
 	.{name="lua", extensions=.["lua"], url="https://github.com/tree-sitter-grammars/tree-sitter-lua.git", revision="10fe0054734eec83049514ea2e718b2a56acd0c9"},
 ];
 
@@ -669,17 +671,35 @@ refresh_document_indentation_table :: (document: *Document) {
 	}
 }
 
-calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> string {
-	document := document_get(handle);
+document_supports_auto_indentation :: (document: *Document) -> bool {
+	return document.language && document.tsTree && document.language.indentQuery.query;
+}
+
+// Returns a line's text as it will read once this batch's indentation is applied, i.e. with its leading whitespace
+// replaced by the overlay's indentation if the line has one. colShift is how far the columns after the indentation move
+line_text_with_indent_overlay :: (handle: DocumentHandle, lineNumber: s64, overlay: *Table(s64, string)) -> text: string, colShift: s64 {
+	line := get_line_content(handle, lineNumber);
+	if !overlay then return line.text, 0;
+
+	found, newIndentation := table_find(overlay, lineNumber);
+	if !found then return line.text, 0;
+
+	oldIndentationCount := 0;
+	for line.text {
+		if it != #char "\t" && it != #char " " then break;
+		oldIndentationCount += 1;
+	}
+	text := join(newIndentation, slice(line.text, oldIndentationCount, line.text.count - oldIndentationCount),, temp);
+	return text, newIndentation.count - oldIndentationCount;
+}
+
+// This is the core indentation calculation function, generally don't use this and use the other functions. 
+// Overlay is indentation edits that have been computed but not applied to the document. For example if you end up with 
+// an AUTO indentation, it'll read from the previous line, which may have been edited, so read from the overlay instead.
+calculate_indentation_for_line_core :: (document: *Document, lineNumber:s64, overlay: *Table(s64, string)) -> string {
+	handle := document.handle;
 	tabsOverSpaces :: true;
 	verboseLogging :: false;
-
-	supportsAutoIndentation := document.language && document.tsTree && document.language.indentQuery.query;
-	if !supportsAutoIndentation
-		return "";
-
-	// This takes a LOOOOOOOOOOONG time for every line
-	refresh_document_indentation_table(document);
 
 	push_allocator(temp);
 
@@ -820,8 +840,8 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 		
 		// if we encounter an indent.auto, then we fallback to copying the indentation from the previous line
 		if !beginFound && !alignFound && autoFound && nodeStart.line < lineNumber && lineNumber <= nodeEnd.line {
-			prevLine := get_line_content(handle, lineNumber-1);
-			for prevLine.text {
+			prevLineText := line_text_with_indent_overlay(handle, lineNumber-1, overlay);
+			for prevLineText {
 				if it == #char "\t" then indentLevel += tabSize;
 				if it == #char " " then indentLevel += 1;
 				if !is_space(it) then break;
@@ -889,10 +909,10 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 					else {
 						// This is an absolute position, so set it and bail.
 						// the indent must be a visual column as well, so regrettably we must calculate that
-						openLineContent := get_line_content(handle, open.line);
+						openLineText, colShift := line_text_with_indent_overlay(handle, open.line, overlay);
 						openVisualCol := 0;
-						for openLineContent.text {
-							if it_index >= open.col then break;
+						for openLineText {
+							if it_index >= open.col + colShift then break;
 							if it == #char "\t" then openVisualCol += chars_to_tabstop(openVisualCol);
 							else openVisualCol += 1;
 						}
@@ -907,9 +927,9 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 				}
 				if avoidLastMatchingNext {
 					// we need the indentation of the line containing the open delimiter
-					openLine := get_line_content(handle, open.line);
+					openLineText := line_text_with_indent_overlay(handle, open.line, overlay);
 					openLineIndentation := 0;
-					for openLine.text {
+					for openLineText {
 						if it == #char "\t" then openLineIndentation += tabSize;
 						if it == #char " " then openLineIndentation += 1;
 						if !is_space(it) then break;
@@ -958,6 +978,161 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 
 	return builder_to_string(*builder,,temp);
 }
+
+// The following functions are suitable for use externally
+
+// Calculates the indentation for a single line, prefer compute_indentation_for_lines when there are many
+calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber: s64) -> string {
+	lines: [1]s64;
+	lines[0] = lineNumber;
+	return compute_indentation_for_lines(handle, lines)[0];
+}
+
+// Calculates the indentation for many lines against a single up to date tree, so a batch costs one parse and one query.
+// Nothing is applied to the document, the results line up with lines and are allocated in temp
+compute_indentation_for_lines :: (handle: DocumentHandle, lines: []s64) -> []string {
+	results := NewArray(lines.count, string,, temp);
+	document := document_get(handle);
+	if lines.count == 0 || !document_supports_auto_indentation(document) then return results;
+
+	refresh_document_indentation_table(document);
+
+	// calculate top down, so each line sees the new indentation of the lines above it through the overlay
+	sortedLines := array_copy(lines,, temp);
+	quick_sort(sortedLines, (a, b) => a - b);
+
+	overlay: Table(s64, string);
+	overlay.allocator = temp;
+	for sortedLines {
+		if table_contains(*overlay, it) then continue;
+		table_set(*overlay, it, calculate_indentation_for_line_core(document, it, *overlay));
+	}
+
+	for lines {
+		_, results[it_index] = table_find(*overlay, it);
+	}
+	return results;
+}
+
+// returns the change in byte length to the line
+replace_line_indentation :: (handle: DocumentHandle, lineNumber: s64, indentation: string) -> s64 {
+	lineContent := get_line_content(handle, lineNumber,,temp);
+
+	// delete any existing indentation
+	deleteUpTo := -1;
+	for lineContent.text {
+		if it != #char "\t" && it != #char " " {
+			existingIndentation := slice(lineContent.text, 0, it_index);
+			if existingIndentation == indentation {
+				return 0;
+			}
+			deleteUpTo = it_index;
+			delete(handle, lineContent.startByteOffset, it_index);
+			break;
+		}
+	}
+
+	// line is either blank or empty
+	if deleteUpTo < 0 {
+		if lineContent.text == indentation {
+			return 0;
+		}
+		deleteUpTo = lineContent.text.count;
+		delete(handle, lineContent.startByteOffset, lineContent.text.count);
+	}
+
+	insert(handle, lineContent.startByteOffset, indentation);
+
+	return indentation.count - deleteUpTo;
+}
+
+// Applies indentation calculated by compute_indentation_for_lines, must be inside an edit.
+// Returns a table (in temp) of line number to the change in byte length of that line
+apply_indentation_for_lines :: (handle: DocumentHandle, lines: []s64, indentations: []string) -> Table(s64, s64) {
+	assert(lines.count == indentations.count);
+
+	LineIndentation :: struct {
+		line: s64;
+		indentation: string;
+	}
+	sorted := NewArray(lines.count, LineIndentation,, temp);
+	for lines {
+		sorted[it_index] = .{it, indentations[it_index]};
+	}
+	// bottom to top, so no edit moves the text of a line we've yet to edit (line numbers never change either way)
+	quick_sort(sorted, (a, b) => b.line - a.line);
+
+	deltas: Table(s64, s64);
+	deltas.allocator = temp;
+	for sorted {
+		if table_contains(*deltas, it.line) then continue;
+		table_set(*deltas, it.line, replace_line_indentation(handle, it.line, it.indentation));
+	}
+	return deltas;
+}
+
+// Recalculates and applies the indentation of lines, must be inside an edit.
+// Returns a table (in temp) of line number to the change in byte length of that line
+reindent_lines :: (handle: DocumentHandle, lines: []s64) -> Table(s64, s64) {
+	document := document_get(handle);
+	if document.language && document.language.indentationIsStructural {
+		// indentation is syntax in this language, so a line's new indentation can change how the lines after it parse,
+		// so we must apply and reparse line by line
+		deltas := reindent_lines_one_by_one(handle, lines);
+		return deltas;
+	}
+
+	// When true, reindent_lines also runs the old line by line path (apply, reparse, calculate next) and logs any line where
+	// it disagrees with the batched calculation. The document ends up with the line by line result
+	INDENT_VERIFY_BATCH :: false;
+	
+	#if INDENT_VERIFY_BATCH {
+		batched := compute_indentation_for_lines(handle, lines);
+		deltas, oneByOne := reindent_lines_one_by_one(handle, lines);
+		for lines {
+			_, expected := table_find(*oneByOne, it);
+			if batched[it_index] != expected {
+				log_error("Batched indentation mismatch on line %: batched % tabs % spaces, line by line % tabs % spaces",
+					it + 1,
+					count_char(batched[it_index], #char "\t"), count_char(batched[it_index], #char " "),
+					count_char(expected, #char "\t"), count_char(expected, #char " "));
+			}
+		}
+		return deltas;
+	}
+	else {
+		indentations := compute_indentation_for_lines(handle, lines);
+		return apply_indentation_for_lines(handle, lines, indentations);
+	}
+}
+
+#scope_file
+
+// The slow path, calculate a line, apply it, and calculate the next against a reparsed tree
+reindent_lines_one_by_one :: (handle: DocumentHandle, lines: []s64) -> deltas: Table(s64, s64), indentations: Table(s64, string) {
+	sortedLines := array_copy(lines,, temp);
+	quick_sort(sortedLines, (a, b) => a - b);
+
+	deltas: Table(s64, s64);
+	deltas.allocator = temp;
+	indentations: Table(s64, string);
+	indentations.allocator = temp;
+	for sortedLines {
+		if table_contains(*deltas, it) then continue;
+		indentation := calculate_indentation_for_line(handle, it);
+		table_set(*indentations, it, indentation);
+		table_set(*deltas, it, replace_line_indentation(handle, it, indentation));
+	}
+	return deltas, indentations;
+}
+
+count_char :: (text: string, char: u8) -> s64 {
+	count := 0;
+	for text if it == char then count += 1;
+	return count;
+}
+
+#scope_export
 
 fetch_grammars :: () {
 	// Have a list of grammar repositories

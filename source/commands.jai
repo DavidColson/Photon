@@ -1481,35 +1481,31 @@ toggle_comment :: (using panel: *Panel, cursor: *Cursor) {
 	
 // returns the change in byte length of the line
 replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
-	indentation := calculate_indentation_for_line(doc, lineNumber);
-	lineContent := get_line_content(doc, lineNumber,,temp);
+	lines: [1]s64;
+	lines[0] = lineNumber;
+	deltas := reindent_lines(doc, lines);
+	_, delta := table_find(*deltas, lineNumber);
+	return delta;
+}
 
-	// delete any existing indentation
-	deleteUpTo := -1;
-	for lineContent.text {
-		if it != #char "\t" && it != #char " " {
-			existingIndentation := slice(lineContent.text, 0, it_index);
-			if existingIndentation == indentation {
-				return 0;
-			}
-			deleteUpTo = it_index;
-			delete(doc, lineContent.startByteOffset, it_index);
-			break;
-		}
+// Reindents lines in one batch and moves every cursor so it stays on the same text, must be inside an edit
+reindent_lines_for_panel :: (using panel: *Panel, lines: []s64) {
+	// indentation changes never change line numbers, so cursor coordinates taken now are still valid after
+	coords := NewArray(cursors.count, CursorCoordinates,,temp);
+	for cursors {
+		coords[it_index].head = get_coordinate_from_offset(document, it.head);
+		coords[it_index].anchor = get_coordinate_from_offset(document, it.anchor);
 	}
 
-	// line is either blank or empty
-	if deleteUpTo < 0 {
-		if lineContent.text == indentation {
-			return 0;
-		}
-		deleteUpTo = lineContent.text.count;
-		delete(doc, lineContent.startByteOffset, lineContent.text.count);
+	lineDeltas := reindent_lines(document, lines);
+
+	for * cursor: cursors {
+		c := coords[it_index];
+		_, headDelta := table_find(*lineDeltas, c.head.line);
+		_, anchorDelta := table_find(*lineDeltas, c.anchor.line);
+		cursor.head = cursor_offset_after_line_indent_change(document, c.head, headDelta);
+		cursor.anchor = cursor_offset_after_line_indent_change(document, c.anchor, anchorDelta);
 	}
-
-	insert(doc, lineContent.startByteOffset, indentation);
-
-	return indentation.count - deleteUpTo;
 }
 
 cursor_offset_after_line_indent_change :: (doc: DocumentHandle, coord: Document.Coordinate, delta: s64) -> s64 {
