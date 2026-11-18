@@ -2217,6 +2217,16 @@ document_wait_for_parse :: (doc: *Document) {
 	}
 }
 
+// Makes the syntax tree match the current text right now, for code that must read an up to date tree.
+// Waits on an in flight parse if there is one, then reparses any remaining edits synchronously on this thread.
+// Incremental reparses of small edits are cheap, so this is much faster than queueing async work and waiting on it
+document_ensure_ts_tree_current :: (handle: DocumentHandle) {
+	if document_get_slot(handle) == null then return;
+	doc := document_get(handle);
+	document_wait_for_parse(doc);
+	document_flush_ts_tree(handle, async=false);
+}
+
 #scope_file
 TSParseTaskData :: struct {
 	doc: *Document;

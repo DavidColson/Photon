@@ -530,12 +530,20 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 }
 	
 refresh_document_indentation_table :: (document: *Document) {
-	// it's important we have up to date tree to use here, so kick off any pending reparse and wait for it
-	document_flush_ts_tree(document.handle);
-	while document.isParsing {
-		process_completed_tasks(*asyncWorker);
-		sleep_milliseconds(5);
-	}
+	// This can take a staggeringly long time
+	// The majority is because we spend most of our time waiting for parsing to complete
+	// And then we spend ages doing queries as well
+	
+	
+	// I feel there are a couple options here
+	// We can try to optimize this approach
+	// Or we can do an entirely different approach to indentation where we no longer pull indents across the whole document
+	// and just constrain it to a specific area. 
+	// Though to be fair, in the latter case we still need an up to date ts tree to read from after every edit
+	
+	
+	// it's important we have up to date tree to use here
+	document_ensure_ts_tree_current(document.handle);
 
 	// the hash uses both the text (we must refresh if the text changed) and 
 	// the treesitter tree, as the table is keyed by the node IDs
@@ -627,6 +635,7 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 	if !supportsAutoIndentation
 		return "";
 
+	// This takes a LOOOOOOOOOOONG time for every line
 	refresh_document_indentation_table(document);
 
 	push_allocator(temp);
@@ -774,7 +783,6 @@ calculate_indentation_for_line :: (handle: DocumentHandle, lineNumber:s64) -> st
 				if it == #char " " then indentLevel += 1;
 				if !is_space(it) then break;
 			}
-			log("indent.auto triggered");
 			break;
 		}
 		
