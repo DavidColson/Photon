@@ -1493,15 +1493,6 @@ toggle_comment :: (using panel: *Panel, cursor: *Cursor) {
 	}
 } @command
 	
-// returns the change in byte length of the line
-replace_indentation_for_line :: (doc: DocumentHandle, lineNumber: s64) -> s64 {
-	lines: [1]s64;
-	lines[0] = lineNumber;
-	deltas := reindent_lines(doc, lines);
-	_, delta := table_find(*deltas, lineNumber);
-	return delta;
-}
-
 // Reindents lines in one batch and moves every cursor so it stays on the same text, must be inside an edit
 reindent_lines_for_panel :: (using panel: *Panel, lines: []s64) {
 	// indentation changes never change line numbers, so cursor coordinates taken now are still valid after

@@ -570,18 +570,6 @@ load_query :: (language: *Language, queryName: string) -> Language.Query {
 }
 	
 refresh_document_indentation_table :: (document: *Document) {
-	// This can take a staggeringly long time
-	// The majority is because we spend most of our time waiting for parsing to complete
-	// And then we spend ages doing queries as well
-	
-	
-	// I feel there are a couple options here
-	// We can try to optimize this approach
-	// Or we can do an entirely different approach to indentation where we no longer pull indents across the whole document
-	// and just constrain it to a specific area. 
-	// Though to be fair, in the latter case we still need an up to date ts tree to read from after every edit
-	
-	
 	// it's important we have up to date tree to use here
 	document_ensure_ts_tree_current(document.handle);
 
@@ -1078,58 +1066,28 @@ reindent_lines :: (handle: DocumentHandle, lines: []s64) -> Table(s64, s64) {
 	if document.language && document.language.indentationIsStructural {
 		// indentation is syntax in this language, so a line's new indentation can change how the lines after it parse,
 		// so we must apply and reparse line by line
-		deltas := reindent_lines_one_by_one(handle, lines);
-		return deltas;
+		return reindent_lines_one_by_one(handle, lines);
 	}
 
-	// When true, reindent_lines also runs the old line by line path (apply, reparse, calculate next) and logs any line where
-	// it disagrees with the batched calculation. The document ends up with the line by line result
-	INDENT_VERIFY_BATCH :: false;
-	
-	#if INDENT_VERIFY_BATCH {
-		batched := compute_indentation_for_lines(handle, lines);
-		deltas, oneByOne := reindent_lines_one_by_one(handle, lines);
-		for lines {
-			_, expected := table_find(*oneByOne, it);
-			if batched[it_index] != expected {
-				log_error("Batched indentation mismatch on line %: batched % tabs % spaces, line by line % tabs % spaces",
-					it + 1,
-					count_char(batched[it_index], #char "\t"), count_char(batched[it_index], #char " "),
-					count_char(expected, #char "\t"), count_char(expected, #char " "));
-			}
-		}
-		return deltas;
-	}
-	else {
-		indentations := compute_indentation_for_lines(handle, lines);
-		return apply_indentation_for_lines(handle, lines, indentations);
-	}
+	indentations := compute_indentation_for_lines(handle, lines);
+	return apply_indentation_for_lines(handle, lines, indentations);
 }
 
 #scope_file
 
 // The slow path, calculate a line, apply it, and calculate the next against a reparsed tree
-reindent_lines_one_by_one :: (handle: DocumentHandle, lines: []s64) -> deltas: Table(s64, s64), indentations: Table(s64, string) {
+reindent_lines_one_by_one :: (handle: DocumentHandle, lines: []s64) -> Table(s64, s64) {
 	sortedLines := array_copy(lines,, temp);
 	quick_sort(sortedLines, (a, b) => a - b);
 
 	deltas: Table(s64, s64);
 	deltas.allocator = temp;
-	indentations: Table(s64, string);
-	indentations.allocator = temp;
 	for sortedLines {
 		if table_contains(*deltas, it) then continue;
 		indentation := calculate_indentation_for_line(handle, it);
-		table_set(*indentations, it, indentation);
 		table_set(*deltas, it, replace_line_indentation(handle, it, indentation));
 	}
-	return deltas, indentations;
-}
-
-count_char :: (text: string, char: u8) -> s64 {
-	count := 0;
-	for text if it == char then count += 1;
-	return count;
+	return deltas;
 }
 
 #scope_export
