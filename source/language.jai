@@ -38,6 +38,19 @@ Language :: struct {
 	highlightsQuery: Query;
 	captureToHighlight: Table(u32, HighlightType);
 	indentQuery: Query;
+	captureToIndentKind: [..]IndentCaptureKind; // indexed by indentQuery capture index
+}
+
+IndentCaptureKind :: enum u8 {
+	NONE;
+	AUTO;
+	BEGIN;
+	END;
+	DEDENT;
+	BRANCH;
+	IGNORE;
+	ALIGN;
+	ZERO;
 }
 
 IndentationMetadata :: struct {
@@ -128,6 +141,31 @@ get_language :: (fileExtension: string) -> bool, *Language {
 	
 	lang.highlightsQuery = load_query(lang, "highlights");
 	lang.indentQuery = load_query(lang, "indents");
+
+	// build mapping table for indent captures, so refreshing the indent tables doesn't compare capture names per capture
+	if lang.indentQuery.query {
+		indentCaptureCount := ts_query_capture_count(lang.indentQuery.query);
+		array_resize(*lang.captureToIndentKind, indentCaptureCount);
+		for captureIndex: 0..indentCaptureCount-1 {
+			captureName: string;
+			len:u32;
+			captureName.data = ts_query_capture_name_for_id(lang.indentQuery.query, captureIndex, *len);
+			captureName.count = xx len;
+
+			kind := IndentCaptureKind.NONE;
+			if captureName == {
+				case "indent.auto";   kind = .AUTO;
+				case "indent.begin";  kind = .BEGIN;
+				case "indent.end";    kind = .END;
+				case "indent.dedent"; kind = .DEDENT;
+				case "indent.branch"; kind = .BRANCH;
+				case "indent.ignore"; kind = .IGNORE;
+				case "indent.align";  kind = .ALIGN;
+				case "indent.zero";   kind = .ZERO;
+			}
+			lang.captureToIndentKind[captureIndex] = kind;
+		}
+	}
 
 	if lang.highlightsQuery.query == null {
 		return true, lang;
@@ -578,9 +616,15 @@ refresh_document_indentation_table :: (document: *Document) {
 			result, capture, patternIndex, metadataTable := query_next(*document.language.indentQuery, document.handle,,temp);
 			if result == false then break;
 			
-			captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
-			
+			kind := IndentCaptureKind.NONE;
+			if capture.index < document.language.captureToIndentKind.count {
+				kind = document.language.captureToIndentKind[capture.index];
+			}
+			// helper captures (e.g. @_except used only by predicates) don't go in any table
+			if kind == .NONE then continue;
+
 			#if false {
+				captureName := get_capture_name(capture, *document.language.indentQuery,,temp);
 				// additional logging if you want it
 				nodeStartLine := ts_node_start_point(capture.node).row;
 				nodeEndLine := ts_node_end_point(capture.node).row;
@@ -610,16 +654,15 @@ refresh_document_indentation_table :: (document: *Document) {
 				}
 			}
 			
-			if captureName == {
-				case "indent.auto"; table_set(*document.indents.auto, capture.node.id, metadata);
-				case "indent.begin"; table_set(*document.indents.begin, capture.node.id, metadata);
-				case "indent.end"; table_set(*document.indents.end, capture.node.id, metadata);
-				case "indent.dedent"; table_set(*document.indents.dedent, capture.node.id, metadata);
-				case "indent.branch"; table_set(*document.indents.branch, capture.node.id, metadata);
-				case "indent.ignore"; table_set(*document.indents.ignore, capture.node.id, metadata);
-				case "indent.align"; table_set(*document.indents.align, capture.node.id, metadata);
-				case "indent.zero"; table_set(*document.indents.zero, capture.node.id, metadata);
-				case; continue;
+			if kind == {
+				case .AUTO;   table_set(*document.indents.auto, capture.node.id, metadata);
+				case .BEGIN;  table_set(*document.indents.begin, capture.node.id, metadata);
+				case .END;    table_set(*document.indents.end, capture.node.id, metadata);
+				case .DEDENT; table_set(*document.indents.dedent, capture.node.id, metadata);
+				case .BRANCH; table_set(*document.indents.branch, capture.node.id, metadata);
+				case .IGNORE; table_set(*document.indents.ignore, capture.node.id, metadata);
+				case .ALIGN;  table_set(*document.indents.align, capture.node.id, metadata);
+				case .ZERO;   table_set(*document.indents.zero, capture.node.id, metadata);
 			}
 		}
 		document.indents.treeHash = treeHash;
