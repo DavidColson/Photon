@@ -134,6 +134,15 @@ deinit :: (using watcher: $T/File_Watcher) {
                 error, error_string := System.get_error_value_and_string();
                 log_error("Couldn't cancel the async io on %: error % (%)", it.name, error, error_string);
             }
+
+            // Photon local change: CancelIo only requests cancellation. The kernel can still write into
+            // overlapped and notify_information until the read completes, so wait for it before freeing them.
+            // Skip if no read is pending (issuing it failed), otherwise this would wait forever.
+            if success && !it.read_issue_failed {
+                bytes_transferred: s32;
+                GetOverlappedResult(it.handle, *it.overlapped, *bytes_transferred, TRUE);
+            }
+
             release(it.*);
             free(it);
         }
