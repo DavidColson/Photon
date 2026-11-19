@@ -80,6 +80,9 @@ reconcile_watcher_batch :: () {
 }
 
 reconcile_file :: (path: string) {
+	// The project file can also be an open document or a project entry, so still fall through to the normal handling below
+	if project_is_project_file(path)  project_reload();
+
 	found, handle := document_get_by_path(path);
 	if found  reconcile_document(handle);
 	else      reconcile_project_entry(path);
@@ -114,6 +117,9 @@ reconcile_directory :: (path: string, events: File_Change_Event) {
 
 reconcile_paths_under :: (dir: string) {
 	// This is intended to reconcile files we already track under the given directory
+	// A rescan of the project file's directory (e.g. event buffer overflow, or the folder was deleted) may have hidden a change to it
+	if projectFilePath.count > 0 && path_is_within(projectFilePath, dir)  project_reload();
+
 	for doc: openDocuments {
 		if path_is_within(document_get_path(doc), dir)  reconcile_document(doc);
 	}

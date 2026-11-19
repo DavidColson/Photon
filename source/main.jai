@@ -175,7 +175,10 @@ main :: () {
 	projectParsed := false;
 	if isSet.project {
 		projectParsed, project = project_parser(args.project);
-		if projectParsed then project_watch_folders();
+		if projectParsed {
+			project_set_file_path(args.project);
+			project_watch_folders();
+		}
 	}
 
 	if filesToOpen.count > 0 {

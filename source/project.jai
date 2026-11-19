@@ -53,6 +53,26 @@ Project :: struct {
 projectAsyncWorker: Async;
 projectAsyncWorkerStarted: bool;
 
+// Absolute path to the .photon-project file currently loaded, '/' separated.
+// Heap allocated rather than in project.memory so it survives a project reload.
+projectFilePath: string;
+
+project_set_file_path :: (path: string) {
+	free(projectFilePath);
+	projectFilePath = ifx is_absolute_path(path) then copy_string(path) else copy_string(get_absolute_path(path));
+	path_overwrite_separators(projectFilePath, #char "/");
+}
+
+project_is_project_file :: (path: string) -> bool {
+	return projectFilePath.count > 0 && platform_path_equal(path, projectFilePath);
+}
+
+// Called by the file watcher when the project file changes on disk
+project_reload :: () {
+	log("Project file % changed, reload requested", projectFilePath);
+	// @todo: implement project hot reloading
+}
+
 project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
@@ -247,6 +267,10 @@ project_watch_folders :: () {
 	for project.folders {
 		watch_project_directory(it);
 	}
+
+	// The project file itself usually lives outside the project folders, so watch its directory too.
+	// This is a no-op if it's already covered by one of the folders above.
+	if projectFilePath.count > 0  watch_directory_for_document(projectFilePath);
 }
 
 project_begin_load :: () {
