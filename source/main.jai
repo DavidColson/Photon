@@ -1552,6 +1552,13 @@ path_normalized :: (path: string) -> string {
 	return result;
 }
 
+has_extension :: (name: string, extension: string) -> bool {
+	if name.count < extension.count  return false;
+	test := name;
+	advance(*test, name.count - extension.count);
+	return test == extension;
+}
+
 bucket_array_find_or_null :: ( using array: *Bucket_Array, locator: Bucket_Locator) -> *array.type {
 	bucket := all_buckets[locator.bucket_index];
 	if bucket.occupied[locator.slot_index] == false return null;

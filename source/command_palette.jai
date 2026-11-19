@@ -1060,13 +1060,15 @@ FilePath :: struct {
 // and the behaviour that does differ is looked up from the argument type in path_arg_config
 SystemPath      :: struct @command_arg(pathArgHandler) { using base: FilePath; }
 WorkingDirPath  :: struct @command_arg(pathArgHandler) { using base: FilePath; }
-ProjectPath     :: struct @command_arg(pathArgHandler) { using base: FilePath; }
+ProjectPath     :: struct @command_arg(pathArgHandler) { using base: FilePath; } // for the actual project definiton file (.photon-project)
+ProjectFilePath :: struct @command_arg(pathArgHandler) { using base: FilePath; } // for files in a project
 DocumentDirPath :: struct @command_arg(pathArgHandler) { using base: FilePath; }
 
 // path_commit writes the value through a *FilePath, so the variations must all be laid out like one
 #assert size_of(SystemPath) == size_of(FilePath);
 #assert size_of(WorkingDirPath) == size_of(FilePath);
 #assert size_of(ProjectPath) == size_of(FilePath);
+#assert size_of(ProjectFilePath) == size_of(FilePath);
 #assert size_of(DocumentDirPath) == size_of(FilePath);
 
 pathArgHandler := ArgHandler.{ populate = path_populate, filter = path_filter, resolve = path_resolve, drawSuggestion = path_draw_suggestion, pathInput = true };
@@ -1075,11 +1077,13 @@ PathArgConfig :: struct {
 	start: enum { SYSTEM; WORKING_DIR; PROJECT; DOCUMENT_DIR; };
 	createLabel := "Create";
 	createAtTop := false;
+	fileTypeFilter: string;
 }
 
 path_arg_config :: (argType: *Type_Info) -> PathArgConfig {
 	if argType == type_info(WorkingDirPath)  return .{ start = .WORKING_DIR };
-	if argType == type_info(ProjectPath)     return .{ start = .PROJECT };
+	if argType == type_info(ProjectPath)     return .{ start = .SYSTEM, fileTypeFilter = ".photon-project" };
+	if argType == type_info(ProjectFilePath) return .{ start = .PROJECT };
 	if argType == type_info(DocumentDirPath) return .{ start = .DOCUMENT_DIR, createLabel = "Save as", createAtTop = true };
 	return .{ start = .SYSTEM };
 }
@@ -1166,11 +1170,22 @@ path_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		visitor :: (info: *File_Visit_Info, palette: *CommandPalette) {
 			name := copy_string(info.short_name,,get_per_invocation_allocator(palette));
 			directory := path_strip_filename(command_palette_get_input_text(palette));
+			
 			if info.is_directory {
 				path_add_suggestion(palette, name, .DIRECTORY, tprint("%1%2/", directory, name));
 			}
 			else {
-				path_add_suggestion(palette, name, .FILE, tprint("%1%2", directory, name));
+				state := cast(*PathArgState, palette.handlerData);
+				// If there is a file type filter, then you would check it here
+				filePath := tprint("%1%2", directory, name);
+				if state.config.fileTypeFilter.count {
+					// TODO: check that the filter is actually prefixed with a dot
+					if !has_extension(filePath, state.config.fileTypeFilter) {
+						return; // skip as it doesn't fulfill the filter
+					}
+				}
+				
+				path_add_suggestion(palette, name, .FILE, filePath);
 			}
 		}
 		if platform_is_path_directory(dir) {

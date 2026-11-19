@@ -2104,9 +2104,15 @@ open_file_in_working_dir :: (panel: *Panel, cursor: *Cursor, file: WorkingDirPat
 	open_path(panel, file.base);
 } @command
 
-open_file_in_project :: (panel: *Panel, cursor: *Cursor, file: ProjectPath) {
+open_file_in_project :: (panel: *Panel, cursor: *Cursor, file: ProjectFilePath) {
 	NORMAL :: CommandConfig.{ prettyName = "Open file in project", keybinding = .["<space>o"] };
 	open_path(panel, file.base);
+} @command
+
+open_project :: (panel: *Panel, cursor: *Cursor, projectFile: ProjectPath) {
+	NORMAL :: CommandConfig.{ prettyName = "Open project", keybinding = .["<space>p"] };
+	project_set_file_path(projectFile.path);
+	project_reload();
 } @command
 
 open_path :: (panel: *Panel, file: FilePath) {
