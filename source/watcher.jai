@@ -24,10 +24,25 @@ watcherBatch: [..]WatcherChange;
 watchedProjectDirs: [..]string;
 watchedDocumentDirs: [..]string;
 
-watcher_init :: () {
+init_project_watcher :: () {
 	if !init(*projectWatcher, file_watcher_callback, watch_recursively = true, event_buffer_size = 64 * 1024) {
 		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
 	}
+}
+
+watcher_reset_project_watcher :: () {
+	// deinit takes the watcher by value and leaves our copy pointing at freed memory, so clear it before re-initializing
+	deinit(projectWatcher);
+	projectWatcher = .{};
+
+	for watchedProjectDirs  free(it);
+	array_reset(*watchedProjectDirs);
+
+	init_project_watcher();
+}
+
+watcher_init :: () {
+	init_project_watcher();
 	if !init(*documentWatcher, file_watcher_callback, watch_recursively = false) {
 		push_notification("Could not initialize the file watcher. Files won't be reloaded. This is likely a bug.");
 	}

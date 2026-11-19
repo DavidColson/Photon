@@ -47,15 +47,14 @@ Project :: struct {
 	pendingReconciles: [..]string; // these are file change events that came in while we were building the project file list
 }
 
-// Separate worker from asyncWorker so the (potentially long) project file scan
-// doesn't block document loads, parses and saves queued behind it.
-// Kept outside Project since project_parser returns Project by value.
 projectAsyncWorker: Async;
 projectAsyncWorkerStarted: bool;
 
 // Absolute path to the .photon-project file currently loaded, '/' separated.
 // Heap allocated rather than in project.memory so it survives a project reload.
 projectFilePath: string;
+
+projectReloadRequested: bool;
 
 project_set_file_path :: (path: string) {
 	free(projectFilePath);
@@ -67,10 +66,32 @@ project_is_project_file :: (path: string) -> bool {
 	return projectFilePath.count > 0 && platform_path_equal(path, projectFilePath);
 }
 
-// Called by the file watcher when the project file changes on disk
 project_reload :: () {
-	log("Project file % changed, reload requested", projectFilePath);
-	// @todo: implement project hot reloading
+	if !projectReloadRequested  log("Project file % changed, reload requested", projectFilePath);
+	projectReloadRequested = true;
+}
+
+project_do_reload :: () {
+	// Parse into temp first so a broken file leaves the current project untouched
+	folders, ignore: [..]string;
+	if !project_parse_file(projectFilePath, *folders, *ignore) {
+		log_error("Failed to reparse project file %, keeping the current project", projectFilePath);
+		push_notification("Project file has errors, keeping current project");
+		return;
+	}
+
+	project_set_settings(folders, ignore);
+
+	watcher_reset_project_watcher();
+	project_watch_folders();
+	
+	// Document paths are not watched if the project watcher is watching them
+	// So we have to re-register them now 
+	for doc: openDocuments  watch_directory_for_document(document_get_path(doc));
+
+	log("Project reloaded: % folder(s), % ignore(s)", project.folders.count, project.ignore.count);
+
+	// @todo: reconcile existing project files against the new folders, rescan, and load new files
 }
 
 project_allocator :: inline () -> Allocator {
@@ -150,21 +171,17 @@ ProjectFileSections :: enum {
 	IGNORE;
 }
 
-project_parser :: (projectFileName: string) -> bool, Project {
+project_parse_file :: (projectFileName: string, folders: *[..]string, ignore: *[..]string) -> bool {
 	handler: Text_File_Handler;
 	defer deinit(*handler);
 
-	// currently we create the project itself and set it up in here
-	// is this a good idea? Not sure lets see how it goes
-	project: Project;
-	project.loadProgress = .WAITING_FOR_FILE_SCAN;
-	project.folders.allocator = project_allocator();
-	project.ignore.allocator = project_allocator();
+	folders.allocator = temp;
+	ignore.allocator = temp;
 
 	currentSection := ProjectFileSections.NONE;
 
 	start_file(*handler, "project", projectFileName);
-	if handler.failed return false, .{};
+	if handler.failed return false;
 
 	while true {
 		line, found := consume_next_line(*handler);
@@ -173,7 +190,7 @@ project_parser :: (projectFileName: string) -> bool, Project {
 		if begins_with(line, "[") {
 			if !ends_with(line, "]") {
 				error(handler, "Sections must end with a ']' character");
-				return false, .{};
+				return false;
 			}
 
 			sectionName := slice(line, 1, line.count-2);
@@ -184,40 +201,49 @@ project_parser :: (projectFileName: string) -> bool, Project {
 					currentSection = .IGNORE;
 				case;
 					error(handler, "Unknown section");
-					return false, .{};
+					return false;
 			}
 			continue;
 		}
 		else if currentSection == .NONE {
 			error(handler, "No open section at this point in the file");
-			return false, .{};
+			return false;
 		}
 
 		if currentSection == {
 			case .FOLDERS;
 				if !is_absolute_path(line) {
 					error(handler, "Supplied folder is not an absolute path");
-					return false, .{};
+					return false;
 				}
 				if !is_directory(line) {
 					error(handler, "Supplied folder is not a directory or cannot be found");
-					return false, .{};
+					return false;
 				}
 				line = trim_right(line, "/");
 				line = trim_right(line, "\\");
-				folder := copy_string(line,,project_allocator()); 
+				folder := copy_string(line,,temp);
 				path_overwrite_separators(folder, #char "/");
-				array_add(*project.folders, folder);
+				array_add(folders, folder);
 			case .IGNORE;
-				folder := copy_string(line,,project_allocator()); 
+				folder := copy_string(line,,temp);
 				path_overwrite_separators(folder, #char "/");
-				array_add(*project.ignore, folder);
+				array_add(ignore, folder);
 		}
 	}
 
-	return true, project;
+	return true;
 }
 
+project_set_settings :: (folders: []string, ignore: []string) {
+	array_reset(*project.folders);
+	array_reset(*project.ignore);
+	project.folders.allocator = project_allocator();
+	project.ignore.allocator = project_allocator();
+
+	for folders  array_add(*project.folders, copy_string(it,,project_allocator()));
+	for ignore   array_add(*project.ignore,  copy_string(it,,project_allocator()));
+}
 
 should_ignore_path :: (path: string) -> bool {
 	// we assume paths are all allowed
@@ -319,6 +345,11 @@ project_begin_load :: () {
 
 project_update :: () {
 	if projectAsyncWorkerStarted then process_completed_tasks(*projectAsyncWorker);
+
+	if projectReloadRequested && !project_is_loading() {
+		projectReloadRequested = false;
+		project_do_reload();
+	}
 
 	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
 		init_thread_groups();

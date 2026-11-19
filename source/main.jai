@@ -174,8 +174,11 @@ main :: () {
 
 	projectParsed := false;
 	if isSet.project {
-		projectParsed, project = project_parser(args.project);
+		folders, ignore: [..]string;
+		projectParsed = project_parse_file(args.project, *folders, *ignore);
 		if projectParsed {
+			project.loadProgress = .WAITING_FOR_FILE_SCAN;
+			project_set_settings(folders, ignore);
 			project_set_file_path(args.project);
 			project_watch_folders();
 		}
