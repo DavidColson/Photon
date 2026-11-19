@@ -47,6 +47,12 @@ Project :: struct {
 	pendingReconciles: [..]string; // these are file change events that came in while we were building the project file list
 }
 
+// Separate worker from asyncWorker so the (potentially long) project file scan
+// doesn't block document loads, parses and saves queued behind it.
+// Kept outside Project since project_parser returns Project by value.
+projectAsyncWorker: Async;
+projectAsyncWorkerStarted: bool;
+
 project_allocator :: inline () -> Allocator {
 	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
 }
@@ -277,12 +283,19 @@ project_begin_load :: () {
 		project.loadProgress = .WAITING_FOR_FILE_LOADING;
 	}
 
+	if !projectAsyncWorkerStarted {
+		init_async(*projectAsyncWorker);
+		projectAsyncWorkerStarted = true;
+	}
+
 	project.loadProgress = .FILE_SCAN_IN_PROGRESS;
 	log("Begin project loading");
-	push_task(*asyncWorker, null, collect_project_files_task, collect_project_files_complete);
+	push_task(*projectAsyncWorker, null, collect_project_files_task, collect_project_files_complete);
 }
 
 project_update :: () {
+	if projectAsyncWorkerStarted then process_completed_tasks(*projectAsyncWorker);
+
 	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
 		init_thread_groups();
 		start(*project.threadGroup);
