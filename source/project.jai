@@ -56,6 +56,7 @@ projectAsyncWorkerStarted: bool;
 projectFilePath: string;
 
 projectReloadRequested: bool;
+projectReloadInProgress: bool;
 
 project_set_file_path :: (path: string) {
 	free(projectFilePath);
@@ -90,7 +91,8 @@ project_do_reload :: () {
 	// So we have to re-register them now 
 	for doc: openDocuments  watch_directory_for_document(document_get_path(doc));
 
-	log("Project reloaded: % folder(s), % ignore(s)", project.folders.count, project.ignore.count);
+	log("Project reload: reparsed project file, % folder(s), % ignore(s)", project.folders.count, project.ignore.count);
+	projectReloadInProgress = true;
 
 	// Find files that are no longer in the project on the worker, then remove them back on the main thread.
 	// The worker only reads projectFiles; while it runs the project counts as loading, so nothing else
@@ -114,15 +116,14 @@ project_do_reload :: () {
 		defer { array_reset(*taskData.toRemove); free(taskData); }
 
 		for taskData.toRemove  project_remove_file(it);
-		log("Project reload removed % file(s) no longer in the project", taskData.toRemove.count);
+		log("Project reload: removed % file(s) no longer in the project", taskData.toRemove.count);
 
 		// Documents opened while the worker was running couldn't remove their project entries, so do it now
 		project_remove_open_documents();
 		project_reap_tombstones();
 
-		// @todo: rescan the new folders and load new files, instead of going straight to COMPLETE
-		project.loadProgress = .COMPLETE;
-		project_replay_pending_reconciles();
+		// Now scan the new folders for files we don't have yet, load like normal
+		project_begin_load();
 	}
 
 	taskData := New(ReloadTaskData);
@@ -370,6 +371,9 @@ project_begin_load :: () {
 			success, _ := document_get_by_path(info.full_name);
 			if success then return;
 
+			// already in the project, e.g. we're rescanning after a project reload
+			if table_contains(*project.projectFileTable, info.full_name) then return;
+
 			// log("found file short: % full: %", info.short_name, info.full_name);
 
 			project_add_file(info.full_name);
@@ -390,7 +394,8 @@ project_begin_load :: () {
 	}
 
 	project.loadProgress = .FILE_SCAN_IN_PROGRESS;
-	log("Begin project loading");
+	if projectReloadInProgress  log("Project reload: rescanning project folders");
+	else                        log("Begin project loading");
 	push_task(*projectAsyncWorker, null, collect_project_files_task, collect_project_files_complete);
 }
 
@@ -403,20 +408,24 @@ project_update :: () {
 	}
 
 	if project.loadProgress == .WAITING_FOR_FILE_LOADING {
-		init_thread_groups();
-		start(*project.threadGroup);
-		project.threadGroupStarted = true;
+		// On a reload the thread group is already running, so only start it the first time
+		if !project.threadGroupStarted {
+			init_thread_groups();
+			start(*project.threadGroup);
+			project.threadGroupStarted = true;
+		}
 
 		// Delete any files that got opened properly while we did the file scan
 		project_remove_open_documents();
-		
+
 		for * project.projectFiles {
-			if it.content.count == 0 {
+			if it.content.count == 0 && it.queuedLoads == 0 {
 				project_queue_file_load(it.locator);
 			}
 		}
 
-		log("Loading % files into the project", project.pendingFileLoads);
+		if projectReloadInProgress  log("Project reload: loading % new file(s) into the project", project.pendingFileLoads);
+		else                        log("Loading % files into the project", project.pendingFileLoads);
 		project.loadProgress = .FILE_LOADING_IN_PROGRESS;
 	}
 
@@ -435,8 +444,15 @@ project_update :: () {
 
 	if project.loadProgress == .FILE_LOADING_IN_PROGRESS && project.pendingFileLoads == 0 {
 		project.loadProgress = .COMPLETE;
-		log("Project loading complete");
-		push_notification("Project Loaded");
+		if projectReloadInProgress {
+			log("Project reload complete");
+			push_notification("Project Reloaded");
+			projectReloadInProgress = false;
+		}
+		else {
+			log("Project loading complete");
+			push_notification("Project Loaded");
+		}
 		project_replay_pending_reconciles();
 
 		// @todo: track the progress of the project load
