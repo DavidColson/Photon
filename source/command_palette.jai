@@ -618,7 +618,7 @@ finder_file_populate :: (using palette: *CommandPalette, argType: *Type_Info) {
 		for * file: project.projectFiles {
 			if file.tombstoned then continue;
 			suggestion := array_add(*suggestionList);
-			suggestion.name = file.fullName;
+			suggestion.name = copy_string(file.fullName,,get_per_invocation_allocator(palette));
 			suggestion.sortKey = 10 + calculate_edit_recency_bonus(file.diskLastModtime);
 			finderFile := New(FinderFile,,get_per_invocation_allocator(palette));
 			finderFile.isDocument = false;
@@ -778,6 +778,7 @@ find_in_files_filter :: (using palette: *CommandPalette, filter: string) {
 		filter := data.filter.*;
 		// @todo: 500 results per thread is a bit of an odd limit
 		searchCursor := 0;
+		path: string;
 		while searchCursor < file.content.count && data.results[threadIndex].count < 500 {
 			result := find_index_from_left_nocase_fast(file.content, filter, searchCursor);
 			if result >= 0 {
@@ -820,15 +821,19 @@ find_in_files_filter :: (using palette: *CommandPalette, filter: string) {
 				line := string.{ midEndOffset - midStartOffset, file.content.data + midStartOffset };
 				preview, previewStart, matchRange := make_match_preview(line, result - midStartOffset, result - midStartOffset + filter.count);
 				
+				// copied into this thread's pool (once per file), the project frees a file's name when it's
+				// removed and that can happen while these results are still showing
+				if path.data == null  path = copy_string(file.fullName);
+
 				suggestion := array_add(*data.results[threadIndex]);
-				suggestion.name = file.fullName;
+				suggestion.name = path;
 				suggestion.sortKey = 10; // TODO: sorting based on recency etc
-				
+
 				searchResult := New(FindInFiles);
 				searchResult.matchLine = preview;
 				searchResult.lineNum = mid;
 				searchResult.lineOffset = midStartOffset + previewStart;
-				searchResult.filePath = file.fullName;
+				searchResult.filePath = path;
 				searchResult.projectHandle = file.locator;
 				searchResult.matchRange = matchRange;
 				searchResult.isDocument = false;

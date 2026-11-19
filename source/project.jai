@@ -1,13 +1,9 @@
 
-// @todo: currently we use one memory pool for the whole project
-// but really, we need more
-// we need one for long lasting project info such as the folder lists, etc
-// and then we need another that lasts for the duration of the project loading
-// process, to store work, the file scan results and other temporary things
+// Memory: everything the project owns is individually heap allocated and freed when it's replaced or removed
+// (folders/ignores in project_set_settings, files in project_destroy_file). Anything that holds on to project
+// strings beyond the current frame, such as palette results, must take its own copy.
 
 Project :: struct {
-	memory: Flat_Pool;
-
 	folders: [..]string;
 	ignore: [..]string;
 	
@@ -52,7 +48,6 @@ projectAsyncWorker: Async;
 projectAsyncWorkerStarted: bool;
 
 // Absolute path to the .photon-project file currently loaded, '/' separated.
-// Heap allocated rather than in project.memory so it survives a project reload.
 projectFilePath: string;
 
 projectReloadRequested: bool;
@@ -165,10 +160,6 @@ project_remove_open_documents :: () {
 	}
 }
 
-project_allocator :: inline () -> Allocator {
-	return Allocator.{ proc = flat_pool_allocator_proc, data = *project.memory };
-}
-
 project_is_loaded :: inline () -> bool {
 	return project.loadProgress == .COMPLETE;
 }
@@ -195,24 +186,27 @@ project_remove_file :: (locator: Bucket_Locator) {
 		return;
 	}
 
-	free_file(file);
-	destroy(*file.lock);
-	bucket_array_remove(*project.projectFiles, locator);
+	project_destroy_file(file);
 }
 
 project_reap_tombstones :: () {
 	for * file: project.projectFiles {
 		if !file.tombstoned || file.queuedLoads > 0 continue;
 		log("Reaped tombstoned project file %", file.fullName);
-		locator := file.locator;
-		free_file(file);
-		destroy(*file.lock);
-		bucket_array_remove(*project.projectFiles, locator);
+		project_destroy_file(file);
 	}
 }
 
+project_destroy_file :: (file: *Project.File) {
+	locator := file.locator;
+	free_file(file);
+	free(file.fullName);
+	destroy(*file.lock);
+	bucket_array_remove(*project.projectFiles, locator);
+}
+
 project_add_file :: (path: string) -> Bucket_Locator {
-	file := Project.File.{ fullName = copy_string(path,, project_allocator()) };
+	file := Project.File.{ fullName = copy_string(path) };
 	init(*file.lock);
 	locator, entry := bucket_array_add(*project.projectFiles, file);
 	entry.locator = locator;
@@ -307,13 +301,13 @@ project_parse_file :: (projectFileName: string, folders: *[..]string, ignore: *[
 }
 
 project_set_settings :: (folders: []string, ignore: []string) {
+	for project.folders  free(it);
+	for project.ignore   free(it);
 	array_reset(*project.folders);
 	array_reset(*project.ignore);
-	project.folders.allocator = project_allocator();
-	project.ignore.allocator = project_allocator();
 
-	for folders  array_add(*project.folders, copy_string(it,,project_allocator()));
-	for ignore   array_add(*project.ignore,  copy_string(it,,project_allocator()));
+	for folders  array_add(*project.folders, copy_string(it));
+	for ignore   array_add(*project.ignore,  copy_string(it));
 }
 
 should_ignore_path :: (path: string) -> bool {
