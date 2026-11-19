@@ -129,6 +129,17 @@ command_palette_reset :: (panel: *Panel) {
 	editorMode = .NORMAL;
 }
 
+command_palette_refresh_project_results :: () {
+	if editorMode != .COMMAND_PALETTE return;
+
+	palette := *focusedPanel.commandPalette;
+	if palette.currentHandler != *finderFileArgHandler && palette.currentHandler != *findInFilesArgHandler return;
+
+	filter := copy_string(command_palette_get_input_text(palette),,temp);
+	command_palette_populate_suggestions(palette);
+	command_palette_filter_and_sort_suggestions(palette, filter);
+}
+
 command_palette_has_valid_selection :: (state: *CommandPalette) -> bool {
 	return state.selection >= 0 && state.selection < state.numToDisplay && state.selection < state.suggestionList.count;
 }

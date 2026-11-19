@@ -176,12 +176,17 @@ main :: () {
 	if isSet.project {
 		folders, ignore: [..]string;
 		projectParsed = project_parse_file(args.project, *folders, *ignore);
+
+		project_set_file_path(args.project);
 		if projectParsed {
 			project.loadProgress = .WAITING_FOR_FILE_SCAN;
 			project_set_settings(folders, ignore);
-			project_set_file_path(args.project);
-			project_watch_folders();
 		}
+		else {
+			log_error("Failed to parse project file %, it will be loaded once the errors are fixed", projectFilePath);
+			push_notification("Project file has errors, fix them to load the project");
+		}
+		project_watch_folders();
 	}
 
 	if filesToOpen.count > 0 {

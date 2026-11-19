@@ -76,13 +76,28 @@ project_reload :: () {
 project_do_reload :: () {
 	// Parse into temp first so a broken file leaves the current project untouched
 	folders, ignore: [..]string;
+	neverLoaded := project.loadProgress == .NONE; // the project file was broken at startup
 	if !project_parse_file(projectFilePath, *folders, *ignore) {
-		log_error("Failed to reparse project file %, keeping the current project", projectFilePath);
-		push_notification("Project file has errors, keeping current project");
+		if neverLoaded {
+			log_error("Failed to parse project file %, still waiting for the errors to be fixed", projectFilePath);
+			push_notification("Project file has errors, fix them to load the project");
+		}
+		else {
+			log_error("Failed to reparse project file %, keeping the current project", projectFilePath);
+			push_notification("Project file has errors, keeping current project");
+		}
 		return;
 	}
 
 	project_set_settings(folders, ignore);
+
+	// Nothing to reconcile if it never loaded, so this is just a normal first load
+	if neverLoaded {
+		project_watch_folders();
+		project.loadProgress = .WAITING_FOR_FILE_SCAN;
+		project_begin_load();
+		return;
+	}
 
 	watcher_reset_project_watcher();
 	project_watch_folders();
@@ -129,6 +144,10 @@ project_do_reload :: () {
 	taskData := New(ReloadTaskData);
 	taskData.toRemove.allocator = context.allocator;
 	project.loadProgress = .RELOAD_RECONCILE_IN_PROGRESS;
+
+	// Files are about to be removed and their slots reused, so drop any open palette results that refer to them
+	command_palette_refresh_project_results();
+
 	push_task(*projectAsyncWorker, taskData, find_files_outside_project_task, find_files_outside_project_complete);
 }
 
@@ -448,6 +467,9 @@ project_update :: () {
 			log("Project reload complete");
 			push_notification("Project Reloaded");
 			projectReloadInProgress = false;
+
+			// Bring the project files back into any open palette results now the reload is done
+			command_palette_refresh_project_results();
 		}
 		else {
 			log("Project loading complete");
