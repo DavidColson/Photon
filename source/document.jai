@@ -439,7 +439,7 @@ document_get_or_open :: (path: string, noLoad := false, async := true, allowMiss
 		document_load_from_disk(doc.handle, async);
 		
 		// a path is either a document or a project file, never both
-		if project.loadProgress != .FILE_SCAN_IN_PROGRESS {
+		if !project_is_worker_reading_files() {
 			found, locator := table_find(*project.projectFileTable, doc.path);
 			if found  project_remove_file(locator);
 		}

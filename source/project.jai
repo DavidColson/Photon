@@ -38,6 +38,7 @@ Project :: struct {
 		FILE_SCAN_IN_PROGRESS;
 		WAITING_FOR_FILE_LOADING;
 		FILE_LOADING_IN_PROGRESS;
+		RELOAD_RECONCILE_IN_PROGRESS; // projectAsyncWorker is reading projectFiles to find files no longer in the project
 	}
 	loadProgress: ProjectLoadProgress;
 	pendingFileLoads: s32;
@@ -91,7 +92,57 @@ project_do_reload :: () {
 
 	log("Project reloaded: % folder(s), % ignore(s)", project.folders.count, project.ignore.count);
 
-	// @todo: reconcile existing project files against the new folders, rescan, and load new files
+	// Find files that are no longer in the project on the worker, then remove them back on the main thread.
+	// The worker only reads projectFiles; while it runs the project counts as loading, so nothing else
+	// on the main thread adds, removes or reaps project files (see project_is_worker_reading_files).
+	ReloadTaskData :: struct {
+		toRemove: [..]Bucket_Locator;
+	}
+
+	find_files_outside_project_task :: (data: *void) {
+		taskData := cast(*ReloadTaskData, data);
+		for * file: project.projectFiles {
+			if file.tombstoned continue;
+			if !path_is_within_project_folders(file.fullName) || should_ignore_file(file.fullName) {
+				array_add(*taskData.toRemove, file.locator);
+			}
+		}
+	}
+
+	find_files_outside_project_complete :: (data: *void) {
+		taskData := cast(*ReloadTaskData, data);
+		defer { array_reset(*taskData.toRemove); free(taskData); }
+
+		for taskData.toRemove  project_remove_file(it);
+		log("Project reload removed % file(s) no longer in the project", taskData.toRemove.count);
+
+		// Documents opened while the worker was running couldn't remove their project entries, so do it now
+		project_remove_open_documents();
+		project_reap_tombstones();
+
+		// @todo: rescan the new folders and load new files, instead of going straight to COMPLETE
+		project.loadProgress = .COMPLETE;
+		project_replay_pending_reconciles();
+	}
+
+	taskData := New(ReloadTaskData);
+	taskData.toRemove.allocator = context.allocator;
+	project.loadProgress = .RELOAD_RECONCILE_IN_PROGRESS;
+	push_task(*projectAsyncWorker, taskData, find_files_outside_project_task, find_files_outside_project_complete);
+}
+
+// True while projectAsyncWorker is walking or building projectFiles without a lock.
+// The main thread must not add, remove or reap project files during this time.
+project_is_worker_reading_files :: inline () -> bool {
+	return project.loadProgress == .FILE_SCAN_IN_PROGRESS || project.loadProgress == .RELOAD_RECONCILE_IN_PROGRESS;
+}
+
+// A path is either a document or a project file, never both
+project_remove_open_documents :: () {
+	for doc: openDocuments {
+		found, locator := table_find(*project.projectFileTable, document_get_path(doc));
+		if found  project_remove_file(locator);
+	}
 }
 
 project_allocator :: inline () -> Allocator {
@@ -357,10 +408,7 @@ project_update :: () {
 		project.threadGroupStarted = true;
 
 		// Delete any files that got opened properly while we did the file scan
-		for doc: openDocuments {
-			found, locator := table_find(*project.projectFileTable, document_get_path(doc));
-			if found  project_remove_file(locator);
-		}
+		project_remove_open_documents();
 		
 		for * project.projectFiles {
 			if it.content.count == 0 {
@@ -381,7 +429,8 @@ project_update :: () {
 			file.queuedLoads -= 1;
 			project.pendingFileLoads -= 1;
 		}
-		if results.count > 0 then project_reap_tombstones();
+		// While the worker is reading projectFiles we can't remove entries; the reload completion reaps instead
+		if results.count > 0 && !project_is_worker_reading_files() then project_reap_tombstones();
 	}
 
 	if project.loadProgress == .FILE_LOADING_IN_PROGRESS && project.pendingFileLoads == 0 {
